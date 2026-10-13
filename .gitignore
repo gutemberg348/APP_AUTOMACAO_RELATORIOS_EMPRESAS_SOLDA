@@ -7,7 +7,7 @@ materiais_base/
 dist/
 dist-android/
 .expo/
-storage/
+/storage/
 coverage/
 *.tsbuildinfo
 apps/api/src/generated/
