@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+enum RecordStatus {
+  ACTIVE
+  ARCHIVED
+}
+enum ReportStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  FINISHED
+}
+enum PointType {
+  WELD
+  MEASUREMENT
+  INSPECTION_POINT
+  CUSTOM
+}
+enum MediaType {
+  IMAGE
+  DOCUMENT
+  DRAWING
+  OTHER
+}
+enum SignatureRole {
+  INSPECTOR
+  TECHNICAL_RESPONSIBLE
+  CLIENT
+  REVIEWER
+  OTHER
+}
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  email String @unique
+  phone String?
+  passwordHash String
+  roleId String @db.Uuid
+  role Role @relation(fields: [roleId], references: [id])
+  status UserStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdReports Report[] @relation("ReportCreator")
+  reviewedReports Report[] @relation("ReportReviewer")
+  approvedReports Report[] @relation("ReportApprover")
+  media ReportMedia[]
+  pdfs ReportPdf[]
+  refreshTokens RefreshToken[]
+  auditLogs AuditLog[]
+  @@index([roleId])
+  @@map("users")
+}
+model Role {
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  name String
+  users User[]
+  permissions RolePermission[]
+  @@map("roles")
+}
+model Permission {
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  description String?
+  roles RolePermission[]
+  @@map("permissions")
+}
+model RolePermission {
+  roleId String @db.Uuid
+  permissionId String @db.Uuid
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+model Company {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  corporateName String?
+  cnpj String?
+  phone String?
+  email String?
+  contactName String?
+  notes String?
+  status RecordStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  projects Project[]
+  reports Report[]
+  @@index([status])
+  @@map("companies")
+}
+model Project {
+  id String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id])
+  name String
+  code String?
+  location String?
+  description String?
+  responsible String?
+  reportDefaults Json @default("{}") @db.JsonB
+  status RecordStatus @default(ACTIVE)
+  startDate DateTime? @db.Date
+  endDate DateTime? @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reports Report[]
+  @@index([companyId])
+  @@index([status])
+  @@map("projects")
+}
+model ReportType {
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  name String
+  description String?
+  active Boolean @default(true)
+  config Json @default("{}") @db.JsonB
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reports Report[]
+  @@map("report_types")
+}
+model Report {
+  id String @id @default(uuid()) @db.Uuid
+  reportTypeId String @db.Uuid
+  reportType ReportType @relation(fields: [reportTypeId], references: [id])
+  companyId String @db.Uuid
+  company Company @relation(fields: [companyId], references: [id])
+  projectId String @db.Uuid
+  project Project @relation(fields: [projectId], references: [id])
+  number String @default("")
+  title String @default("")
+  reportDate DateTime? @db.Date
+  status ReportStatus @default(DRAFT)
+  createdById String @db.Uuid
+  createdBy User @relation("ReportCreator", fields: [createdById], references: [id])
+  reviewedById String? @db.Uuid
+  reviewedBy User? @relation("ReportReviewer", fields: [reviewedById], references: [id])
+  approvedById String? @db.Uuid
+  approvedBy User? @relation("ReportApprover", fields: [approvedById], references: [id])
+  specificData Json @default("{}") @db.JsonB
+  version Int @default(1)
+  revisionNotes String?
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  submittedAt DateTime?
+  approvedAt DateTime?
+  finishedAt DateTime?
+  points ReportPoint[]
+  media ReportMedia[]
+  drawings ReportDrawing[]
+  signatures ReportSignature[]
+  pdfs ReportPdf[]
+  @@index([companyId])
+  @@index([projectId])
+  @@index([reportTypeId])
+  @@index([status])
+  @@index([reportDate])
+  @@index([createdById])
+  @@index([deletedAt, createdAt])
+  @@map("reports")
+}
+model ReportPoint {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  report Report @relation(fields: [reportId], references: [id])
+  number String
+  type PointType
+  label String?
+  value Float?
+  unit String?
+  positionX Float?
+  positionY Float?
+  data Json @default("{}") @db.JsonB
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  media ReportMedia[]
+  @@index([reportId, sortOrder])
+  @@map("report_points")
+}
+model ReportMedia {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  report Report @relation(fields: [reportId], references: [id])
+  reportPointId String? @db.Uuid
+  reportPoint ReportPoint? @relation(fields: [reportPointId], references: [id])
+  sectionKey String?
+  type MediaType
+  originalName String
+  fileName String
+  mimeType String
+  fileSize Int
+  filePath String
+  sha256 String @unique @db.Char(64)
+  caption String?
+  sortOrder Int @default(0)
+  uploadedById String @db.Uuid
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+  createdAt DateTime @default(now())
+  @@index([reportId])
+  @@index([reportPointId])
+  @@map("report_media")
+}
+model ReportDrawing {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  report Report @relation(fields: [reportId], references: [id])
+  data Json @db.JsonB
+  sortOrder Int @default(0)
+  previewPath String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([reportId])
+  @@map("report_drawings")
+}
+model ReportSignature {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  report Report @relation(fields: [reportId], references: [id])
+  role SignatureRole
+  name String
+  registrationNumber String?
+  signatureImagePath String?
+  signatureAssetId String? @db.Uuid
+  signatureAsset SignatureAsset? @relation(fields: [signatureAssetId], references: [id])
+  signedAt DateTime?
+  @@index([reportId])
+  @@map("report_signatures")
+}
+model SignatureAsset {
+  id String @id @default(uuid()) @db.Uuid
+  filePath String
+  createdById String @db.Uuid
+  createdAt DateTime @default(now())
+  people Person[]
+  signatures ReportSignature[]
+  @@map("signature_assets")
+}
+model Person {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  role SignatureRole
+  registrationNumber String @default("")
+  company String @default("")
+  email String @default("")
+  phone String @default("")
+  signatureAssetId String? @db.Uuid
+  signatureAsset SignatureAsset? @relation(fields: [signatureAssetId], references: [id])
+  active Boolean @default(true)
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([active, name])
+  @@map("people")
+}
+model ReportPdf {
+  id String @id @default(uuid()) @db.Uuid
+  reportId String @db.Uuid
+  report Report @relation(fields: [reportId], references: [id])
+  version Int
+  filePath String
+  generatedById String @db.Uuid
+  generatedBy User @relation(fields: [generatedById], references: [id])
+  createdAt DateTime @default(now())
+  @@unique([reportId, version])
+  @@map("report_pdfs")
+}
+model TrainingCategory {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  contents TrainingContent[]
+  @@map("training_categories")
+}
+model TrainingContent {
+  id String @id @default(uuid()) @db.Uuid
+  categoryId String @db.Uuid
+  category TrainingCategory @relation(fields: [categoryId], references: [id])
+  title String
+  description String?
+  content String
+  mediaPath String?
+  videoUrl String?
+  sortOrder Int @default(0)
+  active Boolean @default(true)
+  @@index([categoryId, sortOrder])
+  originalName String?
+  mimeType String?
+  fileSize Int?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  @@map("training_contents")
+}
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
+  user User? @relation(fields: [userId], references: [id])
+  action String
+  entity String
+  entityId String?
+  metadata Json @default("{}") @db.JsonB
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([entity])
+  @@index([entityId])
+  @@map("audit_logs")
+}
+model RefreshToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  tokenHash String @unique @db.Char(64)
+  familyId String @db.Uuid
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}

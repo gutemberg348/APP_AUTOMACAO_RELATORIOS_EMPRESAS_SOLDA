@@ -1,0 +1,51 @@
+{
+  "name": "weldcosta-system",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "setup:env": "node scripts/setup-env.mjs",
+    "setup:production": "node scripts/setup-production.mjs",
+    "docker:production": "node scripts/docker-production.mjs up",
+    "docker:production:check": "node scripts/docker-production.mjs check",
+    "docker:production:logs": "node scripts/docker-production.mjs logs",
+    "docker:production:stop": "node scripts/docker-production.mjs stop",
+    "apk": "node scripts/build-apk.mjs",
+    "apk:check": "node scripts/build-apk.mjs --check",
+    "test:deployment": "node --test scripts/test/deployment.test.mjs",
+    "dev:api": "npm run dev --workspace @weldcosta/api",
+    "dev:app": "npm run start --workspace @weldcosta/app",
+    "dev:app:clean": "npm run start --workspace @weldcosta/app -- --clear",
+    "dev:web": "npm run web --workspace @weldcosta/app",
+    "build": "npm run build --workspace @weldcosta/shared && npm run build --workspace @weldcosta/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint apps packages --ignore-pattern '**/generated/**'",
+    "format": "prettier --write .",
+    "test": "npm run test --workspace @weldcosta/api",
+    "test:integration": "node scripts/integration.mjs",
+    "db:generate": "npm run db:generate --workspace @weldcosta/api",
+    "db:migrate": "npm run db:migrate --workspace @weldcosta/api",
+    "db:deploy": "npm run db:deploy --workspace @weldcosta/api",
+    "db:seed": "npm run db:seed --workspace @weldcosta/api"
+  },
+  "overrides": {
+    "react-native-worklets": "0.10.1",
+    "react-native-reanimated": "4.5.1",
+    "react-native-gesture-handler": "2.32.0",
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "typescript-eslint": "^8.46.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3"
+  }
+}

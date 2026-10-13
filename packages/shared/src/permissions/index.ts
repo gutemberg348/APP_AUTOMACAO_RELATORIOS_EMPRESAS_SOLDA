@@ -1,0 +1,65 @@
+export const permissions = [
+  'companies.view',
+  'companies.create',
+  'companies.edit',
+  'companies.archive',
+  'projects.view',
+  'projects.create',
+  'projects.edit',
+  'projects.archive',
+  'reports.view',
+  'reports.create',
+  'reports.edit',
+  'reports.edit.allFields',
+  'reports.submit',
+  'reports.review',
+  'reports.approve',
+  'reports.finish',
+  'reports.delete',
+  'media.upload',
+  'media.delete',
+  'drawing.edit',
+  'users.view',
+  'users.create',
+  'users.edit',
+  'users.disable',
+  'roles.view',
+  'roles.edit',
+  'training.view',
+  'training.manage',
+  'pdf.generate',
+  'pdf.download',
+] as const;
+export type PermissionCode = (typeof permissions)[number];
+const view = [
+  'companies.view',
+  'projects.view',
+  'reports.view',
+  'training.view',
+  'pdf.download',
+] satisfies PermissionCode[];
+export const rolePermissions: Record<string, readonly PermissionCode[]> = {
+  ADMIN: permissions,
+  REVIEWER: [
+    ...view,
+    'reports.edit',
+    'reports.review',
+    'reports.approve',
+    'reports.finish',
+    'pdf.generate',
+  ],
+  INSPECTOR: [
+    ...view,
+    'reports.create',
+    'reports.edit',
+    'reports.edit.allFields',
+    'reports.submit',
+    'media.upload',
+    'drawing.edit',
+  ],
+  OPERATOR: [...view, 'reports.edit'],
+  VIEWER: view,
+};
+export function hasPermission(granted: readonly string[], permission: PermissionCode) {
+  return granted.includes(permission);
+}

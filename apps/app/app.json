@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Weldcosta Inspeções",
+    "slug": "weldcosta-system",
+    "scheme": "weldcosta",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "platforms": ["android", "ios", "web"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      "expo-sharing",
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Selecione fotos e vídeos para anexar aos materiais da Weldcosta.",
+          "cameraPermission": "Permita usar a câmera para fotografar a inspeção.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.weldcosta.inspecoes"
+    },
+    "ios": {
+      "bundleIdentifier": "com.weldcosta.inspecoes",
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "Weldcosta Inspeções"
+    }
+  }
+}

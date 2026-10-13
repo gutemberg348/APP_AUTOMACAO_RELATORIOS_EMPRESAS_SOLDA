@@ -1,0 +1,32 @@
+﻿[
+    {
+        "file":  "RDO.pdf",
+        "size":  638835,
+        "pages":  2,
+        "sha256":  "ceb80ae479b1e20e9bd63827ef73e99156b39671d5e34ae817b4fa13214a67c5"
+    },
+    {
+        "file":  "REL 002 - LIQUIDO PENETRANTE ( LP).pdf",
+        "size":  1578793,
+        "pages":  6,
+        "sha256":  "a002ea5b09de295f4711a7de11f7a713a75a68924e93bef90b34b1a5f950c5a9"
+    },
+    {
+        "file":  "REL 005 - TH - TESTE HIDROSTATICO.pdf",
+        "size":  1641457,
+        "pages":  5,
+        "sha256":  "32fd9431da5ea516cc489ca2ffb98cd6b1cad7a4f546adfff09fd802d514538d"
+    },
+    {
+        "file":  "REL- 001 ENDOSCOPIA.pdf",
+        "size":  3121462,
+        "pages":  8,
+        "sha256":  "ebec0a1fe9725d7ec975dfbac9dbec9ce373646f3bd8343ff5b36819d54b72b7"
+    },
+    {
+        "file":  "REL-004 - MODELO DE REL DE MEDIÇÃO DE ESPESSURA.pdf",
+        "size":  1112253,
+        "pages":  4,
+        "sha256":  "1d9807eae47a9638d58245c6eabf5c0af62beedb54b5739378d8c852312a4653"
+    }
+]

@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-weldcosta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-weldcosta}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5434}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-weldcosta}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-weldcosta}?schema=public
+      STORAGE_PATH: /app/storage
+    ports:
+      - '${API_BIND_ADDRESS:-127.0.0.1}:${PORT:-3301}:${PORT:-3301}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - report_storage:/app/storage
+    command:
+      [
+        'sh',
+        '-c',
+        'npm run db:deploy && npm run db:seed && npm run start --workspace @weldcosta/api',
+      ]
+volumes:
+  postgres_data:
+  report_storage:

@@ -1,0 +1,66 @@
+import { StyleSheet } from 'react-native';
+import type { ThemeTokens } from './tokens';
+export const createThemeStyles = (t: ThemeTokens) =>
+  StyleSheet.create({
+    page: {
+      padding: 32,
+      paddingBottom: 40,
+      gap: 24,
+      width: '100%',
+      maxWidth: 1440,
+      alignSelf: 'center',
+    },
+    heading: {
+      color: t.colors.text,
+      fontSize: 30,
+      fontFamily: t.fonts.extra,
+      letterSpacing: -1,
+      lineHeight: 40,
+    },
+    text: { color: t.colors.text, fontSize: 14, fontFamily: t.fonts.medium, lineHeight: 22 },
+    muted: { color: t.colors.muted, fontSize: 13, fontFamily: t.fonts.regular, lineHeight: 21 },
+    caption: {
+      color: t.colors.subtle,
+      fontSize: 11,
+      fontFamily: t.fonts.semibold,
+      letterSpacing: 0.6,
+    },
+    row: { flexDirection: 'row', gap: 12, flexWrap: 'wrap', alignItems: 'center' },
+    card: {
+      backgroundColor: t.colors.surface,
+      padding: 24,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.colors.line,
+      gap: 16,
+      minWidth: 0,
+    },
+    input: {
+      minHeight: 48,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      fontSize: 14,
+      fontFamily: t.fonts.medium,
+      color: t.colors.text,
+      flex: 1,
+      minWidth: 0,
+    },
+    label: {
+      color: t.colors.text,
+      fontSize: 12,
+      fontFamily: t.fonts.semibold,
+      marginBottom: 4,
+      lineHeight: 19,
+    },
+    button: {
+      minHeight: 46,
+      paddingHorizontal: 17,
+      paddingVertical: 12,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
+      borderWidth: 1,
+    },
+  });

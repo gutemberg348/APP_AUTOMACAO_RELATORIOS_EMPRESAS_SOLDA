@@ -1,0 +1,71 @@
+name: weldcosta-production
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-weldcosta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Execute npm run setup:production}
+      POSTGRES_DB: ${POSTGRES_DB:-weldcosta}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: 3301
+      TRUST_PROXY_HOPS: 1
+      DATABASE_URL: postgresql://${POSTGRES_USER:-weldcosta}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-weldcosta}?schema=public
+      STORAGE_PATH: /app/storage
+    ports:
+      - '127.0.0.1:13301:3301'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - report_storage:/app/storage
+    command:
+      [
+        'sh',
+        '-c',
+        'npm run db:deploy && npm run db:seed && npm run start --workspace @weldcosta/api',
+      ]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3301/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:18085:80'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+volumes:
+  postgres_data:
+  report_storage:
