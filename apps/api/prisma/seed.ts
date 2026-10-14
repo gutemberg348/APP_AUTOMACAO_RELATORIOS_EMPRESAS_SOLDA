@@ -44,17 +44,24 @@ async function seed() {
     )
       throw new Error('ADMIN_PASSWORD deve ter ao menos 12 caracteres e no máximo 72 bytes.');
     const role = await prisma.role.findUniqueOrThrow({ where: { code: 'ADMIN' } });
-    await prisma.user.upsert({
-      where: { email: process.env.ADMIN_EMAIL.toLowerCase() },
-      create: {
-        name: 'Administrador',
-        email: process.env.ADMIN_EMAIL.toLowerCase(),
-        passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD, 12),
-        roleId: role.id,
-      },
-      update: {},
-    });
-    console.log('Administrador provisionado pelo ENV (senha existente preservada).');
+    const email = process.env.ADMIN_EMAIL.trim().toLowerCase();
+    const existingAdmin = await prisma.user.findFirst({ where: { roleId: role.id } });
+    if (!existingAdmin)
+      await prisma.user.upsert({
+        where: { email },
+        create: {
+          name: 'Administrador',
+          email,
+          passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD, 12),
+          roleId: role.id,
+        },
+        update: {},
+      });
+    console.log(
+      existingAdmin
+        ? 'Administrador já configurado. Cadastros, e-mails e senhas do painel preservados.'
+        : 'Administrador inicial provisionado pelo ENV (senha existente preservada).',
+    );
   } else console.log('ADMIN_EMAIL/ADMIN_PASSWORD ausentes: nenhum administrador criado.');
   console.log('Seed concluído: cargos, permissões e tipos. Nenhum dado dos PDFs foi importado.');
 }

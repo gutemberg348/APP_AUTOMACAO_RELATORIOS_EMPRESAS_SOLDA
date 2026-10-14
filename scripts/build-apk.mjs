@@ -10,9 +10,15 @@ import {
   run,
   npmCommand,
 } from './lib/deployment.mjs';
+import {
+  androidBuildPath,
+  resetAndroidPathCaches,
+  androidWindowsPathsGradle,
+  prepareWindowsAutolinking,
+} from './lib/android-build-path.mjs';
 
-const appRoot = path.join(root, 'apps/app');
 const signingRoot = path.join(root, '.android-signing');
+let buildPath;
 const exists = (file) =>
   access(file).then(
     () => true,
@@ -94,6 +100,7 @@ try {
       'api-url': { type: 'string' },
       'skip-api-check': { type: 'boolean' },
       'version-code': { type: 'string' },
+      clean: { type: 'boolean' },
     },
   });
   const apiUrl = publicApiUrl(values['api-url'] ?? deployment.apiUrl);
@@ -118,6 +125,11 @@ try {
       }
     }
     const credentials = await signing(tools.keytool);
+    buildPath = await androidBuildPath(root);
+    const appRoot = path.join(buildPath.root, 'apps/app');
+    console.log(`Pasta de compilação Android: ${appRoot}`);
+    if (process.platform === 'win32')
+      await resetAndroidPathCaches(root, buildPath.root, path.join(signingRoot, 'build-path.json'));
     const stateFile = path.join(signingRoot, 'last-build.json');
     const previous = (await exists(stateFile))
       ? JSON.parse(await readFile(stateFile, 'utf8'))
@@ -139,28 +151,45 @@ try {
       EXPO_NO_DOTENV: '1',
       NODE_ENV: 'production',
       WELDCOSTA_ANDROID_VERSION_CODE: String(versionCode),
+      WELDCOSTA_ANDROID_BUILD_ROOT: process.platform === 'win32' ? buildPath.root : '',
       WELDCOSTA_STORE_FILE: credentials.keystore,
       WELDCOSTA_STORE_PASSWORD: credentials.password,
       WELDCOSTA_KEY_ALIAS: credentials.alias,
       WELDCOSTA_KEY_PASSWORD: credentials.password,
     };
-    await run(npmCommand, ['run', 'build', '--workspace', '@weldcosta/shared'], { env });
+    await run(npmCommand, ['run', 'build', '--workspace', '@weldcosta/shared'], {
+      env,
+    });
     await run(
       process.execPath,
       [
-        path.join(root, 'node_modules/expo/bin/cli'),
+        path.join(buildPath.root, 'node_modules/expo/bin/cli'),
         'prebuild',
         '--platform',
         'android',
         '--no-install',
+        ...(values.clean ? [] : ['--no-clean']),
       ],
       { cwd: appRoot, env: { ...env, CI: '1' } },
     );
     const gradleFile = path.join(appRoot, 'android/app/build.gradle');
+    await prepareWindowsAutolinking(root, buildPath.root);
     await writeFile(gradleFile, releaseSigningGradle(await readFile(gradleFile, 'utf8')));
+    const rootGradleFile = path.join(appRoot, 'android/build.gradle');
+    await writeFile(
+      rootGradleFile,
+      androidWindowsPathsGradle(await readFile(rootGradleFile, 'utf8')),
+    );
     await run(
       process.platform === 'win32' ? 'gradlew.bat' : './gradlew',
-      [':app:assembleRelease', '--no-daemon', '--console=plain'],
+      [
+        ':app:assembleRelease',
+        '--no-daemon',
+        '--console=plain',
+        // Expo modules resolve physical paths; Kotlin incremental caches cannot
+        // relativize those sources against the SUBST drive used by React Native.
+        ...(process.platform === 'win32' ? ['-Pkotlin.incremental=false'] : []),
+      ],
       { cwd: path.join(appRoot, 'android'), env },
     );
     const apk = path.join(appRoot, 'android/app/build/outputs/apk/release/app-release.apk');
@@ -184,4 +213,9 @@ try {
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
+} finally {
+  if (buildPath)
+    await buildPath.release().catch((error) => {
+      console.warn(`Não foi possível liberar a unidade temporária: ${error.message}`);
+    });
 }

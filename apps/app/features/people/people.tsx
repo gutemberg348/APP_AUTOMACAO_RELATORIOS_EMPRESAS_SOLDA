@@ -1,15 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View, Switch } from 'react-native';
+import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  personSchema,
+  personSaveSchema,
+  userRoleLabels,
+  userRoleDescriptions,
   type Person,
   type PersonInput,
   type Paginated,
   type ReportSigner,
 } from '@weldcosta/shared';
-import { api, jsonBody } from '../../services/api';
+import { api, ApiError, jsonBody } from '../../services/api';
 import { useTheme } from '../../utils/theme';
+import { usePermission } from '../../hooks/use-permission';
+import { usePageScroll } from '../../components/page-scroll';
+import { apiValidationIssues, formErrorGuidance } from '../../utils/form-feedback';
 import {
   Button,
   Card,
@@ -21,6 +27,7 @@ import {
   Pager,
   SearchField,
   PanelHeader,
+  IconButton,
 } from '../../components/ui';
 import { SelectField } from '../../components/select-field';
 import { PickerSheet } from '../../components/picker-sheet';
@@ -54,6 +61,13 @@ export function PersonForm({
 }) {
   const { styles } = useTheme(),
     client = useQueryClient();
+  const canCreateLogin = usePermission('users.create'),
+    canManageLogin = usePermission('users.view');
+  const [withLogin, setWithLogin] = useState(false),
+    [password, setPassword] = useState(''),
+    [confirm, setConfirm] = useState(''),
+    [showPassword, setShowPassword] = useState(false),
+    [roleCode, setRoleCode] = useState('INSPECTOR');
   const [data, setData] = useState<PersonInput>(() => ({
     name: person?.name ?? initial?.name ?? '',
     role: person?.role ?? initial?.role ?? 'INSPECTOR',
@@ -67,8 +81,31 @@ export function PersonForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState<Record<string, string>>({});
-  const field = (key: keyof PersonInput, value: string | null) =>
+  const nodes = useRef<Record<string, View | null>>({}),
+    reveal = usePageScroll();
+  const [feedback, setFeedback] = useState({ field: '', attempt: 0 });
+  useEffect(() => {
+    if (!feedback.attempt) return;
+    const frame = requestAnimationFrame(() => reveal(nodes.current[feedback.field]));
+    return () => cancelAnimationFrame(frame);
+  }, [feedback, reveal]);
+  const node = (key: string) => (value: View | null) => {
+    nodes.current[key] = value;
+  };
+  const problem = (issues: { path: readonly PropertyKey[]; message: string }[]) => {
+    setInvalid(Object.fromEntries(issues.map((issue) => [issue.path.join('.'), issue.message])));
+    setError(
+      new Error('Confira os campos destacados para continuar. Seu preenchimento foi mantido.'),
+    );
+    setFeedback((old) => ({
+      field: issues[0]?.path.join('.') ?? 'feedback',
+      attempt: old.attempt + 1,
+    }));
+  };
+  const field = (key: keyof PersonInput, value: string | null) => {
     setData((old) => ({ ...old, [key]: value }));
+    setInvalid((old) => ({ ...old, [key]: '' }));
+  };
   return (
     <Card>
       <PanelHeader
@@ -76,17 +113,21 @@ export function PersonForm({
         subtitle="Salve os dados e a assinatura para usar nos próximos relatórios."
         icon="user"
       />
-      <Notice error={error} />
+      <View ref={node('feedback')}>
+        <Notice error={error} guidance={formErrorGuidance(error)} />
+      </View>
       <FormGrid>
         <FormCell>
-          <Field
-            label="Nome completo"
-            required
-            value={data.name}
-            onChangeText={(v) => field('name', v)}
-            error={invalid.name}
-            editable={!busy}
-          />
+          <View ref={node('name')}>
+            <Field
+              label="Nome completo"
+              required
+              value={data.name}
+              onChangeText={(v) => field('name', v)}
+              error={invalid.name}
+              editable={!busy}
+            />
+          </View>
         </FormCell>
         <FormCell>
           <SelectField
@@ -117,15 +158,21 @@ export function PersonForm({
           />
         </FormCell>
         <FormCell>
-          <Field
-            label="E-mail (opcional)"
-            value={data.email}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            onChangeText={(v) => field('email', v)}
-            error={invalid.email}
-            editable={!busy}
-          />
+          <View ref={node('email')}>
+            <Field
+              label={withLogin ? 'E-mail de acesso' : 'E-mail (opcional)'}
+              required={withLogin}
+              value={data.email}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoCorrect={false}
+              autoComplete="email"
+              hint={withLogin ? 'Este e-mail será usado para entrar no sistema.' : undefined}
+              onChangeText={(v) => field('email', v)}
+              error={invalid.email}
+              editable={!busy}
+            />
+          </View>
         </FormCell>
         <FormCell>
           <Field
@@ -133,10 +180,144 @@ export function PersonForm({
             mask="phone"
             value={data.phone}
             onChangeText={(v) => field('phone', v)}
+            error={invalid.phone}
             editable={!busy}
           />
         </FormCell>
       </FormGrid>
+      {(canCreateLogin || person?.user) && (
+        <Card>
+          <PanelHeader
+            title="Acesso ao sistema"
+            subtitle="O cadastro da pessoa e da assinatura pode existir sem login."
+            icon="lock"
+          />
+          {person?.user ? (
+            <>
+              <Text style={styles.label}>Login: {person.user.email}</Text>
+              <Text style={styles.muted}>
+                {userRoleLabels[person.user.role.code] ?? person.user.role.name} ·{' '}
+                {person.user.deletedAt
+                  ? 'Excluído'
+                  : person.user.status === 'ACTIVE'
+                    ? 'Ativo'
+                    : 'Inativo'}
+              </Text>
+              <Text style={styles.muted}>
+                A senha e o acesso são gerenciados em Usuários. Editar os dados desta pessoa não
+                altera seu login.
+              </Text>
+              {canManageLogin && (
+                <Button
+                  title="Gerenciar login"
+                  icon="user"
+                  secondary
+                  disabled={busy}
+                  onPress={() => router.push('/users/' + person.user!.id)}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <View style={[styles.row, { alignItems: 'center' }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Esta pessoa terá login?</Text>
+                  <Text style={styles.muted}>
+                    {withLogin
+                      ? 'Será criado junto com o cadastro usando o e-mail acima.'
+                      : 'Cadastre somente os dados e a assinatura.'}
+                  </Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Esta pessoa terá login?"
+                  value={withLogin}
+                  disabled={busy}
+                  onValueChange={(value) => {
+                    setWithLogin(value);
+                    setInvalid({});
+                    setError(undefined);
+                    if (!value) {
+                      setPassword('');
+                      setConfirm('');
+                    }
+                  }}
+                />
+              </View>
+              {withLogin && (
+                <>
+                  <View ref={node('login.roleCode')}>
+                    <SelectField
+                      label="Perfil de acesso"
+                      value={roleCode}
+                      clearable={false}
+                      required
+                      disabled={busy}
+                      options={Object.entries(userRoleLabels).map(([value, label]) => ({
+                        value,
+                        label,
+                        description: userRoleDescriptions[value],
+                        icon: 'shield',
+                      }))}
+                      onChange={(value) => setRoleCode(value)}
+                      error={invalid['login.roleCode']}
+                    />
+                  </View>
+                  <Text style={styles.muted}>{userRoleDescriptions[roleCode]}</Text>
+                  <FormGrid>
+                    <FormCell>
+                      <View ref={node('login.password')}>
+                        <Field
+                          label="Senha de acesso"
+                          required
+                          value={password}
+                          editable={!busy}
+                          secureTextEntry={!showPassword}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          autoComplete="new-password"
+                          onChangeText={(value) => {
+                            setPassword(value);
+                            setInvalid((old) => ({ ...old, 'login.password': '' }));
+                          }}
+                          error={invalid['login.password']}
+                          hint="Pelo menos 12 caracteres."
+                          trailing={
+                            <IconButton
+                              icon={showPassword ? 'eye-off' : 'eye'}
+                              label={showPassword ? 'Ocultar senhas' : 'Mostrar senhas'}
+                              disabled={busy}
+                              onPress={() => setShowPassword(!showPassword)}
+                            />
+                          }
+                        />
+                      </View>
+                    </FormCell>
+                    <FormCell>
+                      <View ref={node('confirm')}>
+                        <Field
+                          label="Confirmar senha"
+                          required
+                          value={confirm}
+                          editable={!busy}
+                          secureTextEntry={!showPassword}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          autoComplete="new-password"
+                          onChangeText={(value) => {
+                            setConfirm(value);
+                            setInvalid((old) => ({ ...old, confirm: '' }));
+                          }}
+                          error={invalid.confirm}
+                        />
+                      </View>
+                    </FormCell>
+                  </FormGrid>
+                </>
+              )}
+            </>
+          )}
+        </Card>
+      )}
       <SignatureField
         value={data.signatureAssetId}
         onChange={(id) => field('signatureAssetId', id)}
@@ -148,19 +329,29 @@ export function PersonForm({
           <Text style={styles.text}>Disponível para novos relatórios</Text>
         </View>
       )}
+      {person?.user && (
+        <Text style={styles.muted}>
+          A disponibilidade nos relatórios não altera o acesso dessa pessoa ao sistema.
+        </Text>
+      )}
       <View style={[styles.row, { flexWrap: 'wrap' }]}>
         <Button
-          title="Salvar cadastro"
+          title={withLogin ? 'Salvar pessoa e criar login' : 'Salvar cadastro'}
           icon="save"
           busy={busy}
           onPress={async () => {
             setError(undefined);
-            const parsed = personSchema.safeParse(data);
+            if (busy) return;
+            const parsed = personSaveSchema.safeParse({
+              ...data,
+              ...(withLogin && !person?.userId ? { login: { password, roleCode } } : {}),
+            });
             if (!parsed.success) {
-              setInvalid(
-                Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message])),
-              );
-              setError(new Error('Confira os campos destacados.'));
+              problem(parsed.error.issues);
+              return;
+            }
+            if (withLogin && password !== confirm) {
+              problem([{ path: ['confirm'], message: 'As senhas devem ser iguais.' }]);
               return;
             }
             setInvalid({});
@@ -174,9 +365,19 @@ export function PersonForm({
                 }),
               );
               void client.invalidateQueries({ queryKey: ['people'] });
+              if (parsed.data.login) void client.invalidateQueries({ queryKey: ['users'] });
+              setPassword('');
+              setConfirm('');
               onSaved(saved);
             } catch (e) {
-              setError(e);
+              const issues = apiValidationIssues(e);
+              if (issues.length) problem(issues);
+              else {
+                setError(e);
+                if (e instanceof ApiError && e.code === 'EMAIL_IN_USE')
+                  setInvalid({ email: e.message });
+                setFeedback((old) => ({ field: 'feedback', attempt: old.attempt + 1 }));
+              }
             } finally {
               setBusy(false);
             }
@@ -231,6 +432,13 @@ export function PeopleList({
               person.registrationNumber,
               person.company,
               person.signatureAssetId ? 'Assinatura salva' : 'Sem assinatura',
+              person.user
+                ? person.user.deletedAt
+                  ? 'Login excluído'
+                  : person.user.status === 'ACTIVE'
+                    ? 'Com login'
+                    : 'Login inativo'
+                : null,
             ]
               .filter(Boolean)
               .join(' · ')}

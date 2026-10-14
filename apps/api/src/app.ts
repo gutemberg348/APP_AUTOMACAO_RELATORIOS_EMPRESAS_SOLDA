@@ -14,6 +14,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
 import { send } from './utils/http';
 import { tutorialsRoutes } from './modules/tutorials/tutorials.routes';
 import { peopleRoutes } from './modules/people/people.routes';
+import { usersRoutes } from './modules/users/users.routes';
 export const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -31,6 +32,7 @@ app.use('/reports', requireAuth, reportsRoutes);
 app.use('/dashboard', requireAuth, dashboardRoutes);
 app.use('/tutorials', requireAuth, tutorialsRoutes);
 app.use('/people', requireAuth, peopleRoutes);
+app.use('/users', requireAuth, usersRoutes);
 app.use((_req, res) =>
   res
     .status(404)

@@ -29,6 +29,7 @@ import { PageScrollContext } from './page-scroll';
 import { InputVisibilityContext } from './input-visibility';
 import { router, type Href } from 'expo-router';
 import { requestNavigation } from '../stores/navigation';
+import { KeyboardScrollView } from './keyboard-scroll-view';
 export const selectionState = (selected: boolean, disabled?: boolean) =>
   Platform.OS === 'web' ? { disabled } : { selected, disabled };
 
@@ -69,8 +70,8 @@ export function Page({
   return (
     <View ref={viewport} style={{ flex: 1, minWidth: 0 }}>
       <PageScrollContext.Provider value={reveal}>
-        <ScrollView
-          ref={scroll}
+        <KeyboardScrollView
+          scrollRef={scroll}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           onScroll={(event) => {
             offset.current = event.nativeEvent.contentOffset.y;
@@ -120,7 +121,7 @@ export function Page({
             {action && <View style={{ alignSelf: mobile ? 'stretch' : 'center' }}>{action}</View>}
           </View>
           {children}
-        </ScrollView>
+        </KeyboardScrollView>
       </PageScrollContext.Provider>
     </View>
   );
@@ -357,10 +358,12 @@ export function Field({
   const [focus, setFocus] = useState(false);
   const container = useRef<View>(null);
   const revealInput = useContext(InputVisibilityContext);
-  const mobile = useWindowDimensions().width < 640;
+  const { width, height } = useWindowDimensions();
+  const mobile = width < 640;
   const id = useId();
   const readonly = props.editable === false;
   const inputProps: TextInputProps = {
+    ...(Platform.OS === 'android' ? { disableFullscreenUI: true } : {}),
     nativeID: id,
     accessibilityLabel: label,
     accessibilityHint: hint,
@@ -373,12 +376,13 @@ export function Field({
     },
     onBlur: (event) => {
       setFocus(false);
+      revealInput?.(null);
       onBlur?.(event);
     },
     style: [
       styles.input,
       mobile && { fontSize: 16 },
-      props.multiline && { minHeight: 116, textAlignVertical: 'top' },
+      props.multiline && { minHeight: focus && height < 500 ? 72 : 116, textAlignVertical: 'top' },
       { outlineWidth: 0 } as TextInputProps['style'],
       props.style,
     ],

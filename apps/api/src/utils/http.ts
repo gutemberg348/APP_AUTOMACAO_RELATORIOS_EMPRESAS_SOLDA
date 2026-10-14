@@ -24,7 +24,11 @@ export function pagination(query: ListQuery) {
     orderBy: { [query.sortBy]: query.sortOrder },
   };
 }
-export function pageResult<T>(items: T[], total: number, query: ListQuery) {
+export function pageResult<T, Q extends Pick<ListQuery, 'page' | 'limit'>>(
+  items: T[],
+  total: number,
+  query: Q,
+) {
   return {
     items,
     total,

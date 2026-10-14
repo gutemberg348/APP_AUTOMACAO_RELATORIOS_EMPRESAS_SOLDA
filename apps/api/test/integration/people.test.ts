@@ -14,6 +14,7 @@ import { render as rdo } from '../../src/modules/pdf/templates/reports/rdo';
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
 let token = '',
   viewer = '',
+  operator = '',
   companyId = '',
   projectId = '',
   reportTypeId = '';
@@ -21,7 +22,7 @@ const auth = () => ({ Authorization: 'Bearer ' + token });
 beforeAll(async () => {
   if (!new URL(process.env.DATABASE_URL!).pathname.endsWith('/weldcosta_test'))
     throw new Error('Isolated DB required');
-  for (const roleCode of ['ADMIN', 'VIEWER']) {
+  for (const roleCode of ['ADMIN', 'VIEWER', 'OPERATOR']) {
     const role = await prisma.role.findUniqueOrThrow({ where: { code: roleCode } });
     const email = randomUUID() + '@people.test.invalid',
       password = randomUUID();
@@ -35,7 +36,8 @@ beforeAll(async () => {
     });
     const login = await request(app).post('/auth/login').send({ email, password });
     if (roleCode === 'ADMIN') token = login.body.data.accessToken;
-    else viewer = login.body.data.accessToken;
+    else if (roleCode === 'VIEWER') viewer = login.body.data.accessToken;
+    else operator = login.body.data.accessToken;
   }
   companyId = (await prisma.company.create({ data: { name: 'Signature test company' } })).id;
   projectId = (await prisma.project.create({ data: { companyId, name: 'Signature test project' } }))
@@ -43,6 +45,175 @@ beforeAll(async () => {
   reportTypeId = (await prisma.reportType.findUniqueOrThrow({ where: { code: 'EVS' } })).id;
 });
 afterAll(() => prisma.$disconnect());
+it('creates an optional login atomically from the person email and returns only safe linked account fields', async () => {
+  const email = randomUUID() + '@people-login.test.invalid',
+    password = randomUUID();
+  const response = await request(app)
+    .post('/people')
+    .set(auth())
+    .send({
+      name: 'Pessoa com login',
+      role: 'INSPECTOR',
+      email: ' ' + email.toUpperCase() + ' ',
+      phone: '(19) 99999-9999',
+      login: { password },
+    });
+  expect(response.status, JSON.stringify(response.body)).toBe(201);
+  const person = response.body.data as Person;
+  expect(person.email).toBe(email);
+  expect(person.userId).toBe(person.user?.id);
+  expect(person.user).toMatchObject({ email, status: 'ACTIVE', role: { code: 'INSPECTOR' } });
+  expect(JSON.stringify(response.body)).not.toMatch(/password|authVersion|refreshToken/);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  expect(user.name).toBe(person.name);
+  expect(user.phone).toBe(person.phone);
+  expect(user.passwordHash).not.toBe(password);
+  expect(await bcrypt.compare(password, user.passwordHash)).toBe(true);
+  expect((await request(app).post('/auth/login').send({ email, password })).status).toBe(200);
+  const listed = await request(app).get('/people?search=Pessoa%20com%20login').set(auth());
+  expect(listed.body.data.items.find((p: Person) => p.id === person.id).user.email).toBe(email);
+  expect(JSON.stringify(listed.body)).not.toMatch(/passwordHash|authVersion/);
+  const audit = await prisma.auditLog.findMany({
+    where: { entityId: { in: [person.id, user.id] } },
+  });
+  expect(audit.map((entry) => entry.action)).toEqual(
+    expect.arrayContaining(['CREATE_PERSON', 'CREATE_USER']),
+  );
+  expect(JSON.stringify(audit)).not.toContain(password);
+});
+
+it('requires user creation permission for logins while allowing ordinary person registrations', async () => {
+  const email = randomUUID() + '@people-login.test.invalid';
+  const header = { Authorization: 'Bearer ' + operator };
+  const denied = await request(app)
+    .post('/people')
+    .set(header)
+    .send({
+      name: 'Sem permissão de login',
+      role: 'OTHER',
+      email,
+      login: { password: randomUUID(), roleCode: 'ADMIN' },
+    });
+  expect(denied.status).toBe(403);
+  expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  expect(await prisma.person.count({ where: { email } })).toBe(0);
+  const normal = await request(app)
+    .post('/people')
+    .set(header)
+    .send({ name: 'Pessoa sem login', role: 'OTHER' });
+  expect(normal.status).toBe(201);
+  expect(normal.body.data.user).toBeNull();
+  expect(
+    (
+      await request(app)
+        .put('/people/' + normal.body.data.id)
+        .set(header)
+        .send({
+          name: 'Pessoa sem login',
+          role: 'OTHER',
+          email,
+          version: normal.body.data.version,
+          active: true,
+          login: { password: randomUUID() },
+        })
+    ).status,
+  ).toBe(403);
+});
+
+it('validates login credentials and rolls back the whole person registration on duplicate email', async () => {
+  const email = randomUUID() + '@people-login.test.invalid',
+    password = randomUUID();
+  for (const extra of [
+    { login: { password } },
+    { email, login: { password: 'short' } },
+    { email, login: { password: 'é'.repeat(40) } },
+    { email, login: { password, roleCode: 'ROOT' } },
+    { email, login: { password, userId: randomUUID() } },
+    { email, login: { password }, userId: randomUUID() },
+  ]) {
+    expect(
+      (
+        await request(app)
+          .post('/people')
+          .set(auth())
+          .send({ name: 'Login inválido', role: 'OTHER', ...extra })
+      ).status,
+    ).toBe(400);
+  }
+  const role = await prisma.role.findUniqueOrThrow({ where: { code: 'VIEWER' } });
+  const original = await prisma.user.create({
+    data: {
+      name: 'Conta existente',
+      email,
+      passwordHash: await bcrypt.hash(password, 4),
+      roleId: role.id,
+    },
+  });
+  const duplicate = await request(app)
+    .post('/people')
+    .set(auth())
+    .send({ name: 'Duplicado', role: 'OTHER', email, login: { password: randomUUID() } });
+  expect(duplicate.status).toBe(409);
+  expect(duplicate.body.error.code).toBe('EMAIL_IN_USE');
+  expect(await prisma.person.count({ where: { email } })).toBe(0);
+  expect((await prisma.user.findUniqueOrThrow({ where: { email } })).passwordHash).toBe(
+    original.passwordHash,
+  );
+});
+
+it('adds access to an existing person without partial creation on stale saves or resetting an existing login', async () => {
+  const email = randomUUID() + '@people-login.test.invalid',
+    password = randomUUID();
+  const original = (
+    await request(app)
+      .post('/people')
+      .set(auth())
+      .send({ name: 'Pessoa cadastrada', role: 'REVIEWER', email })
+  ).body.data as Person;
+  const data = {
+    name: original.name,
+    role: original.role,
+    email,
+    active: true,
+    login: { password, roleCode: 'VIEWER' },
+  };
+  const stale = await request(app)
+    .put('/people/' + original.id)
+    .set(auth())
+    .send({ ...data, version: original.version + 1 });
+  expect(stale.status).toBe(409);
+  expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  const saved = await request(app)
+    .put('/people/' + original.id)
+    .set(auth())
+    .send({ ...data, version: original.version });
+  expect(saved.status).toBe(200);
+  const person = saved.body.data as Person;
+  expect(person.user?.role.code).toBe('VIEWER');
+  expect((await request(app).post('/auth/login').send({ email, password })).status).toBe(200);
+  const reset = await request(app)
+    .put('/people/' + person.id)
+    .set(auth())
+    .send({ ...data, version: person.version, login: { password: randomUUID() } });
+  expect(reset.status).toBe(409);
+  expect(reset.body.error.code).toBe('LOGIN_EXISTS');
+  const contactEmail = randomUUID() + '@contact.test.invalid';
+  const changed = await request(app)
+    .put('/people/' + person.id)
+    .set(auth())
+    .send({
+      name: 'Contato alterado',
+      role: person.role,
+      email: contactEmail,
+      active: false,
+      version: person.version,
+    });
+  expect(changed.status).toBe(200);
+  expect(changed.body.data.user.email).toBe(email);
+  expect(changed.body.data.user.status).toBe('ACTIVE');
+  expect((await request(app).post('/auth/login').send({ email, password })).status).toBe(200);
+});
+
 it('validates authenticated signature capture and file uploads', async () => {
   expect((await request(app).get('/people')).status).toBe(401);
   expect(

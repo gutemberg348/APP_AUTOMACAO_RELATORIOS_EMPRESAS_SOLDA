@@ -45,6 +45,8 @@ model User {
   email String @unique
   phone String?
   passwordHash String
+  authVersion Int @default(1)
+  deletedAt DateTime?
   roleId String @db.Uuid
   role Role @relation(fields: [roleId], references: [id])
   status UserStatus @default(ACTIVE)
@@ -57,7 +59,9 @@ model User {
   pdfs ReportPdf[]
   refreshTokens RefreshToken[]
   auditLogs AuditLog[]
+  person Person?
   @@index([roleId])
+  @@index([deletedAt, status])
   @@map("users")
 }
 model Role {
@@ -259,6 +263,8 @@ model Person {
   company String @default("")
   email String @default("")
   phone String @default("")
+  userId String? @unique @db.Uuid
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   signatureAssetId String? @db.Uuid
   signatureAsset SignatureAsset? @relation(fields: [signatureAssetId], references: [id])
   active Boolean @default(true)

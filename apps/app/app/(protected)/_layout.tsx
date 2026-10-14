@@ -1,7 +1,7 @@
 import { useTheme } from '../../utils/theme';
 import { requestNavigation } from '../../stores/navigation';
 import { useEffect, useState } from 'react';
-import { Pressable, Text, View, Modal, useWindowDimensions } from 'react-native';
+import { Pressable, Text, View, Modal, ScrollView, useWindowDimensions } from 'react-native';
 import { Redirect, Slot, usePathname, router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,8 +12,17 @@ import { Brand } from '../../components/brand';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { Icon, type IconName } from '../../components/icon';
 import { Button, IconButton, Loading, Badge, selectionState } from '../../components/ui';
+import { useKeyboardVisible } from '../../hooks/use-keyboard-visible';
+import { PickerSheet } from '../../components/picker-sheet';
 
 const links = [
+  {
+    label: 'Usuários',
+    short: 'Usuários',
+    path: '/users',
+    icon: 'shield',
+    permission: 'users.view',
+  },
   {
     label: 'Pessoas e assinaturas',
     short: 'Pessoas',
@@ -68,11 +77,13 @@ export default function ProtectedLayout() {
   const { tokens: t, styles } = useTheme();
   const { session, ready, clear, setSession } = useAuth(),
     path = usePathname();
-  const { width } = useWindowDimensions(),
+  const { width, height } = useWindowDimensions(),
     insets = useSafeAreaInsets(),
     desktop = width >= t.breakpoints.sidebar;
   const [profile, setProfile] = useState(false),
+    [more, setMore] = useState(false),
     [leaving, setLeaving] = useState(false);
+  const keyboardVisible = useKeyboardVisible();
   const client = useQueryClient();
   const me = useQuery({
     queryKey: ['me'],
@@ -89,6 +100,8 @@ export default function ProtectedLayout() {
   if (!ready) return <Loading />;
   if (!session) return <Redirect href="/login" />;
   const visibleLinks = links.filter((link) => session.user.permissions.includes(link.permission));
+  const canManageUsers = session.user.permissions.includes('users.view');
+  const extraPaths: readonly string[] = ['/users', '/people', '/tutorials'];
   const current = links.find((link) => path.startsWith(link.path));
   const initials = session.user.name
     .trim()
@@ -134,6 +147,9 @@ export default function ProtectedLayout() {
         backgroundColor: t.colors.background,
         flexDirection: 'row',
         paddingTop: insets.top,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+        paddingBottom: desktop && !keyboardVisible ? insets.bottom : 0,
       }}
     >
       {desktop && (
@@ -158,12 +174,11 @@ export default function ProtectedLayout() {
           >
             AMBIENTE DE TRABALHO
           </Text>
-          <View style={{ gap: 6 }}>
+          <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ gap: 6 }}>
             {visibleLinks.map((link) => (
               <NavLink key={link.path} link={link} selected={path.startsWith(link.path)} />
             ))}
-          </View>
-          <View style={{ flex: 1 }} />
+          </ScrollView>
           <View
             style={{
               backgroundColor: t.colors.soft,
@@ -211,7 +226,7 @@ export default function ProtectedLayout() {
       <View style={{ flex: 1, minWidth: 0 }}>
         <View
           style={{
-            height: desktop ? 72 : 64,
+            height: desktop ? 72 : keyboardVisible && height < 500 ? 48 : 64,
             backgroundColor: t.colors.surface,
             paddingHorizontal: desktop ? 32 : 20,
             borderBottomWidth: 1,
@@ -267,20 +282,26 @@ export default function ProtectedLayout() {
         <View style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Slot />
         </View>
-        {!desktop && (
+        {!desktop && !keyboardVisible && (
           <View
+            testID="app-bottom-navigation"
             style={{
               flexDirection: 'row',
               backgroundColor: t.colors.surface,
               borderTopWidth: 1,
               borderColor: t.colors.line,
               paddingTop: 8,
-              paddingBottom: Math.max(insets.bottom, 8),
+              paddingBottom: insets.bottom + 8,
               paddingHorizontal: 8,
             }}
           >
             {visibleLinks
-              .filter((link) => link.path !== '/people')
+              .filter(
+                (link) =>
+                  link.path !== '/people' &&
+                  link.path !== '/users' &&
+                  (!canManageUsers || link.path !== '/tutorials'),
+              )
               .map((link) => (
                 <Pressable
                   key={link.path}
@@ -324,9 +345,77 @@ export default function ProtectedLayout() {
                   </Text>
                 </Pressable>
               ))}
+            {canManageUsers && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Abrir menu Mais"
+                onPress={() => setMore(true)}
+                style={{
+                  flex: 1,
+                  minHeight: 52,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5,
+                }}
+              >
+                <View
+                  style={{
+                    paddingHorizontal: 17,
+                    paddingVertical: 4,
+                    borderRadius: 9,
+                    backgroundColor: extraPaths.some((extra) => path.startsWith(extra))
+                      ? t.colors.blueSoft
+                      : 'transparent',
+                  }}
+                >
+                  <Icon
+                    name="menu"
+                    size={21}
+                    color={
+                      extraPaths.some((extra) => path.startsWith(extra))
+                        ? t.colors.blue
+                        : t.colors.muted
+                    }
+                  />
+                </View>
+                <Text
+                  style={{
+                    fontFamily: t.fonts.medium,
+                    fontSize: 10,
+                    color: extraPaths.some((extra) => path.startsWith(extra))
+                      ? t.colors.blue
+                      : t.colors.muted,
+                  }}
+                >
+                  Mais
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
       </View>
+      <PickerSheet
+        visible={more}
+        title="Mais opções"
+        subtitle="Administração e atalhos do sistema."
+        icon="menu"
+        onClose={() => setMore(false)}
+      >
+        {visibleLinks
+          .filter((link) => extraPaths.includes(link.path))
+          .map((link) => (
+            <Button
+              key={link.path}
+              title={link.label}
+              icon={link.icon}
+              secondary
+              onPress={() => {
+                setMore(false);
+                requestNavigation(() => router.push(link.path));
+              }}
+            />
+          ))}
+      </PickerSheet>
       <Modal
         accessibilityLabel="Sua conta"
         visible={profile}
@@ -362,6 +451,17 @@ export default function ProtectedLayout() {
               </View>
             </View>
             <Badge label={role} tone="blue" dot={false} />
+            {canManageUsers && (
+              <Button
+                title="Gerenciar usuários"
+                icon="shield"
+                secondary
+                onPress={() => {
+                  setProfile(false);
+                  requestNavigation(() => router.push('/users'));
+                }}
+              />
+            )}
             <Button
               title="Pessoas e assinaturas"
               icon="user"

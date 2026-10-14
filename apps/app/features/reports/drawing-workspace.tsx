@@ -96,7 +96,9 @@ function InspectorScroll({
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: 24 }}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardDismissMode={
+            Platform.OS === 'ios' ? 'interactive' : Platform.OS === 'android' ? 'on-drag' : 'none'
+          }
           automaticallyAdjustContentInsets={false}
           automaticallyAdjustKeyboardInsets={false}
           contentInsetAdjustmentBehavior="never"
@@ -169,7 +171,7 @@ function WorkspaceContent(props: WorkspaceProps) {
         <View
           testID="drawing-workspace-header"
           style={{
-            padding: 10,
+            padding: inputMode && window.height < 500 ? 2 : 10,
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
@@ -266,7 +268,12 @@ function WorkspaceContent(props: WorkspaceProps) {
         )}
         <View
           testID="drawing-workspace-footer"
-          style={{ padding: 6, borderTopWidth: 1, borderColor: t.colors.line, flexShrink: 0 }}
+          style={{
+            padding: inputMode && window.height < 500 ? 2 : 6,
+            borderTopWidth: 1,
+            borderColor: t.colors.line,
+            flexShrink: 0,
+          }}
         >
           {inputMode ? (
             <Button

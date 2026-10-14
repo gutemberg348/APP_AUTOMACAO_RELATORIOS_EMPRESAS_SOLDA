@@ -10,6 +10,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: config.name ?? 'Weldcosta Inspeções',
     slug: config.slug ?? 'weldcosta-system',
-    android: { ...config.android, versionCode },
+    android: { ...config.android, versionCode, softwareKeyboardLayoutMode: 'resize' },
   };
 };

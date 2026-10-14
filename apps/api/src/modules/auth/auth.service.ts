@@ -25,16 +25,16 @@ export function publicUser(user: UserWithRole): CurrentUser {
     permissions: user.role.permissions.map((item) => item.permission.code),
   };
 }
-function createTokens(userId: string, tokenId: string) {
+function createTokens(userId: string, tokenId: string, authVersion: number) {
   return {
-    accessToken: jwt.sign({ kind: 'access' }, env.JWT_SECRET, {
+    accessToken: jwt.sign({ kind: 'access', authVersion }, env.JWT_SECRET, {
       algorithm: 'HS256',
       subject: userId,
       issuer: 'weldcosta-api',
       audience: 'weldcosta-app',
       expiresIn: durationSeconds(env.JWT_EXPIRES_IN),
     }),
-    refreshToken: jwt.sign({ kind: 'refresh' }, env.REFRESH_TOKEN_SECRET, {
+    refreshToken: jwt.sign({ kind: 'refresh', authVersion }, env.REFRESH_TOKEN_SECRET, {
       algorithm: 'HS256',
       subject: userId,
       jwtid: tokenId,
@@ -59,18 +59,18 @@ function verify(token: string, kind: 'access' | 'refresh') {
 }
 async function activeUser(id: string) {
   const user = await prisma.user.findUnique({ where: { id }, include: roleInclude });
-  if (!user || user.status !== 'ACTIVE') throw denied();
+  if (!user || user.status !== 'ACTIVE' || user.deletedAt) throw denied();
   return user;
 }
 export const authService = {
   async login(email: string, password: string) {
     const user = await prisma.user.findUnique({ where: { email }, include: roleInclude });
     const matches = await bcrypt.compare(password, user?.passwordHash ?? dummyHash);
-    if (!user || !matches || user.status !== 'ACTIVE')
+    if (!user || !matches || user.status !== 'ACTIVE' || user.deletedAt)
       throw new AppError(401, 'INVALID_CREDENTIALS', 'E-mail ou senha inválidos.');
     const tokenId = randomUUID(),
       familyId = randomUUID(),
-      tokens = createTokens(user.id, tokenId);
+      tokens = createTokens(user.id, tokenId, user.authVersion);
     await prisma.$transaction(async (tx) => {
       await tx.refreshToken.create({
         data: {
@@ -88,7 +88,10 @@ export const authService = {
     return { ...tokens, user: publicUser(user) };
   },
   async authenticate(token: string) {
-    return publicUser(await activeUser(verify(token, 'access').sub!));
+    const payload = verify(token, 'access');
+    const user = await activeUser(payload.sub!);
+    if ((payload.authVersion ?? 1) !== user.authVersion) throw denied();
+    return publicUser(user);
   },
   async refresh(token: string) {
     const payload = verify(token, 'refresh');
@@ -109,7 +112,8 @@ export const authService = {
     }
     const user = await activeUser(stored.userId),
       nextId = randomUUID(),
-      tokens = createTokens(user.id, nextId);
+      tokens = createTokens(user.id, nextId, user.authVersion);
+    if ((payload.authVersion ?? 1) !== user.authVersion) throw denied();
     const rotated = await prisma.$transaction(async (tx) => {
       const consumed = await tx.refreshToken.updateMany({
         where: { id: stored.id, revokedAt: null },

@@ -113,6 +113,12 @@ android {
 tasks.matching { it.name == 'createBundleReleaseJsAndAssets' }.configureEach {
     inputs.property('weldcostaApiUrl', System.getenv('EXPO_PUBLIC_API_URL') ?: '')
 }
+def shortBuildRoot = System.getenv('WELDCOSTA_ANDROID_BUILD_ROOT')
+if (shortBuildRoot) {
+    react { cliFile = file(shortBuildRoot + '/scripts/expo-android-bundle.cjs') }
+    // RN configures app CMake arguments after the root project's plugin hook.
+    android.defaultConfig.externalNativeBuild.cmake.arguments '-DCMAKE_OBJECT_PATH_MAX=240'
+}
 ${end}\n`
   );
 }

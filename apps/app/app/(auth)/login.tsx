@@ -1,13 +1,6 @@
 import { useTheme } from '../../utils/theme';
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  useWindowDimensions,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { View, Text, useWindowDimensions } from 'react-native';
 import { Redirect, router } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -20,6 +13,7 @@ import { Icon } from '../../components/icon';
 import { Button, Field, IconButton, Notice } from '../../components/ui';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardScrollView } from '../../components/keyboard-scroll-view';
 
 export default function Login() {
   const { tokens: t, styles } = useTheme();
@@ -45,9 +39,13 @@ export default function Login() {
     }
   });
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: t.colors.surface }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: t.colors.surface,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+      }}
     >
       <View style={{ position: 'absolute', top: insets.top + 16, right: 24, zIndex: 2 }}>
         <ThemeToggle />
@@ -131,7 +129,8 @@ export default function Login() {
             </View>
           </View>
         )}
-        <ScrollView
+        <KeyboardScrollView
+          testID="login-keyboard-scroll"
           style={{ flex: 1 }}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
@@ -139,6 +138,7 @@ export default function Login() {
             justifyContent: 'center',
             padding: desktop ? 48 : 24,
             paddingTop: desktop ? 80 : insets.top + 80,
+            paddingBottom: insets.bottom + 24,
           }}
         >
           <View style={{ width: '100%', maxWidth: 392, alignSelf: 'center', gap: 30 }}>
@@ -254,8 +254,8 @@ export default function Login() {
               </Text>
             )}
           </View>
-        </ScrollView>
+        </KeyboardScrollView>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

@@ -1,5 +1,5 @@
 import { useTheme } from '../utils/theme';
-import { useEffect, type PropsWithChildren, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type PropsWithChildren, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
@@ -9,10 +9,13 @@ import {
   Keyboard,
   Platform,
   useWindowDimensions,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton, IconTile } from './ui';
 import type { IconName } from './icon';
+import { KeyboardScrollView } from './keyboard-scroll-view';
+import { PageScrollContext } from './page-scroll';
 
 export function PickerSheet({
   visible,
@@ -36,6 +39,22 @@ export function PickerSheet({
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const mobile = width < 640;
+  const scroll = useRef<ScrollView>(null),
+    offset = useRef(0);
+  const reveal = useCallback((target?: View | null) => {
+    if (!target) {
+      scroll.current?.scrollTo({ y: 0, animated: true });
+      return;
+    }
+    scroll.current?.getNativeScrollRef()?.measureInWindow((_x, top) => {
+      target.measureInWindow((_targetX, targetTop) => {
+        scroll.current?.scrollTo({
+          y: Math.max(0, offset.current + targetTop - top - 24),
+          animated: true,
+        });
+      });
+    });
+  }, []);
   useEffect(() => {
     if (visible) Keyboard.dismiss();
   }, [visible]);
@@ -74,7 +93,7 @@ export function PickerSheet({
             borderBottomRightRadius: mobile ? 0 : 22,
             overflow: 'hidden',
             boxShadow: '0 24px 70px rgba(17,42,71,0.2)',
-            paddingBottom: mobile ? Math.max(insets.bottom, 12) : 0,
+            paddingBottom: mobile ? insets.bottom + 12 : 12,
           }}
         >
           {mobile && (
@@ -114,7 +133,20 @@ export function PickerSheet({
             </View>
             <IconButton icon="close" label={'Fechar ' + title.toLowerCase()} onPress={onClose} />
           </View>
-          <View style={{ padding: mobile ? 20 : 22, gap: 16, flexShrink: 1 }}>{children}</View>
+          <PageScrollContext.Provider value={reveal}>
+            <KeyboardScrollView
+              scrollRef={scroll}
+              onScroll={(event) => {
+                offset.current = event.nativeEvent.contentOffset.y;
+              }}
+              testID="picker-keyboard-scroll"
+              automaticallyAdjustKeyboardInsets={false}
+              style={{ flexShrink: 1, minHeight: 0 }}
+              contentContainerStyle={{ padding: mobile ? 20 : 22, gap: 16 }}
+            >
+              {children}
+            </KeyboardScrollView>
+          </PageScrollContext.Provider>
           {footer && (
             <View
               style={{

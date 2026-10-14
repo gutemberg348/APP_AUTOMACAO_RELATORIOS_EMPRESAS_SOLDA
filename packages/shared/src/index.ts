@@ -11,3 +11,4 @@ export * from './people';
 export * from './signature-geometry';
 export * from './report-status';
 export * from './report-review';
+export * from './users';
