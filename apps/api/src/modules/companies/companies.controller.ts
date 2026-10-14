@@ -8,6 +8,7 @@ export const companiesController = {
       res,
       await companiesService.list(
         listQuery(req, ['createdAt', 'updatedAt', 'name'], recordStatuses),
+        req.user!,
       ),
     );
   },
@@ -15,7 +16,7 @@ export const companiesController = {
     send(res, await companiesService.get(idParam(req)));
   },
   async create(req: Request, res: Response) {
-    send(res, await companiesService.create(companySchema.parse(req.body), req.user!.id), 201);
+    send(res, await companiesService.create(companySchema.parse(req.body), req.user!), 201);
   },
   async update(req: Request, res: Response) {
     send(

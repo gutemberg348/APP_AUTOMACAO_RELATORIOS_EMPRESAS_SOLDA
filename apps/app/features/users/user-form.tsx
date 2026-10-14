@@ -7,6 +7,7 @@ import {
   userPassword,
   userRoleLabels,
   userRoleDescriptions,
+  hasGlobalCompanyAccess,
   type ManagedUser,
   type UserRole,
 } from '@weldcosta/shared';
@@ -28,6 +29,7 @@ import {
   IconButton,
 } from '../../components/ui';
 import { SelectField } from '../../components/select-field';
+import { CompanyAccessField } from './company-access-field';
 
 export function UserForm({
   user,
@@ -54,10 +56,17 @@ export function UserForm({
     [show, setShow] = useState(false),
     [error, setError] = useState<unknown>(),
     [invalid, setInvalid] = useState<Record<string, string>>({});
+  const [companyIds, setCompanyIds] = useState<string[]>(
+    () => user?.companyAccess?.map((access) => access.companyId) ?? [],
+  );
   const dirty = Object.entries(values).some(
     ([key, value]) => value !== initial[key as keyof typeof initial],
   );
-  useUnsavedChanges(dirty);
+  useUnsavedChanges(
+    dirty ||
+      JSON.stringify([...companyIds].sort()) !==
+        JSON.stringify((user?.companyAccess?.map((access) => access.companyId) ?? []).sort()),
+  );
   const reveal = usePageScroll(),
     nodes = useRef<Record<string, View | null>>({});
   const [feedback, setFeedback] = useState({ field: '', attempt: 0 });
@@ -91,6 +100,7 @@ export function UserForm({
       email: values.email,
       phone: values.phone,
       roleId: values.roleId,
+      companyIds,
     };
     const parsed = user
       ? userProfileSchema.safeParse(profile)
@@ -216,6 +226,23 @@ export function UserForm({
             ] ?? 'Selecione o perfil conforme as tarefas dessa pessoa.')}
       </Text>
       <Notice error={roles.error} />
+      {roles.data?.some((role) => role.id === values.roleId) &&
+        (hasGlobalCompanyAccess(roles.data.find((role) => role.id === values.roleId)!.code) ? (
+          <Text style={styles.muted}>Este perfil tem acesso a todas as empresas e obras.</Text>
+        ) : (
+          <CompanyAccessField
+            value={companyIds}
+            onChange={setCompanyIds}
+            disabled={busy}
+            initial={user?.companyAccess?.map((access) => access.company)}
+          />
+        ))}
+      {user && !userRoleLabels[user.role.code] && (
+        <Text style={styles.muted}>
+          Este cadastro usa um perfil antigo. Escolha Administrador, Gerente, Inspetor ou Operador e
+          confira as empresas liberadas.
+        </Text>
+      )}
       {roles.isError && (
         <Button title="Carregar perfis novamente" secondary onPress={() => void roles.refetch()} />
       )}

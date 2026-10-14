@@ -129,6 +129,8 @@ As variáveis do build são passadas ao processo, preservando `apps/app/.env` us
 
 ### Gestão de usuários
 
+Os perfis atuais e as regras de empresas liberadas estão em [níveis de acesso](niveis-acesso.md). Esta atualização inclui a migration `202610140003_company_access`. Depois de publicar, edite os usuários Inspetor/Operador para selecionar suas empresas; contas sem seleção ficam sem acesso a esses registros. Gerente e Administrador veem todas as empresas. Publicação de tutoriais permanece exclusiva do Administrador.
+
 O administrador acessa **Usuários** no menu lateral do painel. No celular, o acesso fica em **Mais → Usuários**. É possível cadastrar, editar nome/e-mail/telefone/perfil, alterar senha, ativar, inativar, excluir e restaurar contas. Exclusão mantém os relatórios e o histórico associados; as contas aparecem no filtro **Excluídos** para restauração. O e-mail de uma conta excluída permanece reservado.
 
 Em **Pessoas e assinaturas**, o administrador também pode marcar **Esta pessoa terá login?**, aproveitando o e-mail do cadastro e informando perfil/senha. Pessoa e usuário são criados juntos. A atualização inclui a migration aditiva `202610140002_person_login`; cadastros existentes permanecem sem login até essa opção ser escolhida.

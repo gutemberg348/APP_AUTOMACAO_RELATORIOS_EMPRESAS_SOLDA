@@ -23,7 +23,7 @@ let companyId = '',
 beforeAll(async () => {
   if (!new URL(process.env.DATABASE_URL!).pathname.endsWith('/weldcosta_test'))
     throw new Error('Integration requires the isolated weldcosta_test database.');
-  for (const code of ['ADMIN', 'INSPECTOR', 'REVIEWER', 'OPERATOR', 'VIEWER']) {
+  for (const code of ['ADMIN', 'MANAGER', 'INSPECTOR', 'REVIEWER', 'OPERATOR', 'VIEWER']) {
     const role = await prisma.role.findUniqueOrThrow({ where: { code } });
     const email = `${code.toLowerCase()}@test.example.invalid`;
     await prisma.user.create({
@@ -37,6 +37,19 @@ beforeAll(async () => {
   typeId = type.id;
 });
 afterAll(() => prisma.$disconnect());
+async function grantFixtureCompany(companyId: string) {
+  await prisma.userCompany.createMany({
+    data: Object.values(sessions)
+      .filter((session) => !['ADMIN', 'MANAGER'].includes(session.user.role.code))
+      .map((session) => ({ userId: session.user.id, companyId })),
+    skipDuplicates: true,
+  });
+}
+async function createFixtureCompany(data: Parameters<typeof prisma.company.create>[0]) {
+  const company = await prisma.company.create(data);
+  await grantFixtureCompany(company.id);
+  return company;
+}
 const auth = (role = 'ADMIN') => ({ Authorization: `Bearer ${sessions[role]!.accessToken}` });
 describe('REST with PostgreSQL', () => {
   it('limits login attempts per client IP behind the production proxy', async () => {
@@ -60,7 +73,7 @@ describe('REST with PostgreSQL', () => {
     expect(otherClient.status).toBe(401);
   });
   it('soft deletes every report status with permission, version and preserved document history', async () => {
-    const company = await prisma.company.create({ data: { name: 'Report deletion company' } });
+    const company = await createFixtureCompany({ data: { name: 'Report deletion company' } });
     const project = await prisma.project.create({
       data: { name: 'Report deletion project', companyId: company.id },
     });
@@ -160,6 +173,8 @@ describe('REST with PostgreSQL', () => {
       .set(auth())
       .send({ name: 'Other Test Company' });
     otherCompanyId = other.body.data.id;
+    await grantFixtureCompany(companyId);
+    await grantFixtureCompany(otherCompanyId);
     const project = await request(app)
       .post('/projects')
       .set(auth())
@@ -234,7 +249,7 @@ describe('REST with PostgreSQL', () => {
     };
     expect(
       (await request(app).put(`/reports/${report.id}`).set(auth('OPERATOR')).send(update)).status,
-    ).toBe(403);
+    ).toBe(404);
     const saved = await request(app)
       .put(`/reports/${report.id}`)
       .set(auth('INSPECTOR'))
@@ -273,15 +288,15 @@ describe('REST with PostgreSQL', () => {
     let response = await transition('IN_REVIEW', 'INSPECTOR');
     expect(response.status).toBe(200);
     report = response.body.data;
-    expect((await transition('APPROVED', 'INSPECTOR')).status).toBe(403);
+    expect((await transition('APPROVED', 'OPERATOR')).status).toBe(404);
     expect(
       (
         await request(app)
           .put(`/reports/${report.id}`)
-          .set(auth('INSPECTOR'))
+          .set(auth('OPERATOR'))
           .send({ version: report.version, title: 'Blocked' })
       ).status,
-    ).toBe(403);
+    ).toBe(404);
     expect((await transition('DRAFT', 'REVIEWER')).status).toBe(400);
     response = await transition('DRAFT', 'REVIEWER', 'Corrigir observações');
     expect(response.status).toBe(200);
@@ -392,7 +407,7 @@ describe('REST with PostgreSQL', () => {
     expect(logs.map((log) => log.action)).toContain('FINISH_REPORT');
   });
   it('prefills independent editable snapshots, persists collections and generates all five PDFs', async () => {
-    const company = await prisma.company.create({
+    const company = await createFixtureCompany({
       data: { name: 'PDF test client', corporateName: 'PDF legal client' },
     });
     const project = await prisma.project.create({
@@ -601,7 +616,7 @@ describe('REST with PostgreSQL', () => {
     ).toBe(400);
   }, 90000);
   it('persists drawings and numbered points atomically, validates links, permissions and locking', async () => {
-    const company = await prisma.company.create({ data: { name: 'Drawing test company' } });
+    const company = await createFixtureCompany({ data: { name: 'Drawing test company' } });
     const project = await prisma.project.create({
       data: { companyId: company.id, name: 'Drawing test project' },
     });
@@ -650,7 +665,7 @@ describe('REST with PostgreSQL', () => {
         .put('/reports/' + saved.id)
         .set(auth(role))
         .send({ version: saved.version, ...(body as object) });
-    expect((await update({ drawings: [drawing] }, 'OPERATOR')).status).toBe(403);
+    expect((await update({ drawings: [drawing] }, 'OPERATOR')).status).toBe(404);
     expect((await update({ drawings: [{ ...drawing, id: randomUUID() }] })).status).toBe(400);
     expect(
       (
@@ -720,7 +735,7 @@ describe('REST with PostgreSQL', () => {
       reportPointId: point.id,
     };
     expect((await request(app).patch(mediaPath).set(auth('OPERATOR')).send(metadata)).status).toBe(
-      403,
+      404,
     );
     expect(
       (
@@ -785,7 +800,7 @@ describe('REST with PostgreSQL', () => {
     expect(cleared.body.data.drawings).toHaveLength(0);
   }, 30000);
   it('removes confirmed point photos and marks atomically, preserving other points and enforcing permissions', async () => {
-    const company = await prisma.company.create({ data: { name: 'Point removal company' } });
+    const company = await createFixtureCompany({ data: { name: 'Point removal company' } });
     const project = await prisma.project.create({
       data: { companyId: company.id, name: 'Point removal project' },
     });
@@ -1015,7 +1030,7 @@ describe('REST with PostgreSQL', () => {
     expect(concluded.body.data.specificData.finalReport).toBe('Inspeção concluída');
   });
   it('changes status without a number, reopens approved/finalized reports and preserves prior PDF versions', async () => {
-    const company = await prisma.company.create({ data: { name: 'Quick status company' } });
+    const company = await createFixtureCompany({ data: { name: 'Quick status company' } });
     const project = await prisma.project.create({
       data: { name: 'Quick status project', companyId: company.id },
     });
@@ -1061,7 +1076,7 @@ describe('REST with PostgreSQL', () => {
         .set(auth(role))
         .send({ status, version, quick: true });
     expect((await change('APPROVED', 'VIEWER')).status).toBe(403);
-    expect((await change('APPROVED', 'INSPECTOR')).status).toBe(403);
+    expect((await change('APPROVED', 'OPERATOR')).status).toBe(404);
     expect((await change('APPROVED', 'ADMIN', current.version + 1)).status).toBe(409);
     for (const status of [
       'APPROVED',
@@ -1118,7 +1133,7 @@ describe('REST with PostgreSQL', () => {
     ).toBe('DRAFT');
   }, 90000);
   it('allows numberless selector changes for every report type while retaining other validations', async () => {
-    const company = await prisma.company.create({ data: { name: 'Numberless selector company' } });
+    const company = await createFixtureCompany({ data: { name: 'Numberless selector company' } });
     const project = await prisma.project.create({
       data: { name: 'Numberless selector project', companyId: company.id },
     });
@@ -1167,7 +1182,7 @@ describe('REST with PostgreSQL', () => {
     }
   });
   it('submits partial inspections with explicit acknowledgment and exports approved PDFs without a fourth phase', async () => {
-    const company = await prisma.company.create({ data: { name: 'Partial report company' } });
+    const company = await createFixtureCompany({ data: { name: 'Partial report company' } });
     const project = await prisma.project.create({
       data: { name: 'Partial report project', companyId: company.id },
     });
@@ -1323,7 +1338,7 @@ describe('REST with PostgreSQL', () => {
     }
   }, 90000);
   it('removes an inspection point and its photos while keeping an independent marker on the drawing', async () => {
-    const company = await prisma.company.create({ data: { name: 'Independent marker company' } });
+    const company = await createFixtureCompany({ data: { name: 'Independent marker company' } });
     const project = await prisma.project.create({
       data: { name: 'Independent marker project', companyId: company.id },
     });
@@ -1399,7 +1414,7 @@ describe('REST with PostgreSQL', () => {
           .set(auth('OPERATOR'))
           .send(body)
       ).status,
-    ).toBe(403);
+    ).toBe(404);
     const removed = await request(app)
       .put('/reports/' + saved.id)
       .set(auth())

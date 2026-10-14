@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { requirePermission } from '../../middlewares/auth';
 import { companiesController as c } from './companies.controller';
 import { projectsController } from '../projects/projects.controller';
+import { requireCompanyAccess } from '../../middlewares/access-scope';
 export const companiesRoutes = Router();
+companiesRoutes.use('/:id', requireCompanyAccess);
 companiesRoutes.get('/', requirePermission('companies.view'), c.list);
 companiesRoutes.get(
   '/:companyId/projects',

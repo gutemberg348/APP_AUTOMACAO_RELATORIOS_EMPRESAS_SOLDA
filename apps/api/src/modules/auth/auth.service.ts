@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import type { CurrentUser } from '@weldcosta/shared';
+import { rolePermissions, type CurrentUser } from '@weldcosta/shared';
 import { prisma } from '../../prisma/client';
 import { env, durationSeconds } from '../../config/env';
 import { AppError } from '../../errors/app-error';
 import type { Prisma } from '../../generated/prisma/client';
 const roleInclude = {
   role: { include: { permissions: { include: { permission: true } } } },
+  companyAccess: { select: { companyId: true } },
 } as const;
 type UserWithRole = Prisma.UserGetPayload<{ include: typeof roleInclude }>;
 const denied = () =>
@@ -22,7 +23,12 @@ export function publicUser(user: UserWithRole): CurrentUser {
     email: user.email,
     phone: user.phone,
     role: { id: user.role.id, name: user.role.name, code: user.role.code },
-    permissions: user.role.permissions.map((item) => item.permission.code),
+    permissions: user.role.permissions
+      .map((item) => item.permission.code)
+      .filter((code) =>
+        (rolePermissions[user.role.code] as readonly string[] | undefined)?.includes(code),
+      ),
+    companyIds: user.companyAccess.map((access) => access.companyId),
   };
 }
 function createTokens(userId: string, tokenId: string, authVersion: number) {

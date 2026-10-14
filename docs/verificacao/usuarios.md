@@ -2,7 +2,7 @@
 
 O administrador encontra **Usuários** no menu lateral ou em **Mais → Usuários** no celular. A área oferece cadastro, edição de nome/e-mail/telefone/perfil, alteração de senha, ativação, inativação, exclusão e restauração, com pesquisa, filtros e paginação.
 
-Os perfis disponíveis são Administrador, Revisor, Inspetor, Operador e Visualizador. O acesso à gestão é controlado por permissões na interface e na API. As senhas exigem ao menos 12 caracteres e no máximo 72 bytes; não são retornadas pela API nem incluídas na auditoria.
+Os perfis atuais são Administrador, Gerente, Inspetor e Operador, com [regras de acesso e empresas liberadas](../niveis-acesso.md). Revisor e Visualizador são preservados apenas nas contas antigas até o administrador selecionar um perfil atual. O acesso à gestão é controlado por permissões na interface e na API. As senhas exigem ao menos 12 caracteres e no máximo 72 bytes; não são retornadas pela API nem incluídas na auditoria.
 
 Excluir uma conta retira seu acesso e a move para **Excluídos**, preservando relatórios e histórico. É possível restaurá-la nesse filtro. Seu e-mail continua reservado para evitar associar outra pessoa à mesma identidade. O administrador não pode inativar, excluir ou retirar o próprio perfil de administrador; a API também protege o último administrador ativo contra alterações simultâneas.
 
@@ -26,7 +26,15 @@ A opção também aparece no cadastro de pessoa aberto dentro do relatório. Pes
 
 A migration aditiva `202610140002_person_login` vincula pessoa e usuário. Foram aprovados 38 testes de integração (incluindo quatro novos cenários de login opcional), build, TypeScript, ESLint e exportação Expo web/iOS/Android. Verificação no navegador com API simulada cobriu criar e adicionar login, confirmação de senha, duplicidade, perfil escolhido, opção desligada, acesso restrito, conta vinculada e campo visível na simulação do teclado. Capturas: [cadastro no painel](pessoa-login-desktop.png) e [cadastro no celular](pessoa-login-mobile.png).
 
-## Publicação
+## Ações exclusivas do administrador
+
+O bloco lateral **Precisão em cada etapa** foi removido. Publicar, editar e excluir tutoriais e cadastrar usuários exigem o perfil **ADMIN**, além da permissão correspondente. A mesma restrição vale para criar login ao cadastrar ou editar uma pessoa. As telas e a API usam a regra compartilhada; atribuir esses códigos de permissão a outro perfil não libera essas ações. Consultar tutoriais e cadastrar pessoas sem login continuam seguindo as permissões normais.
+
+Nesta alteração, passaram 100 testes unitários, incluindo chamadas HTTP com autenticação simulada dos quatro perfis não administrativos, build, TypeScript, ESLint e exportação Expo web/iOS/Android. A suíte de integração com PostgreSQL não foi executada: o Docker Desktop estava desligado no PC. Nenhum serviço ou banco local foi iniciado para essa verificação.
+
+No navegador com API simulada, os quatro perfis não administrativos permaneceram sem botões de publicação/cadastro e sem acesso às páginas de criação, mesmo recebendo todos os códigos de permissão na sessão. O administrador manteve os controles de cadastro/upload. O menu ficou sem o bloco removido, e a consulta a tutoriais funcionou em desktop e celular, sem erros de execução.
+
+## Publicação da atualização
 
 Após enviar os arquivos ao Git, execute na raiz do projeto na VPS:
 

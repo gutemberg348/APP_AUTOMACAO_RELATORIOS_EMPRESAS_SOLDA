@@ -6,6 +6,7 @@ import {
   personSaveSchema,
   userRoleLabels,
   userRoleDescriptions,
+  hasGlobalCompanyAccess,
   type Person,
   type PersonInput,
   type Paginated,
@@ -32,6 +33,7 @@ import {
 import { SelectField } from '../../components/select-field';
 import { PickerSheet } from '../../components/picker-sheet';
 import { SignatureField } from './signature-field';
+import { CompanyAccessField } from '../users/company-access-field';
 
 export const personRoles = [
   { value: 'INSPECTOR', label: 'Inspetor' },
@@ -68,6 +70,7 @@ export function PersonForm({
     [confirm, setConfirm] = useState(''),
     [showPassword, setShowPassword] = useState(false),
     [roleCode, setRoleCode] = useState('INSPECTOR');
+  const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [data, setData] = useState<PersonInput>(() => ({
     name: person?.name ?? initial?.name ?? '',
     role: person?.role ?? initial?.role ?? 'INSPECTOR',
@@ -263,6 +266,13 @@ export function PersonForm({
                     />
                   </View>
                   <Text style={styles.muted}>{userRoleDescriptions[roleCode]}</Text>
+                  {!hasGlobalCompanyAccess(roleCode) && (
+                    <CompanyAccessField
+                      value={companyIds}
+                      onChange={setCompanyIds}
+                      disabled={busy}
+                    />
+                  )}
                   <FormGrid>
                     <FormCell>
                       <View ref={node('login.password')}>
@@ -344,7 +354,9 @@ export function PersonForm({
             if (busy) return;
             const parsed = personSaveSchema.safeParse({
               ...data,
-              ...(withLogin && !person?.userId ? { login: { password, roleCode } } : {}),
+              ...(withLogin && !person?.userId
+                ? { login: { password, roleCode, companyIds } }
+                : {}),
             });
             if (!parsed.success) {
               problem(parsed.error.issues);

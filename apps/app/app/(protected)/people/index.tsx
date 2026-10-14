@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import type { Person } from '@weldcosta/shared';
-import { Page, Button, Choice } from '../../../components/ui';
+import { Page, Button, Choice, Empty } from '../../../components/ui';
 import { PeopleList, PersonForm } from '../../../features/people/people';
 import { usePermission } from '../../../hooks/use-permission';
 import { useNavigationGuard } from '../../../stores/navigation';
 export default function PeopleScreen() {
   const [editing, setEditing] = useState<Person | 'new' | null>(null),
     [active, setActive] = useState(true);
-  const canEdit = usePermission('reports.edit');
+  const canEdit = usePermission('people.manage'),
+    canView = usePermission('people.view');
   useEffect(() => {
     useNavigationGuard.getState().setDirty(!!editing);
     return () => useNavigationGuard.getState().setDirty(false);
@@ -24,7 +25,13 @@ export default function PeopleScreen() {
         ) : undefined
       }
     >
-      {editing ? (
+      {!canView ? (
+        <Empty
+          title="Acesso restrito"
+          text="Preencha os responsáveis diretamente no relatório. O cadastro geral de pessoas é reservado à administração e ao gerente."
+          icon="lock"
+        />
+      ) : editing ? (
         <PersonForm
           key={editing === 'new' ? 'new' : editing.id}
           person={editing === 'new' ? undefined : editing}

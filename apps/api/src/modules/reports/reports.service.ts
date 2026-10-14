@@ -23,6 +23,7 @@ import { assertEditable, assertFieldAccess, assertTransition } from './reports.p
 import { PdfService, type PdfProvider } from '../pdf/pdf.service';
 import { LocalStorageProvider } from '../../services/storage/local-storage-provider';
 import { env } from '../../config/env';
+import { reportScope, assertCompanyAccess, signatureScope } from '../../middlewares/access-scope';
 const reportListInclude = { company: true, project: true, reportType: true } as const;
 // The list selector changes status independently of the manually assigned number.
 const statusSelectSchema = reportSubmissionSchema.omit({ number: true });
@@ -86,6 +87,7 @@ async function saveCollections(
   points?: ReportPoint[],
   signatures?: ReportSigner[],
   drawings?: ReportDrawing[],
+  user?: CurrentUser,
 ) {
   const currentDrawings = await tx.reportDrawing.findMany({ where: { reportId } });
   const effectiveDrawings =
@@ -218,6 +220,7 @@ async function saveCollections(
   if (signatures) {
     const assets = await tx.signatureAsset.findMany({
       where: {
+        ...(user ? signatureScope(user) : {}),
         id: { in: signatures.flatMap((s) => (s.signatureAssetId ? [s.signatureAssetId] : [])) },
       },
     });
@@ -242,9 +245,10 @@ async function saveCollections(
 }
 export class ReportsService {
   constructor(private pdf: PdfProvider = new PdfService()) {}
-  async list(query: ListQuery) {
+  async list(query: ListQuery, user: CurrentUser) {
     const where: Prisma.ReportWhereInput = {
       deletedAt: null,
+      AND: [reportScope(user)],
       companyId: query.companyId,
       projectId: query.projectId,
       reportTypeId: query.reportTypeId,
@@ -280,6 +284,7 @@ export class ReportsService {
     return getReport(prisma, id);
   }
   async create(data: z.infer<typeof reportCreateSchema>, user: CurrentUser) {
+    assertCompanyAccess(user, data.companyId);
     return prisma.$transaction(async (tx) => {
       const project = await tx.project.findUnique({ where: { id: data.projectId } });
       const company = await tx.company.findUnique({ where: { id: data.companyId } });
@@ -320,7 +325,7 @@ export class ReportsService {
         },
         include: reportInclude,
       });
-      await saveCollections(tx, report.id, points, signatures, drawings);
+      await saveCollections(tx, report.id, points, signatures, drawings, user);
       await tx.auditLog.create({
         data: { userId: user.id, action: 'CREATE_REPORT', entity: 'Report', entityId: report.id },
       });
@@ -440,7 +445,7 @@ export class ReportsService {
         });
         deletedFiles.push(...media.map((m) => m.filePath));
       }
-      await saveCollections(tx, id, points, signatures, drawings);
+      await saveCollections(tx, id, points, signatures, drawings, user);
       await tx.auditLog.create({
         data: { userId: user.id, action: 'UPDATE_REPORT', entity: 'Report', entityId: id },
       });

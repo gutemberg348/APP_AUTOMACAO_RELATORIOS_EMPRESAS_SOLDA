@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma/client';
-import { permissions, rolePermissions } from '@weldcosta/shared';
+import { permissions, rolePermissions, userRoleLabels } from '@weldcosta/shared';
 config({ path: '../../.env', quiet: true });
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
@@ -13,10 +13,16 @@ async function seed() {
   for (const [code, granted] of Object.entries(rolePermissions)) {
     const role = await prisma.role.upsert({
       where: { code },
-      create: { code, name: code },
-      update: {},
+      create: { code, name: userRoleLabels[code] ?? code },
+      update: { name: userRoleLabels[code] ?? code },
     });
     const matching = await prisma.permission.findMany({ where: { code: { in: [...granted] } } });
+    await prisma.rolePermission.deleteMany({
+      where: {
+        roleId: role.id,
+        permissionId: { notIn: matching.map((permission) => permission.id) },
+      },
+    });
     for (const permission of matching)
       await prisma.rolePermission.upsert({
         where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },

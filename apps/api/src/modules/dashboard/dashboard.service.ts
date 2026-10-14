@@ -1,8 +1,11 @@
 import { prisma } from '../../prisma/client';
 import { reportInclude } from '../reports/reports.service';
+import type { CurrentUser } from '@weldcosta/shared';
+import { companyScope, projectScope, reportScope } from '../../middlewares/access-scope';
 export const dashboardService = {
-  async get(granted: string[]) {
-    const where = { deletedAt: null };
+  async get(user: CurrentUser) {
+    const granted = user.permissions;
+    const where = { deletedAt: null, ...reportScope(user) };
     const [
       totalCompanies,
       totalProjects,
@@ -15,10 +18,10 @@ export const dashboardService = {
       awaitingReview,
     ] = await prisma.$transaction([
       granted.includes('companies.view')
-        ? prisma.company.count()
+        ? prisma.company.count({ where: companyScope(user) })
         : prisma.company.count({ where: { id: '00000000-0000-0000-0000-000000000000' } }),
       granted.includes('projects.view')
-        ? prisma.project.count()
+        ? prisma.project.count({ where: projectScope(user) })
         : prisma.project.count({ where: { id: '00000000-0000-0000-0000-000000000000' } }),
       prisma.report.count({ where: { ...where, status: 'DRAFT' } }),
       prisma.report.count({ where: { ...where, status: 'IN_REVIEW' } }),

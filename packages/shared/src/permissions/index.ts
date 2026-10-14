@@ -28,6 +28,8 @@ export const permissions = [
   'roles.edit',
   'training.view',
   'training.manage',
+  'people.view',
+  'people.manage',
   'pdf.generate',
   'pdf.download',
 ] as const;
@@ -41,6 +43,10 @@ const view = [
 ] satisfies PermissionCode[];
 export const rolePermissions: Record<string, readonly PermissionCode[]> = {
   ADMIN: permissions,
+  MANAGER: permissions.filter(
+    (code) =>
+      !code.startsWith('users.') && !code.startsWith('roles.') && code !== 'training.manage',
+  ),
   REVIEWER: [
     ...view,
     'reports.edit',
@@ -49,18 +55,48 @@ export const rolePermissions: Record<string, readonly PermissionCode[]> = {
     'reports.finish',
     'pdf.generate',
   ],
-  INSPECTOR: [
+  INSPECTOR: permissions.filter(
+    (code) =>
+      !code.startsWith('users.') &&
+      !code.startsWith('roles.') &&
+      !code.startsWith('people.') &&
+      code !== 'training.manage',
+  ),
+  OPERATOR: [
     ...view,
     'reports.create',
     'reports.edit',
     'reports.edit.allFields',
     'reports.submit',
+    'reports.delete',
     'media.upload',
+    'media.delete',
     'drawing.edit',
+    'pdf.generate',
   ],
-  OPERATOR: [...view, 'reports.edit'],
   VIEWER: view,
 };
 export function hasPermission(granted: readonly string[], permission: PermissionCode) {
   return granted.includes(permission);
+}
+
+// Publishing tutorials and creating accounts always require the administrator role,
+// including when a different role has been granted those permissions in the database.
+export function hasUserPermission(
+  user: { role: { code: string }; permissions: readonly string[] },
+  permission: PermissionCode,
+) {
+  if (
+    (permission === 'training.manage' || permission === 'users.create') &&
+    user.role.code !== 'ADMIN'
+  )
+    return false;
+  return (
+    (rolePermissions[user.role.code]?.includes(permission) ?? false) &&
+    hasPermission(user.permissions, permission)
+  );
+}
+
+export function hasGlobalCompanyAccess(roleCode: string) {
+  return roleCode === 'ADMIN' || roleCode === 'MANAGER';
 }

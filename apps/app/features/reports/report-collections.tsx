@@ -37,6 +37,7 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { usePageScroll } from '../../components/page-scroll';
 import { emptyPhotoDrafts, useReportPhotoDrafts } from './report-photo-drafts';
 import { PersonForm, PersonPicker, personSigner } from '../people/people';
+import { usePermission } from '../../hooks/use-permission';
 import { SignatureField } from '../people/signature-field';
 export interface ReportFormValues {
   number: string;
@@ -675,6 +676,7 @@ export function ReportSigners({
 }) {
   const { tokens: t, styles } = useTheme();
   const currentUser = useAuth((state) => state.session!.user);
+  const canViewPeople = usePermission('people.view');
   const signers = useWatch({ control, name: 'signatures' });
   const [selecting, setSelecting] = useState<number | 'new' | null>(null);
   const [registering, setRegistering] = useState<number | 'new' | null>(null);
@@ -709,14 +711,16 @@ export function ReportSigners({
       />
       {editable && (
         <View style={{ gap: 12 }}>
-          <Button
-            title="Escolher pessoa cadastrada"
-            icon="user"
-            onPress={() => {
-              setRegistering(null);
-              setSelecting('new');
-            }}
-          />
+          {canViewPeople && (
+            <Button
+              title="Escolher pessoa cadastrada"
+              icon="user"
+              onPress={() => {
+                setRegistering(null);
+                setSelecting('new');
+              }}
+            />
+          )}
           {!fields.length && !!previousSignatures.length && (
             <Button
               title="Repetir responsáveis do último relatório"
@@ -790,7 +794,7 @@ export function ReportSigners({
       )}
       {fields.map((signer, index) => (
         <Card key={signer._formKey} style={{ backgroundColor: t.colors.soft, padding: 18 }}>
-          {editable && (
+          {editable && canViewPeople && (
             <Button
               title="Preencher com pessoa cadastrada"
               small

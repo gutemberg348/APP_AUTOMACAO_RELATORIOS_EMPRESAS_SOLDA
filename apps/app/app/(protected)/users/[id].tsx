@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { View, Text } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { userRoleLabels, userRoleDescriptions, type ManagedUser } from '@weldcosta/shared';
+import {
+  userRoleLabels,
+  userRoleDescriptions,
+  hasGlobalCompanyAccess,
+  type ManagedUser,
+} from '@weldcosta/shared';
 import { api } from '../../../services/api';
 import { usePermission } from '../../../hooks/use-permission';
 import { useTheme } from '../../../utils/theme';
@@ -99,6 +104,13 @@ export default function UserDetailScreen() {
                     {userRoleLabels[user.role.code] ?? user.role.name}
                   </Text>
                   <Text style={styles.muted}>{userRoleDescriptions[user.role.code]}</Text>
+                  <Text style={styles.label}>Empresas liberadas</Text>
+                  <Text style={styles.text}>
+                    {hasGlobalCompanyAccess(user.role.code)
+                      ? 'Todas as empresas e obras'
+                      : user.companyAccess?.map((access) => access.company.name).join(', ') ||
+                        'Nenhuma empresa liberada'}
+                  </Text>
                   <Text style={styles.label}>E-mail</Text>
                   <Text style={styles.text}>{user.email}</Text>
                   <Text style={styles.label}>Telefone</Text>

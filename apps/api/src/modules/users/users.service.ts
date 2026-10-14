@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import {
   userRoleLabels,
+  hasGlobalCompanyAccess,
   type userCreateSchema,
   type userUpdateSchema,
   type userListSchema,
@@ -21,6 +22,9 @@ const select = {
   updatedAt: true,
   deletedAt: true,
   role: { select: { id: true, code: true, name: true } },
+  companyAccess: {
+    select: { companyId: true, company: { select: { id: true, name: true, status: true } } },
+  },
 } satisfies Prisma.UserSelect;
 type Tx = Prisma.TransactionClient;
 const missing = () => new AppError(404, 'NOT_FOUND', 'Usuário não encontrado. Atualize a lista.');
@@ -56,7 +60,10 @@ async function role(tx: Tx, id: string) {
   return found;
 }
 async function current(tx: Tx, id: string, updatedAt: string, deleted = false) {
-  const user = await tx.user.findUnique({ where: { id }, include: { role: true } });
+  const user = await tx.user.findUnique({
+    where: { id },
+    include: { role: true, companyAccess: true },
+  });
   if (!user || !!user.deletedAt !== deleted) throw missing();
   if (user.updatedAt.toISOString() !== updatedAt)
     throw new AppError(
@@ -108,7 +115,8 @@ export async function createUserRecord(
   actorId: string,
   passwordHash: string,
 ) {
-  await role(tx, data.roleId);
+  const nextRole = await role(tx, data.roleId);
+  const companyIds = await allowedCompanies(tx, nextRole.code, data.companyIds ?? []);
   const user = await tx.user.create({
     data: {
       name: data.name,
@@ -116,11 +124,23 @@ export async function createUserRecord(
       phone: data.phone || null,
       roleId: data.roleId,
       passwordHash,
+      companyAccess: { create: companyIds.map((companyId) => ({ companyId })) },
     },
     select,
   });
   await audit(tx, actorId, user.id, 'CREATE_USER');
   return user;
+}
+
+async function allowedCompanies(tx: Tx, roleCode: string, ids: string[]) {
+  if (hasGlobalCompanyAccess(roleCode)) return [];
+  if (ids.length && (await tx.company.count({ where: { id: { in: ids } } })) !== ids.length)
+    throw new AppError(
+      400,
+      'INVALID_COMPANY_ACCESS',
+      'Uma empresa selecionada não existe mais. Atualize a seleção de empresas.',
+    );
+  return ids;
 }
 
 export const usersService = {
@@ -177,6 +197,14 @@ export const usersService = {
         nextRole.code !== 'ADMIN' && user.role.code === 'ADMIN',
       );
       const roleChanged = user.roleId !== nextRole.id;
+      const companyIds = await allowedCompanies(
+        tx,
+        nextRole.code,
+        data.companyIds ?? user.companyAccess.map((access) => access.companyId),
+      );
+      const accessChanged =
+        JSON.stringify([...companyIds].sort()) !==
+        JSON.stringify(user.companyAccess.map((access) => access.companyId).sort());
       const saved = await tx.user.update({
         where: { id },
         data: {
@@ -184,11 +212,12 @@ export const usersService = {
           email: data.email,
           phone: data.phone || null,
           roleId: nextRole.id,
-          ...(roleChanged ? { authVersion: { increment: 1 } } : {}),
+          companyAccess: { deleteMany: {}, create: companyIds.map((companyId) => ({ companyId })) },
+          ...(roleChanged || accessChanged ? { authVersion: { increment: 1 } } : {}),
         },
         select,
       });
-      if (roleChanged) await revoke(tx, id);
+      if (roleChanged || accessChanged) await revoke(tx, id);
       await audit(tx, actorId, id, 'UPDATE_USER');
       return saved;
     });

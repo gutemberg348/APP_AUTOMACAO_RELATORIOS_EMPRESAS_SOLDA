@@ -26,7 +26,8 @@ describe('specific schemas', () => {
   it('allows immediate status changes only with the corresponding permissions', () => {
     expect(canSetReportStatus('DRAFT', 'APPROVED', rolePermissions.ADMIN!)).toBe(true);
     expect(canSetReportStatus('APPROVED', 'DRAFT', rolePermissions.REVIEWER!)).toBe(true);
-    expect(canSetReportStatus('DRAFT', 'APPROVED', rolePermissions.INSPECTOR!)).toBe(false);
+    expect(canSetReportStatus('DRAFT', 'APPROVED', rolePermissions.INSPECTOR!)).toBe(true);
+    expect(canSetReportStatus('DRAFT', 'APPROVED', rolePermissions.OPERATOR!)).toBe(false);
     expect(canSetReportStatus('APPROVED', 'DRAFT', rolePermissions.VIEWER!)).toBe(false);
     expect(canSetReportStatus('FINISHED', 'DRAFT', rolePermissions.ADMIN!)).toBe(true);
     expect(canSetReportStatus('DRAFT', 'FINISHED', rolePermissions.ADMIN!)).toBe(false);
@@ -97,25 +98,31 @@ describe('RBAC and workflow', () => {
     ).not.toThrow();
     expect(() => assertTransition('DRAFT', 'APPROVED', [...rolePermissions.ADMIN!])).toThrow();
     expect(() =>
-      assertTransition('IN_REVIEW', 'APPROVED', [...rolePermissions.INSPECTOR!]),
+      assertTransition('IN_REVIEW', 'APPROVED', [...rolePermissions.OPERATOR!]),
     ).toThrow();
     expect(() => assertTransition('FINISHED', 'DRAFT', [...rolePermissions.ADMIN!])).toThrow();
   });
   it('locks approved and finished reports even for administrators', () => {
     expect(() => assertEditable('FINISHED', user('ADMIN'))).toThrow();
     expect(() => assertEditable('APPROVED', user('ADMIN'))).toThrow();
-    expect(() => assertEditable('IN_REVIEW', user('INSPECTOR'))).toThrow();
+    expect(() => assertEditable('IN_REVIEW', user('INSPECTOR'))).not.toThrow();
+    expect(() => assertEditable('IN_REVIEW', user('OPERATOR'))).toThrow();
   });
-  it('restricts operator edits to explicitly configured field paths', () => {
+  it('lets operators fill reports and still supports restricting configured field paths', () => {
     const previous = { title: 'A', specificData: { observation: 'old', material: 'steel' } };
     const next = { ...previous, specificData: { observation: 'new', material: 'steel' } };
-    expect(() => assertFieldAccess(previous, next, {}, user('OPERATOR'))).toThrow();
+    expect(() => assertFieldAccess(previous, next, {}, user('OPERATOR'))).not.toThrow();
+    const restricted = {
+      ...user('OPERATOR'),
+      permissions: rolePermissions.OPERATOR!.filter((code) => code !== 'reports.edit.allFields'),
+    };
+    expect(() => assertFieldAccess(previous, next, {}, restricted)).toThrow();
     expect(() =>
       assertFieldAccess(
         previous,
         next,
         { editableFieldsByRoleCode: { OPERATOR: ['specificData.observation'] } },
-        user('OPERATOR'),
+        restricted,
       ),
     ).not.toThrow();
     expect(() =>
@@ -123,7 +130,7 @@ describe('RBAC and workflow', () => {
         previous,
         { ...next, title: 'B' },
         { editableFieldsByRoleCode: { OPERATOR: ['specificData.observation'] } },
-        user('OPERATOR'),
+        restricted,
       ),
     ).toThrow();
   });

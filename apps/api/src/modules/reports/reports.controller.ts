@@ -14,6 +14,7 @@ export const reportsController = {
       res,
       await reportsService.list(
         listQuery(req, ['createdAt', 'updatedAt', 'number', 'title', 'reportDate'], reportStatuses),
+        req.user!,
       ),
     );
   },

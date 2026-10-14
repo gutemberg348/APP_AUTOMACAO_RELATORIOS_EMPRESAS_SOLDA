@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { requirePermission } from '../../middlewares/auth';
 import { projectsController as c } from './projects.controller';
+import { requireProjectAccess } from '../../middlewares/access-scope';
 export const projectsRoutes = Router();
+projectsRoutes.use('/:id', requireProjectAccess);
 projectsRoutes.get('/', requirePermission('projects.view'), c.list);
 projectsRoutes.get('/:id', requirePermission('projects.view'), c.get);
 projectsRoutes.post('/', requirePermission('projects.create'), c.create);

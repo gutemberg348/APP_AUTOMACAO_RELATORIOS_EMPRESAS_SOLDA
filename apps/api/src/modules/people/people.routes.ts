@@ -8,7 +8,7 @@ import {
   personSaveSchema,
   personLoginSchema,
   userCreateSchema,
-  hasPermission,
+  hasUserPermission,
   signatureDrawingSchema,
   signatureStrokePath,
   type PersonInput,
@@ -21,6 +21,7 @@ import { requirePermission } from '../../middlewares/auth';
 import { idParam, send } from '../../utils/http';
 import { LocalStorageProvider } from '../../services/storage/local-storage-provider';
 import { createUserRecord, userWriteTransaction } from '../users/users.service';
+import { signatureScope } from '../../middlewares/access-scope';
 
 const storage = new LocalStorageProvider(env.STORAGE_PATH);
 const upload = multer({
@@ -42,9 +43,12 @@ const personInclude = {
   },
 } satisfies Prisma.PersonInclude;
 type LoginInput = z.infer<typeof personLoginSchema>;
-async function loginHash(login: LoginInput | undefined, permissions: readonly string[]) {
+async function loginHash(
+  login: LoginInput | undefined,
+  user: Parameters<typeof hasUserPermission>[0],
+) {
   if (!login) return undefined;
-  if (!hasPermission(permissions, 'users.create'))
+  if (!hasUserPermission(user, 'users.create'))
     throw new AppError(403, 'FORBIDDEN', 'Peça ao administrador para criar o login desta pessoa.');
   return bcrypt.hash(login.password, 12);
 }
@@ -65,6 +69,7 @@ async function createLogin(
       phone: data.phone,
       roleId: role.id,
       password: login.password,
+      companyIds: login.companyIds,
     }),
     actorId,
     passwordHash,
@@ -124,14 +129,16 @@ peopleRoutes.post('/signatures/draw', write, async (req, res) => {
   send(res, await saveSignature(await sharp(Buffer.from(svg)).png().toBuffer(), req.user!.id), 201);
 });
 peopleRoutes.get('/signatures/:id', async (req, res) => {
-  const asset = await prisma.signatureAsset.findUnique({ where: { id: idParam(req) } });
+  const asset = await prisma.signatureAsset.findFirst({
+    where: { id: idParam(req), ...signatureScope(req.user!) },
+  });
   if (!asset) throw new AppError(404, 'NOT_FOUND', 'Assinatura não encontrada.');
   res
     .type('png')
     .set('Cache-Control', 'private, no-store')
     .send(await storage.get(asset.filePath));
 });
-peopleRoutes.get('/', async (req, res) => {
+peopleRoutes.get('/', requirePermission('people.view'), async (req, res) => {
   const query = z
     .object({
       search: z.string().max(200).default(''),
@@ -158,9 +165,9 @@ peopleRoutes.get('/', async (req, res) => {
   ]);
   send(res, { items, total, page: query.page, limit: 30, pages: Math.ceil(total / 30) });
 });
-peopleRoutes.post('/', write, async (req, res) => {
+peopleRoutes.post('/', requirePermission('people.manage'), async (req, res) => {
   const { login, ...data } = personSaveSchema.parse(req.body);
-  const passwordHash = await loginHash(login, req.user!.permissions);
+  const passwordHash = await loginHash(login, req.user!);
   await validateAsset(data.signatureAssetId);
   const person = await userWriteTransaction(async (tx) => {
     const userId = login
@@ -174,12 +181,12 @@ peopleRoutes.post('/', write, async (req, res) => {
   });
   send(res, person, 201);
 });
-peopleRoutes.put('/:id', write, async (req, res) => {
+peopleRoutes.put('/:id', requirePermission('people.manage'), async (req, res) => {
   const id = idParam(req);
   const { version, active, login, ...data } = personSaveSchema
     .safeExtend({ version: z.number().int().positive(), active: z.boolean() })
     .parse(req.body);
-  const passwordHash = await loginHash(login, req.user!.permissions);
+  const passwordHash = await loginHash(login, req.user!);
   await validateAsset(data.signatureAssetId);
   const person = await userWriteTransaction(async (tx) => {
     let userId: string | undefined;

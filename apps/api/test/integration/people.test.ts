@@ -82,7 +82,7 @@ it('creates an optional login atomically from the person email and returns only 
   expect(JSON.stringify(audit)).not.toContain(password);
 });
 
-it('requires user creation permission for logins while allowing ordinary person registrations', async () => {
+it('prevents operators from creating logins or editing the general person catalog', async () => {
   const email = randomUUID() + '@people-login.test.invalid';
   const header = { Authorization: 'Bearer ' + operator };
   const denied = await request(app)
@@ -101,18 +101,17 @@ it('requires user creation permission for logins while allowing ordinary person 
     .post('/people')
     .set(header)
     .send({ name: 'Pessoa sem login', role: 'OTHER' });
-  expect(normal.status).toBe(201);
-  expect(normal.body.data.user).toBeNull();
+  expect(normal.status).toBe(403);
   expect(
     (
       await request(app)
-        .put('/people/' + normal.body.data.id)
+        .put('/people/' + randomUUID())
         .set(header)
         .send({
           name: 'Pessoa sem login',
           role: 'OTHER',
           email,
-          version: normal.body.data.version,
+          version: 1,
           active: true,
           login: { password: randomUUID() },
         })
@@ -175,7 +174,7 @@ it('adds access to an existing person without partial creation on stale saves or
     role: original.role,
     email,
     active: true,
-    login: { password, roleCode: 'VIEWER' },
+    login: { password, roleCode: 'OPERATOR' },
   };
   const stale = await request(app)
     .put('/people/' + original.id)
@@ -189,7 +188,7 @@ it('adds access to an existing person without partial creation on stale saves or
     .send({ ...data, version: original.version });
   expect(saved.status).toBe(200);
   const person = saved.body.data as Person;
-  expect(person.user?.role.code).toBe('VIEWER');
+  expect(person.user?.role.code).toBe('OPERATOR');
   expect((await request(app).post('/auth/login').send({ email, password })).status).toBe(200);
   const reset = await request(app)
     .put('/people/' + person.id)

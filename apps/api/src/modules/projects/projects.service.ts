@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import { projectSchema } from '@weldcosta/shared';
+import { projectSchema, type CurrentUser } from '@weldcosta/shared';
+import { projectScope, assertCompanyAccess } from '../../middlewares/access-scope';
 import type { Prisma, RecordStatus } from '../../generated/prisma/client';
 import { prisma } from '../../prisma/client';
 import { AppError } from '../../errors/app-error';
@@ -11,10 +12,11 @@ const dates = (data: Input) => ({
   endDate: data.endDate ? new Date(data.endDate) : null,
 });
 export const projectsService = {
-  async list(query: ListQuery) {
+  async list(query: ListQuery, user: CurrentUser) {
     const where: Prisma.ProjectWhereInput = {
       companyId: query.companyId,
       status: query.status as RecordStatus | undefined,
+      AND: [projectScope(user)],
       ...(query.search
         ? {
             OR: [
@@ -35,14 +37,20 @@ export const projectsService = {
     if (!project) throw new AppError(404, 'NOT_FOUND', 'Obra não encontrada.');
     return project;
   },
-  create(data: Input, userId: string) {
+  create(data: Input, user: CurrentUser) {
+    assertCompanyAccess(user, data.companyId);
     return prisma.$transaction(async (tx) => {
       const company = await tx.company.findUnique({ where: { id: data.companyId } });
       if (!company || company.status !== 'ACTIVE')
         throw new AppError(409, 'INACTIVE_COMPANY', 'Selecione uma empresa ativa.');
       const project = await tx.project.create({ data: dates(data) });
       await tx.auditLog.create({
-        data: { userId, action: 'CREATE_PROJECT', entity: 'Project', entityId: project.id },
+        data: {
+          userId: user.id,
+          action: 'CREATE_PROJECT',
+          entity: 'Project',
+          entityId: project.id,
+        },
       });
       return project;
     });

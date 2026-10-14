@@ -5,7 +5,7 @@ import { Pressable, Text, View, Modal, ScrollView, useWindowDimensions } from 'r
 import { Redirect, Slot, usePathname, router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { CurrentUser } from '@weldcosta/shared';
+import { userRoleLabels, hasUserPermission, type CurrentUser } from '@weldcosta/shared';
 import { useAuth } from '../../stores/auth';
 import { api, jsonBody } from '../../services/api';
 import { Brand } from '../../components/brand';
@@ -28,7 +28,7 @@ const links = [
     short: 'Pessoas',
     path: '/people',
     icon: 'user',
-    permission: 'reports.view',
+    permission: 'people.view',
   },
   {
     label: 'Visão geral',
@@ -66,13 +66,6 @@ const links = [
     permission: 'training.view',
   },
 ] as const;
-const roleNames: Record<string, string> = {
-  ADMIN: 'Administrador',
-  REVIEWER: 'Revisor',
-  INSPECTOR: 'Inspetor',
-  OPERATOR: 'Operador',
-  VIEWER: 'Visualizador',
-};
 export default function ProtectedLayout() {
   const { tokens: t, styles } = useTheme();
   const { session, ready, clear, setSession } = useAuth(),
@@ -99,8 +92,17 @@ export default function ProtectedLayout() {
   }, [me.data, setSession]);
   if (!ready) return <Loading />;
   if (!session) return <Redirect href="/login" />;
-  const visibleLinks = links.filter((link) => session.user.permissions.includes(link.permission));
-  const canManageUsers = session.user.permissions.includes('users.view');
+  const operator = session.user.role.code === 'OPERATOR';
+  if (operator && !path.startsWith('/reports') && !path.startsWith('/tutorials'))
+    return <Redirect href="/reports" />;
+  const visibleLinks = links.filter(
+    (link) =>
+      hasUserPermission(session.user, link.permission) &&
+      (!operator || link.path === '/reports' || link.path === '/tutorials'),
+  );
+  const canManageUsers = hasUserPermission(session.user, 'users.view');
+  const canViewPeople = hasUserPermission(session.user, 'people.view');
+  const hasMore = canManageUsers || canViewPeople;
   const extraPaths: readonly string[] = ['/users', '/people', '/tutorials'];
   const current = links.find((link) => path.startsWith(link.path));
   const initials = session.user.name
@@ -110,7 +112,7 @@ export default function ProtectedLayout() {
     .map((part) => part[0])
     .join('')
     .toUpperCase();
-  const role = roleNames[session.user.role.code] ?? session.user.role.name;
+  const role = userRoleLabels[session.user.role.code] ?? session.user.role.name;
   const logout = async () => {
     setLeaving(true);
     try {
@@ -179,23 +181,6 @@ export default function ProtectedLayout() {
               <NavLink key={link.path} link={link} selected={path.startsWith(link.path)} />
             ))}
           </ScrollView>
-          <View
-            style={{
-              backgroundColor: t.colors.soft,
-              borderRadius: 12,
-              padding: 16,
-              gap: 8,
-              marginBottom: 22,
-            }}
-          >
-            <Icon name="shield" size={21} color={t.colors.blue} />
-            <Text style={{ fontFamily: t.fonts.bold, fontSize: 12, color: t.colors.text }}>
-              Precisão em cada etapa
-            </Text>
-            <Text style={[styles.muted, { fontSize: 11, lineHeight: 18 }]}>
-              Informações organizadas.{'\n'}Inspeções com rastreabilidade.
-            </Text>
-          </View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Abrir perfil"
@@ -300,7 +285,7 @@ export default function ProtectedLayout() {
                 (link) =>
                   link.path !== '/people' &&
                   link.path !== '/users' &&
-                  (!canManageUsers || link.path !== '/tutorials'),
+                  (!hasMore || link.path !== '/tutorials'),
               )
               .map((link) => (
                 <Pressable
@@ -345,7 +330,7 @@ export default function ProtectedLayout() {
                   </Text>
                 </Pressable>
               ))}
-            {canManageUsers && (
+            {hasMore && (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Abrir menu Mais"
@@ -462,15 +447,17 @@ export default function ProtectedLayout() {
                 }}
               />
             )}
-            <Button
-              title="Pessoas e assinaturas"
-              icon="user"
-              secondary
-              onPress={() => {
-                setProfile(false);
-                requestNavigation(() => router.push('/people'));
-              }}
-            />
+            {canViewPeople && (
+              <Button
+                title="Pessoas e assinaturas"
+                icon="user"
+                secondary
+                onPress={() => {
+                  setProfile(false);
+                  requestNavigation(() => router.push('/people'));
+                }}
+              />
+            )}
             <Button
               title="Sair do sistema"
               icon="logout"

@@ -2,17 +2,18 @@ import { z } from 'zod';
 
 export const userRoleLabels: Record<string, string> = {
   ADMIN: 'Administrador',
-  REVIEWER: 'Revisor',
+  MANAGER: 'Gerente',
   INSPECTOR: 'Inspetor',
   OPERATOR: 'Operador',
-  VIEWER: 'Visualizador',
 };
 export const userRoleDescriptions: Record<string, string> = {
   ADMIN: 'Gerencia usuários, cadastros e todas as etapas dos relatórios.',
-  REVIEWER: 'Revisa e aprova relatórios.',
-  INSPECTOR: 'Cria relatórios, preenche inspeções e adiciona fotos e desenhos.',
-  OPERATOR: 'Consulta cadastros e edita relatórios conforme as permissões.',
-  VIEWER: 'Consulta informações e baixa PDFs.',
+  MANAGER:
+    'Acessa todas as empresas e gerencia cadastros e relatórios. Usuários e publicação de tutoriais ficam com o administrador.',
+  INSPECTOR:
+    'Gerencia empresas, obras e relatórios nas empresas liberadas. Preenche responsáveis no relatório, sem acesso ao cadastro geral de pessoas ou usuários.',
+  OPERATOR:
+    'Seleciona uma empresa e uma obra liberadas para criar e preencher seus próprios relatórios.',
 };
 export interface UserRole {
   id: string;
@@ -29,6 +30,10 @@ export interface ManagedUser {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  companyAccess?: {
+    companyId: string;
+    company: { id: string; name: string; status: 'ACTIVE' | 'ARCHIVED' };
+  }[];
 }
 export const userPassword = z
   .string()
@@ -48,6 +53,11 @@ export const userProfileSchema = z
       .transform((value) => value.toLowerCase()),
     phone: z.string().trim().max(40).optional(),
     roleId: z.uuid({ error: 'Selecione o perfil de acesso.' }),
+    companyIds: z
+      .array(z.uuid())
+      .max(1000)
+      .refine((ids) => new Set(ids).size === ids.length, 'Não repita empresas na seleção.')
+      .optional(),
   })
   .strict();
 export const userCreateSchema = userProfileSchema.extend({ password: userPassword });

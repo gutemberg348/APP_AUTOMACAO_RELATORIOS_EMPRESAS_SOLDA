@@ -10,6 +10,7 @@ export interface CurrentUser {
   phone: string | null;
   role: { id: string; code: string; name: string };
   permissions: string[];
+  companyIds?: string[];
 }
 export interface AuthSession {
   accessToken: string;

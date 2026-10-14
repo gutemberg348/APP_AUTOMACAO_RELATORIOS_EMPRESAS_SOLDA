@@ -8,18 +8,22 @@ export const projectsController = {
       res,
       await projectsService.list(
         listQuery(req, ['createdAt', 'updatedAt', 'name'], recordStatuses),
+        req.user!,
       ),
     );
   },
   async byCompany(req: Request, res: Response) {
     const query = listQuery(req, ['createdAt', 'updatedAt', 'name'], recordStatuses);
-    send(res, await projectsService.list({ ...query, companyId: idParam(req, 'companyId') }));
+    send(
+      res,
+      await projectsService.list({ ...query, companyId: idParam(req, 'companyId') }, req.user!),
+    );
   },
   async get(req: Request, res: Response) {
     send(res, await projectsService.get(idParam(req)));
   },
   async create(req: Request, res: Response) {
-    send(res, await projectsService.create(projectSchema.parse(req.body), req.user!.id), 201);
+    send(res, await projectsService.create(projectSchema.parse(req.body), req.user!), 201);
   },
   async update(req: Request, res: Response) {
     send(

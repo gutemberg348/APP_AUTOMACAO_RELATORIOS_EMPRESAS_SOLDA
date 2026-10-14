@@ -5,9 +5,11 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { app } from '../../src/app';
 import { prisma } from '../../src/prisma/client';
 import { usersService } from '../../src/modules/users/users.service';
+import { env } from '../../src/config/env';
 import type { AuthSession, ManagedUser } from '@weldcosta/shared';
 
 const password = randomUUID(),
@@ -20,7 +22,7 @@ const login = async (email: string, pass = password) =>
 beforeAll(async () => {
   if (new URL(process.env.DATABASE_URL!).pathname !== '/weldcosta_test')
     throw new Error('Isolated DB required');
-  for (const code of ['ADMIN', 'VIEWER', 'OPERATOR', 'INSPECTOR'])
+  for (const code of ['ADMIN', 'MANAGER', 'VIEWER', 'OPERATOR', 'INSPECTOR', 'REVIEWER'])
     roles[code] = (await prisma.role.findUniqueOrThrow({ where: { code } })).id;
   for (const [code, save] of [
     [
@@ -58,12 +60,117 @@ it('restricts user management to granted permissions and lists only safe public 
   expect((await request(app).post('/users').set(header(viewer)).send({})).status).toBe(403);
   const response = await request(app).get('/users/roles').set(header());
   expect(response.status).toBe(200);
-  expect(response.body.data).toHaveLength(5);
+  expect(response.body.data.map((role: { code: string }) => role.code).sort()).toEqual([
+    'ADMIN',
+    'INSPECTOR',
+    'MANAGER',
+    'OPERATOR',
+  ]);
   const users = await request(app).get('/users').set(header());
   expect(users.status).toBe(200);
   expect(JSON.stringify(users.body)).not.toMatch(/passwordHash|authVersion|refreshTokens/);
   expect((await request(app).get('/users?status=unknown').set(header())).status).toBe(400);
 });
+
+it('only allows administrators to create users or manage tutorials, even with extra database permissions', async () => {
+  const grants = await prisma.permission.findMany({
+    where: { code: { in: ['users.create', 'training.manage', 'reports.edit'] } },
+  });
+  expect(grants).toHaveLength(3);
+  const person = await prisma.person.create({ data: { name: 'Pessoa sem login', role: 'OTHER' } });
+  const directory = path.join(env.STORAGE_PATH, 'tutorials');
+  const files = () => readdir(directory).catch(() => []);
+  const before = await files();
+  for (const code of ['MANAGER', 'REVIEWER', 'INSPECTOR', 'OPERATOR', 'VIEWER']) {
+    const roleId = roles[code]!;
+    const existing = await prisma.rolePermission.findMany({ where: { roleId } });
+    const additions = grants.filter(
+      (permission) => !existing.some((entry) => entry.permissionId === permission.id),
+    );
+    try {
+      await prisma.rolePermission.createMany({
+        data: additions.map((permission) => ({ roleId, permissionId: permission.id })),
+      });
+      const email = randomUUID() + '@admin-only.test.invalid';
+      await prisma.user.create({
+        data: { name: code, email, roleId, passwordHash: await bcrypt.hash(password, 4) },
+      });
+      const session = (await login(email)).body.data as AuthSession;
+      expect(session.user.permissions).not.toContain('users.create');
+      expect(session.user.permissions).not.toContain('training.manage');
+      const targetEmail = randomUUID() + '@denied.test.invalid';
+      expect(
+        (
+          await request(app)
+            .post('/users')
+            .set(header(session))
+            .send({ name: 'Não permitido', email: targetEmail, password, roleId: roles.ADMIN })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .post('/people')
+            .set(header(session))
+            .send({ name: 'Não permitido', role: 'OTHER', email: targetEmail, login: { password } })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .put('/people/' + person.id)
+            .set(header(session))
+            .send({
+              name: person.name,
+              role: person.role,
+              email: targetEmail,
+              active: true,
+              version: person.version,
+              login: { password },
+            })
+        ).status,
+      ).toBe(403);
+      expect(await prisma.user.findUnique({ where: { email: targetEmail } })).toBeNull();
+      expect(await prisma.person.count({ where: { email: targetEmail } })).toBe(0);
+      expect(
+        (await prisma.person.findUniqueOrThrow({ where: { id: person.id } })).userId,
+      ).toBeNull();
+      expect(
+        (
+          await request(app)
+            .post('/tutorials')
+            .set(header(session))
+            .field('title', 'Não permitido')
+            .attach('file', Buffer.from('not processed'), 'material.png')
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .put('/tutorials/' + randomUUID())
+            .set(header(session))
+            .field('title', 'Não permitido')
+            .field('version', '1')
+            .attach('file', Buffer.from('not processed'), 'material.png')
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .delete('/tutorials/' + randomUUID())
+            .set(header(session))
+            .send({ version: 1 })
+        ).status,
+      ).toBe(403);
+      expect((await request(app).get('/tutorials').set(header(session))).status).toBe(200);
+      expect(await files()).toEqual(before);
+    } finally {
+      await prisma.rolePermission.deleteMany({
+        where: { roleId, permissionId: { in: additions.map((permission) => permission.id) } },
+      });
+    }
+  }
+}, 30000);
 
 it('creates normalized credentials, rejects duplicates and validates passwords and field injection', async () => {
   const email = randomUUID() + '@users.test.invalid';
@@ -266,7 +373,7 @@ it('protects the current account and the last active administrator, including co
       .send({ status: 'DISABLED', updatedAt: own.updatedAt }),
     request(app)
       .put('/users/' + own.id)
-      .send({ name: own.name, email: own.email, roleId: roles.VIEWER, updatedAt: own.updatedAt }),
+      .send({ name: own.name, email: own.email, roleId: roles.OPERATOR, updatedAt: own.updatedAt }),
   ]) {
     const response = await operation.set(header());
     expect(response.status).toBe(409);

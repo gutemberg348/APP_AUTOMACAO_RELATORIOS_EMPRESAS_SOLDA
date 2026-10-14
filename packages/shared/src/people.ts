@@ -21,7 +21,8 @@ export type PersonInput = z.infer<typeof personSchema>;
 export const personLoginSchema = z
   .object({
     password: userPassword,
-    roleCode: z.enum(['ADMIN', 'REVIEWER', 'INSPECTOR', 'OPERATOR', 'VIEWER']).default('INSPECTOR'),
+    roleCode: z.enum(['ADMIN', 'MANAGER', 'INSPECTOR', 'OPERATOR']).default('INSPECTOR'),
+    companyIds: z.array(z.uuid()).max(1000).optional(),
   })
   .strict();
 export const personSaveSchema = personSchema
