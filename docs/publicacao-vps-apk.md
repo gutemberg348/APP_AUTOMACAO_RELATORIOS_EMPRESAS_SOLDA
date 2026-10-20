@@ -90,6 +90,8 @@ O Nginx da VPS substitui `X-Forwarded-For` com o IP do cliente. A API confia em 
 
 ## 3. Gerar o APK neste PC
 
+Para testar no Expo Go usando a API online, execute `npm run dev:mobile`. O comando verifica o `/health`, passa `https://api-weld.testes-techcode.shop` ao Expo e limpa o cache do Metro. Essa variável tem prioridade sobre a URL local em `apps/app/.env`, sem modificar o arquivo. O Expo usa a porta 8085; se já houver outro Expo rodando, encerre-o antes de executar o comando. Os dados cadastrados nesse modo são salvos no servidor online. Para apenas conferir a conexão sem iniciar o Expo, execute `npm run dev:mobile -- --check`. `npm run dev:app` continua usando a configuração local.
+
 Na raiz do projeto Windows, com dependências instaladas:
 
 ```powershell

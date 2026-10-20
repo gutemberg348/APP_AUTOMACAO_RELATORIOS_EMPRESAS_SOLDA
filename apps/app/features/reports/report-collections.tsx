@@ -1,4 +1,5 @@
 import { useTheme } from '../../utils/theme';
+import { reportPanelStyle } from './report-panel-style';
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, Switch, Keyboard } from 'react-native';
 import {
@@ -143,6 +144,19 @@ export function ReportPoints({
     keyName: '_formKey',
   });
   const measurement = code === 'ME';
+  const invalidPointIndexes = Object.keys(errors.points ?? {})
+    .filter((key) => /^\d+$/.test(key))
+    .join(',');
+  const previousInvalidPoints = useRef<string[]>([]);
+  useEffect(() => {
+    const indexes = invalidPointIndexes ? invalidPointIndexes.split(',') : [];
+    const hasNewErrors = indexes.some((index) => !previousInvalidPoints.current.includes(index));
+    previousInvalidPoints.current = indexes;
+    if (!hasNewErrors) return;
+    // Reveal one invalid point; the remaining errors stay signalled in their headers.
+    revealPending.current = true;
+    setExpandedPoint(Number(indexes[0]));
+  }, [invalidPointIndexes]);
   useEffect(() => {
     if (!revealPending.current) return;
     const timer = setTimeout(() => {
@@ -279,7 +293,8 @@ export function ReportPoints({
       {fields.map((point, index) => {
         const value = values[index],
           key = pointKey(value ?? point);
-        const open = expandedPoint === index || !!errors.points?.[index];
+        const open = expandedPoint === index;
+        const hasError = !!errors.points?.[index];
         const photos =
           (report?.media ?? []).filter(
             (photo) => photo.reportPointId === key && !draft.removedIds.includes(photo.id),
@@ -287,7 +302,7 @@ export function ReportPoints({
         return (
           <Card
             key={point._formKey}
-            style={{ backgroundColor: t.colors.soft, padding: 0, overflow: 'hidden' }}
+            style={[reportPanelStyle(t, open), { padding: 0, overflow: 'hidden' }]}
           >
             <Pressable
               ref={(node) => {
@@ -298,8 +313,19 @@ export function ReportPoints({
                 open ? 'Recolher ponto' : 'Abrir ponto ' + (value?.number || index + 1)
               }
               accessibilityState={{ expanded: open }}
-              onPress={() => setExpandedPoint(open ? null : index)}
-              style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}
+              aria-expanded={open}
+              onPress={() => {
+                Keyboard.dismiss();
+                if (!open) revealPending.current = true;
+                setExpandedPoint(open ? null : index);
+              }}
+              style={{
+                padding: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                backgroundColor: open ? t.colors.blueSoft : t.colors.surface,
+              }}
             >
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={[styles.text, { fontFamily: t.fonts.bold }]}>
@@ -319,18 +345,22 @@ export function ReportPoints({
               </View>
               <Badge
                 label={
-                  value?.data?.acceptable === true
-                    ? 'Aceitável'
-                    : value?.data?.acceptable === false
-                      ? 'Não aceitável'
-                      : 'Pendente'
+                  hasError
+                    ? 'Revisar campos'
+                    : value?.data?.acceptable === true
+                      ? 'Aceitável'
+                      : value?.data?.acceptable === false
+                        ? 'Não aceitável'
+                        : 'Pendente'
                 }
                 tone={
-                  value?.data?.acceptable === true
-                    ? 'green'
-                    : value?.data?.acceptable === false
-                      ? 'danger'
-                      : 'blue'
+                  hasError
+                    ? 'danger'
+                    : value?.data?.acceptable === true
+                      ? 'green'
+                      : value?.data?.acceptable === false
+                        ? 'danger'
+                        : 'blue'
                 }
                 dot={false}
               />
@@ -438,6 +468,7 @@ export function ReportPoints({
                 <PointPhotos
                   draftKey={photoDraftKey}
                   pointId={key}
+                  persistedPointId={value?.id}
                   number={value?.number || String(index + 1)}
                   reportId={report?.id}
                   media={report?.media ?? []}
@@ -652,10 +683,10 @@ export function ReportPoints({
     </View>
   );
 }
-const roles = [
+const roles: { value: ReportSigner['role']; label: string }[] = [
   { value: 'INSPECTOR', label: 'Inspetor' },
   { value: 'TECHNICAL_RESPONSIBLE', label: 'Responsável técnico' },
-  { value: 'CLIENT', label: 'Cliente' },
+  { value: 'CLIENT', label: 'Representante do cliente' },
   { value: 'REVIEWER', label: 'Revisor' },
   { value: 'OTHER', label: 'Outro' },
 ];
@@ -677,9 +708,13 @@ export function ReportSigners({
   const { tokens: t, styles } = useTheme();
   const currentUser = useAuth((state) => state.session!.user);
   const canViewPeople = usePermission('people.view');
+  const canManagePeople = usePermission('people.manage');
   const signers = useWatch({ control, name: 'signatures' });
-  const [selecting, setSelecting] = useState<number | 'new' | null>(null);
-  const [registering, setRegistering] = useState<number | 'new' | null>(null);
+  const [selecting, setSelecting] = useState<number | null>(null);
+  const [registering, setRegistering] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+  const signerViews = useRef<Record<number, View | null>>({});
+  const [revealIndex, setRevealIndex] = useState<number | null>(null);
   const registrationView = useRef<View>(null);
   const revealSigner = usePageScroll();
   useEffect(() => {
@@ -692,35 +727,55 @@ export function ReportSigners({
     name: 'signatures',
     keyName: '_formKey',
   });
+  useEffect(() => {
+    if (revealIndex === null) return;
+    const timer = setTimeout(() => {
+      revealSigner(signerViews.current[revealIndex]);
+      setRevealIndex(null);
+    }, 160);
+    return () => clearTimeout(timer);
+  }, [revealIndex, revealSigner]);
+  const addRole = (role: ReportSigner['role']) => {
+    // Reuse an empty slot instead of creating another unfilled responsibility.
+    const emptyIndex = signers.findIndex(
+      (s) =>
+        s.role === role &&
+        !s.name.trim() &&
+        !s.signatureAssetId &&
+        !s.registrationNumber?.trim() &&
+        !s.signedAt,
+    );
+    if (emptyIndex !== -1) {
+      setAdding(false);
+      setRevealIndex(emptyIndex);
+      return;
+    }
+    append({ role, name: '', registrationNumber: '' });
+    setAdding(false);
+    setRevealIndex(fields.length);
+  };
+  const roleLabel = (role?: string) =>
+    roles.find((item) => item.value === role)?.label ?? 'Responsável';
   return (
     <View style={{ gap: 16 }}>
       <PanelHeader
         title="Responsáveis"
-        subtitle="Escolha uma pessoa ou preencha agora. Confira os dados e a assinatura antes de salvar."
-        action={
-          editable ? (
-            <Button
-              title="Adicionar responsável"
-              small
-              secondary
-              icon="plus"
-              onPress={() => append({ role: 'INSPECTOR', name: '', registrationNumber: '' })}
-            />
-          ) : undefined
-        }
+        subtitle="Preencha aqui o inspetor, o responsável técnico e o representante do cliente. A mesma pessoa pode ocupar mais de uma função."
       />
       {editable && (
         <View style={{ gap: 12 }}>
-          {canViewPeople && (
-            <Button
-              title="Escolher pessoa cadastrada"
-              icon="user"
-              onPress={() => {
-                setRegistering(null);
-                setSelecting('new');
-              }}
-            />
-          )}
+          {roles
+            .slice(0, 3)
+            .filter((role) => !signers.some((s) => s.role === role.value))
+            .map((role) => (
+              <Button
+                key={role.value}
+                title={`Preencher ${role.label.toLowerCase()}`}
+                secondary
+                icon="plus"
+                onPress={() => addRole(role.value)}
+              />
+            ))}
           {!fields.length && !!previousSignatures.length && (
             <Button
               title="Repetir responsáveis do último relatório"
@@ -739,25 +794,52 @@ export function ReportSigners({
               }
             />
           )}
+          <Button
+            title="Adicionar responsável"
+            secondary
+            icon="plus"
+            onPress={() => setAdding(true)}
+          />
         </View>
       )}
+      <PickerSheet
+        visible={adding}
+        title="Qual função deseja preencher?"
+        subtitle="Escolha a função que esta pessoa terá no relatório."
+        icon="user"
+        onClose={() => setAdding(false)}
+      >
+        <View style={{ padding: 20, gap: 12 }}>
+          {roles.map((role) => (
+            <Button
+              key={role.value}
+              title={role.label}
+              secondary
+              onPress={() => addRole(role.value)}
+            />
+          ))}
+        </View>
+      </PickerSheet>
       {registering !== null && (
         <View ref={registrationView}>
           <PersonForm
             key={String(registering)}
-            initial={registering === 'new' ? undefined : signers[registering]}
+            initial={signers[registering]}
+            reportRole={signers[registering]?.role}
             onCancel={() => setRegistering(null)}
             onSaved={(person) => {
+              const target = signers[registering];
+              if (!target) return;
               const value = {
                 ...personSigner(person),
                 signedAt: person.signatureAssetId ? reportDate : '',
               };
-              if (registering === 'new') append(value);
-              else
-                update(registering, {
-                  ...value,
-                  signedAt: signers[registering]?.signedAt || value.signedAt,
-                });
+              update(registering, {
+                ...value,
+                role: target.role,
+                signedAt: signers[registering]?.signedAt || value.signedAt,
+              });
+              setRevealIndex(registering);
               setRegistering(null);
             }}
           />
@@ -765,6 +847,7 @@ export function ReportSigners({
       )}
       <PersonPicker
         visible={selecting !== null}
+        roleLabel={selecting !== null ? roleLabel(signers[selecting]?.role) : undefined}
         onClose={() => setSelecting(null)}
         onNew={() => {
           setRegistering(selecting);
@@ -775,140 +858,173 @@ export function ReportSigners({
             ...personSigner(person),
             signedAt: person.signatureAssetId ? reportDate : '',
           };
-          if (selecting === 'new') append(value);
-          else if (selecting !== null) update(selecting, value);
+          const target = selecting !== null ? signers[selecting] : undefined;
+          if (selecting !== null && target) {
+            update(selecting, { ...value, role: target.role });
+            setRevealIndex(selecting);
+          }
           setSelecting(null);
         }}
       />
       {!fields.length && <Text style={styles.muted}>Nenhum responsável informado.</Text>}
-      {editable && !signers.some((s) => s.name.trim() === currentUser.name.trim()) && (
-        <Button
-          title="Usar meu nome como inspetor"
-          small
-          secondary
-          icon="user"
-          onPress={() =>
-            append({ role: 'INSPECTOR', name: currentUser.name, registrationNumber: '' })
-          }
-        />
-      )}
       {fields.map((signer, index) => (
-        <Card key={signer._formKey} style={{ backgroundColor: t.colors.soft, padding: 18 }}>
-          {editable && canViewPeople && (
-            <Button
-              title="Preencher com pessoa cadastrada"
-              small
-              secondary
+        <View
+          key={signer._formKey}
+          ref={(node) => {
+            signerViews.current[index] = node;
+          }}
+          collapsable={false}
+        >
+          <Card style={{ backgroundColor: t.colors.soft, padding: 18 }}>
+            <PanelHeader
+              title={roleLabel(signers[index]?.role)}
+              subtitle="Nome, registro, data e assinatura desta função no relatório."
               icon="user"
-              onPress={() => {
-                setRegistering(null);
-                setSelecting(index);
-              }}
             />
-          )}
-          <FormGrid>
-            <FormCell>
-              <Controller
-                control={control}
-                name={`signatures.${index}.role`}
-                render={({ field }) => (
-                  <SelectField
-                    label="Função"
-                    value={field.value}
-                    options={roles}
-                    clearable={false}
-                    disabled={!editable}
-                    onChange={field.onChange}
-                  />
-                )}
-              />
-            </FormCell>
-            <FormCell>
-              <Controller
-                control={control}
-                name={`signatures.${index}.name`}
-                render={({ field }) => (
-                  <Field
-                    label="Nome do responsável"
-                    value={field.value}
-                    onChangeText={field.onChange}
-                    editable={editable}
-                    error={errors.signatures?.[index]?.name?.message}
-                  />
-                )}
-              />
-            </FormCell>
-            <FormCell>
-              <Controller
-                control={control}
-                name={`signatures.${index}.registrationNumber`}
-                render={({ field }) => (
-                  <Field
-                    label="Registro profissional"
-                    value={field.value ?? ''}
-                    onChangeText={field.onChange}
-                    editable={editable}
-                  />
-                )}
-              />
-            </FormCell>
-            <FormCell>
-              <Controller
-                control={control}
-                name={`signatures.${index}.signedAt`}
-                render={({ field }) => (
-                  <DateField
-                    label="Data do responsável"
-                    value={field.value ?? ''}
-                    onChangeText={field.onChange}
-                    editable={editable}
-                    error={errors.signatures?.[index]?.signedAt?.message}
-                  />
-                )}
-              />
-            </FormCell>
-          </FormGrid>
-          <Controller
-            control={control}
-            name={`signatures.${index}.signatureAssetId`}
-            render={({ field }) => (
-              <SignatureField
-                value={field.value}
-                onChange={(id) => {
-                  field.onChange(id);
-                  if (id && !signers[index]?.signedAt)
-                    setValue(`signatures.${index}.signedAt`, reportDate, { shouldDirty: true });
-                }}
-                editable={editable}
+            {editable && signers[index]?.role === 'INSPECTOR' && !signers[index]?.name.trim() && (
+              <Button
+                title="Usar meu nome como inspetor"
+                small
+                secondary
+                icon="user"
+                onPress={() =>
+                  setValue(`signatures.${index}.name`, currentUser.name, { shouldDirty: true })
+                }
               />
             )}
-          />
-          {editable && (
-            <Button
-              title="Guardar pessoa para próximos relatórios"
-              small
-              secondary
-              icon="save"
-              onPress={() => {
-                setRegistering(index);
-                setSelecting(null);
-              }}
+            {editable && signers.some((s, i) => i !== index && s.name.trim()) && (
+              <SelectField
+                label="Reutilizar responsável deste relatório"
+                value=""
+                options={signers.flatMap((s, i) =>
+                  i !== index && s.name.trim()
+                    ? [{ value: String(i), label: `${s.name} · ${roleLabel(s.role)}` }]
+                    : [],
+                )}
+                clearable={false}
+                onChange={(value) => {
+                  const source = signers[Number(value)];
+                  const target = signers[index];
+                  if (source && target) update(index, { ...source, role: target.role });
+                }}
+              />
+            )}
+            {editable && canViewPeople && (
+              <Button
+                title="Preencher com pessoa cadastrada"
+                small
+                secondary
+                icon="user"
+                onPress={() => {
+                  setRegistering(null);
+                  setSelecting(index);
+                }}
+              />
+            )}
+            <FormGrid>
+              <FormCell>
+                <Controller
+                  control={control}
+                  name={`signatures.${index}.role`}
+                  render={({ field }) => (
+                    <SelectField
+                      label="Função neste relatório"
+                      value={field.value}
+                      options={roles}
+                      clearable={false}
+                      disabled={!editable}
+                      onChange={field.onChange}
+                    />
+                  )}
+                />
+              </FormCell>
+              <FormCell>
+                <Controller
+                  control={control}
+                  name={`signatures.${index}.name`}
+                  render={({ field }) => (
+                    <Field
+                      label="Nome do responsável"
+                      value={field.value}
+                      onChangeText={field.onChange}
+                      editable={editable}
+                      error={errors.signatures?.[index]?.name?.message}
+                    />
+                  )}
+                />
+              </FormCell>
+              <FormCell>
+                <Controller
+                  control={control}
+                  name={`signatures.${index}.registrationNumber`}
+                  render={({ field }) => (
+                    <Field
+                      label="Registro profissional"
+                      value={field.value ?? ''}
+                      onChangeText={field.onChange}
+                      editable={editable}
+                    />
+                  )}
+                />
+              </FormCell>
+              <FormCell>
+                <Controller
+                  control={control}
+                  name={`signatures.${index}.signedAt`}
+                  render={({ field }) => (
+                    <DateField
+                      label="Data do responsável"
+                      value={field.value ?? ''}
+                      onChangeText={field.onChange}
+                      editable={editable}
+                      error={errors.signatures?.[index]?.signedAt?.message}
+                    />
+                  )}
+                />
+              </FormCell>
+            </FormGrid>
+            <Controller
+              control={control}
+              name={`signatures.${index}.signatureAssetId`}
+              render={({ field }) => (
+                <SignatureField
+                  value={field.value}
+                  onChange={(id) => {
+                    field.onChange(id);
+                    if (id && !signers[index]?.signedAt)
+                      setValue(`signatures.${index}.signedAt`, reportDate, { shouldDirty: true });
+                  }}
+                  editable={editable}
+                />
+              )}
             />
-          )}
-          {editable && (
-            <Button
-              small
-              variant="ghost"
-              icon="trash"
-              title="Remover responsável"
-              onPress={() => {
-                setRegistering(null);
-                setSelecting(null);
-                remove(index);
-              }}
-            />
-          )}
-        </Card>
+            {editable && canManagePeople && (
+              <Button
+                title="Guardar pessoa para próximos relatórios"
+                small
+                secondary
+                icon="save"
+                onPress={() => {
+                  setRegistering(index);
+                  setSelecting(null);
+                }}
+              />
+            )}
+            {editable && (
+              <Button
+                small
+                variant="ghost"
+                icon="trash"
+                title="Remover responsável"
+                onPress={() => {
+                  setRegistering(null);
+                  setSelecting(null);
+                  remove(index);
+                }}
+              />
+            )}
+          </Card>
+        </View>
       ))}
     </View>
   );

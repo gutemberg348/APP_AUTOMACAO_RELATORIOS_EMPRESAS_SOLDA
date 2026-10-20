@@ -1,5 +1,7 @@
 # Relatórios preenchidos pela obra e geração de PDF
 
+Atualização de fotos: a mesma imagem pode ocupar os dois espaços do **mesmo ponto**. Em outro ponto ou relatório, a seleção é bloqueada. A galeria permite escolher as duas imagens juntas. Veja [regras e verificação de fotos](verificacao/fotos-mesmo-ponto.md).
+
 ## Preenchimento e edição
 
 No cadastro/edição da obra, **Dados-base dos relatórios** reúne fábrica, proprietário, referência do projeto e os dados técnicos de cada ensaio. Cliente vem da razão social/nome da empresa; obra vem do nome do projeto; a referência usa o código/nome da obra quando não houver referência específica. Local do TH usa a localização cadastrada. Fábrica e proprietário têm campos próprios: não são deduzidos de outros nomes.

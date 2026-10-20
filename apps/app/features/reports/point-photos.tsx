@@ -14,6 +14,7 @@ import { checkReportPhoto } from './check-report-photo';
 export function PointPhotos({
   draftKey,
   pointId,
+  persistedPointId,
   number,
   reportId,
   media,
@@ -24,6 +25,7 @@ export function PointPhotos({
 }: {
   draftKey: string;
   pointId: string | null;
+  persistedPointId?: string;
   number?: string;
   reportId?: string;
   media: ReportMedia[];
@@ -60,10 +62,14 @@ export function PointPhotos({
       {!additional && (
         <Text style={[styles.muted, { fontSize: 12 }]}>
           {count}/2 fotos sugeridas · Duas imagens por linha no PDF. Você pode finalizar mesmo sem
-          fotos.
+          fotos. Escolha as duas juntas na galeria. A mesma foto pode ocupar os dois espaços deste
+          ponto.
         </Text>
       )}
       <Notice error={error} />
+      {editable && !additional && count === 0 && (
+        <Button title="Selecionar as duas fotos" icon="image" onPress={openSource} />
+      )}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {existing.map((photo, index) => (
           <View key={photo.id} style={{ flexBasis: '46%', flexGrow: 1, minWidth: 0 }}>
@@ -188,6 +194,24 @@ export function PointPhotos({
             </Pressable>
           ))}
       </View>
+      {editable && !additional && count === 1 && pending.length === 1 && (
+        <Button
+          title="Usar esta foto também ao lado"
+          small
+          secondary
+          icon="image"
+          onPress={() =>
+            update((current) => {
+              const photos = current.photos.filter((photo) => photo.pointKey === pointId);
+              if (photos.length !== 1 || existing.length) return current;
+              return {
+                ...current,
+                photos: [...current.photos, { ...photos[0]!, id: drawingId() }],
+              };
+            })
+          }
+        />
+      )}
       {!existing.length && !pending.length && (
         <Text style={styles.muted}>
           {additional
@@ -208,12 +232,19 @@ export function PointPhotos({
       )}
       <MediaSourcePicker
         visible={sourceOpen}
+        contextLabel={additional ? 'Adicionar imagens complementares' : 'Fotos do ponto ' + number}
+        maxSelections={additional ? 1 : Math.max(1, 2 - count)}
         onClose={closeSource}
         onSelect={async (asset, onProgress) => {
           if (asset.size && asset.size > 10 * 1024 * 1024) {
             throw new Error('Use uma imagem de até 10 MB.');
           }
-          const sha256 = await checkReportPhoto(asset, draftKey, onProgress);
+          const sha256 = await checkReportPhoto(
+            asset,
+            draftKey,
+            { pointId, reportId, persistedPointId },
+            onProgress,
+          );
           update((draft) => ({
             ...draft,
             error: undefined,

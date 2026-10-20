@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
+import { DrawingToolStrip } from './drawing-tool-strip';
+import { PickerSheet } from '../../components/picker-sheet';
 import { InputVisibilityContext } from '../../components/input-visibility';
 import { usePageScroll } from '../../components/page-scroll';
 import {
@@ -22,8 +24,12 @@ import {
   drawingId,
   drawingSvg,
   drawingSymbols,
+  hasDrawingStroke,
+  drawingStrokeWidth,
   hitElement,
   moveElement,
+  moveHatchCorner,
+  transformHatch,
   newDrawingData,
   nextPointNumber,
   pointKey,
@@ -56,9 +62,20 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Icon, type IconName } from '../../components/icon';
 
 type Tool =
-  'select' | 'pipe' | 'line' | 'point' | 'symbol' | 'text' | 'dimension' | 'pan' | SketchTool;
+  | 'hatch'
+  | 'select'
+  | 'pipe'
+  | 'line'
+  | 'point'
+  | 'symbol'
+  | 'text'
+  | 'annotation'
+  | 'dimension'
+  | 'pan'
+  | SketchTool;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
 const primaryTools: Tool[] = [
+  'hatch',
   'pencil',
   'straighten',
   'circle',
@@ -66,12 +83,19 @@ const primaryTools: Tool[] = [
   'pipe',
   'point',
   'text',
+  'annotation',
   'symbol',
   'dimension',
   'select',
   'pan',
 ];
 const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
+  {
+    id: 'hatch',
+    name: 'Hachura triangular',
+    icon: 'layers',
+    hint: 'Toque nos três cantos do trecho. Depois ajuste o tamanho e as linhas da hachura. Use Texto ou Cota para informar a medida real.',
+  },
   {
     id: 'pencil',
     name: 'Lápis livre',
@@ -131,6 +155,12 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     name: 'Texto',
     icon: 'text',
     hint: 'Escreva a identificação e toque no desenho para posicioná-la.',
+  },
+  {
+    id: 'annotation',
+    name: 'Anotação',
+    icon: 'pencil',
+    hint: 'Escreva uma anotação para aparecer abaixo deste desenho no PDF.',
   },
   {
     id: 'dimension',
@@ -196,6 +226,16 @@ function Numeric({
     />
   );
 }
+function RotationButtons({ value, onChange }: { value: number; onChange(angle: number): void }) {
+  const turn = (amount: number) => onChange(((value + amount + 540) % 360) - 180);
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+      <Button title="Girar 15° à esquerda" small secondary icon="undo" onPress={() => turn(-15)} />
+      <Button title="Girar 15° à direita" small secondary icon="redo" onPress={() => turn(15)} />
+      <Button title="Girar 90°" small secondary onPress={() => turn(90)} />
+    </View>
+  );
+}
 export function DrawingEditor({
   value,
   points,
@@ -223,10 +263,18 @@ export function DrawingEditor({
   const revealInline = usePageScroll();
   const lastCanvasLayout = useRef<{ expanded: boolean; width: number } | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
-  const [clearMode, setClearMode] = useState<'strokes' | 'all'>();
+  const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all'>();
+  const [entry, setEntry] = useState<'point' | 'text'>();
+  const [textPosition, setTextPosition] = useState<DrawingPosition>();
   const surface = useRef<View>(null);
   const wheelHandler = useRef<(event: WheelEvent) => void>(() => {});
   const multiTouch = useRef(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelHold = useCallback(() => {
+    clearTimeout(holdTimer.current);
+    holdTimer.current = undefined;
+  }, []);
+  useEffect(() => () => cancelHold(), [cancelHold]);
   const touchOrigin = useRef({ x: 0, y: 0 });
   const pinch = useRef<
     | {
@@ -240,6 +288,7 @@ export function DrawingEditor({
     | undefined
   >(undefined);
   const [showProperties, setShowProperties] = useState(false);
+  const [directSelection, setDirectSelection] = useState(false);
   const [stroke, setStroke] = useState<DrawingPosition[]>([]);
   const [height, setHeight] = useState(480);
   const [advanced, setAdvanced] = useState(false);
@@ -259,6 +308,12 @@ export function DrawingEditor({
     [text, setText] = useState(''),
     [dimension, setDimension] = useState('');
   const [textSize, setTextSize] = useState(20);
+  const [strokeWidth, setStrokeWidth] = useState(2.6);
+  const [selectionOpacity, setSelectionOpacity] = useState(0.5);
+  const [moveStep, setMoveStep] = useState(5);
+  const propertiesView = useRef<View>(null);
+  const [hatchCorners, setHatchCorners] = useState<DrawingPosition[]>([]);
+  const annotationField = useRef<View>(null);
   const [textRotation, setTextRotation] = useState(0);
   const [symbolScale, setSymbolScale] = useState(1);
   const [symbol, setSymbol] = useState('valve'),
@@ -278,6 +333,10 @@ export function DrawingEditor({
         view: typeof view;
         width: number;
         samples: DrawingPosition[];
+        held?: boolean;
+        corner?: number;
+        dx: number;
+        dy: number;
       }
     | undefined
   >(undefined);
@@ -294,6 +353,37 @@ export function DrawingEditor({
     drawing = value[activeIndex],
     data = drawing?.data;
   const selectedElement = data?.elements.find((e) => e.id === selected);
+  const editingSelection = !!selectedElement && (tool === 'select' || directSelection);
+  const insertedSymbol =
+    tool === 'symbol' && selectedElement?.type === 'symbol' ? selectedElement : undefined;
+  const strokeTarget =
+    selectedElement && hasDrawingStroke(selectedElement) && (editingSelection || insertedSymbol)
+      ? selectedElement
+      : undefined;
+  const currentStrokeWidth = strokeTarget ? drawingStrokeWidth(strokeTarget) : strokeWidth;
+  const showStrokeControls =
+    !!strokeTarget ||
+    (!editingSelection &&
+      [...sketchTools, 'line', 'pipe', 'dimension', 'symbol', 'hatch'].includes(tool));
+  const changeStrokeWidth = (amount: number) => {
+    const next = Math.round(Math.max(0.5, Math.min(12, currentStrokeWidth + amount)) * 10) / 10;
+    if (strokeTarget) updateElement({ ...strokeTarget, strokeWidth: next });
+    else setStrokeWidth(next);
+  };
+  const changeSymbolRotation = (angle: number) => {
+    setRotation(angle);
+    if (insertedSymbol) updateElement({ ...insertedSymbol, rotation: angle });
+  };
+  useEffect(() => {
+    cancelHold();
+    setHatchCorners([]);
+    gesture.current = undefined;
+    setDraftElement(undefined);
+    setStroke([]);
+    setTraceStart(undefined);
+    setTraceEnd(undefined);
+    setDirectSelection(false);
+  }, [activeIndex, expanded, editable, savedVersion, cancelHold]);
   const linkedPoint =
     selectedElement?.type === 'point'
       ? points.find((p) => pointKey(p) === selectedElement.reportPointId)
@@ -306,6 +396,13 @@ export function DrawingEditor({
     ),
   );
   const unplacedPoints = points.filter((point) => !markedPointKeys.has(pointKey(point)));
+  const duplicateNumber =
+    pointTarget === 'new' && newNumber?.trim()
+      ? points.find(
+          (point) =>
+            point.number.trim().toLocaleUpperCase() === newNumber.trim().toLocaleUpperCase(),
+        )
+      : undefined;
   const removeSelected = () => {
     if (!data || !selectedElement || !editable) return;
     if (selectedElement.type === 'point') {
@@ -334,11 +431,16 @@ export function DrawingEditor({
   const add = (element: DrawingElement, nextPoints = points) => {
     if (!data || data.elements.length >= 600) {
       setMessage('Limite de 600 elementos nesta prancha. Crie outra prancha para continuar.');
-      return;
+      return false;
     }
-    updateData({ ...data, elements: [...data.elements, element] }, nextPoints);
+    const next = hasDrawingStroke(element)
+      ? { ...element, strokeWidth: element.strokeWidth ?? strokeWidth }
+      : element;
+    updateData({ ...data, elements: [...data.elements, next] }, nextPoints);
     setSelected(element.id);
+    setDirectSelection(false);
     setMessage('');
+    return true;
   };
   const updateElement = (element: DrawingElement) =>
     data &&
@@ -347,17 +449,38 @@ export function DrawingEditor({
       elements: data.elements.map((e) => (e.id === element.id ? element : e)),
     });
   const selectTool = (next: Tool) => {
+    cancelHold();
+    setHatchCorners([]);
+    setDirectSelection(false);
     Keyboard.dismiss();
     setTool(next);
+    if (next === 'point' && !canEditPoints && pointTarget === 'new' && points.length) {
+      setPointTarget(pointKey(unplacedPoints[0] ?? points[0]!));
+    }
     setStart(undefined);
     setTraceStart(undefined);
     setTraceEnd(undefined);
     setStroke([]);
     gesture.current = undefined;
-    if (expanded) setShowProperties(['point', 'text', 'symbol', 'dimension'].includes(next));
+    if (next === 'text') {
+      setTextPosition(undefined);
+      setEntry('text');
+    }
+    if (expanded) setShowProperties(['annotation', 'symbol', 'dimension'].includes(next));
+    else if (next === 'annotation') revealInline(annotationField.current);
     setMessage('');
   };
   const undo = (redo = false) => {
+    cancelHold();
+    if (hatchCorners.length && !redo) {
+      setHatchCorners(hatchCorners.slice(0, -1));
+      setMessage(
+        hatchCorners.length > 1
+          ? 'Toque no canto ' + hatchCorners.length + '.'
+          : 'Toque no primeiro canto da hachura.',
+      );
+      return;
+    }
     const stack = redo ? future : history,
       last = stack.at(-1);
     if (!last) return;
@@ -382,7 +505,48 @@ export function DrawingEditor({
   };
   const place = (raw: DrawingPosition, origin = start) => {
     if (!data) return;
+    if (
+      data.elements.length >= 600 &&
+      tool !== 'select' &&
+      tool !== 'pan' &&
+      !(
+        tool === 'point' &&
+        data.elements.some(
+          (element) => element.type === 'point' && element.reportPointId === pointTarget,
+        )
+      )
+    ) {
+      setMessage('Limite de 600 elementos nesta prancha. Crie outra prancha para continuar.');
+      return;
+    }
     const p = snapPosition(raw, data.grid);
+    if (tool === 'hatch') {
+      const corners = [...hatchCorners, p];
+      if (corners.length < 3) {
+        setHatchCorners(corners);
+        setMessage(
+          'Canto ' + corners.length + ' marcado. Toque no canto ' + (corners.length + 1) + '.',
+        );
+        return;
+      }
+      const [a, b, c] = corners as [DrawingPosition, DrawingPosition, DrawingPosition];
+      if (Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) < 20) {
+        setMessage(
+          'O terceiro canto precisa ficar fora da linha dos dois primeiros. Toque em outra posição.',
+        );
+        return;
+      }
+      add({
+        id: drawingId(),
+        type: 'polyline',
+        points: [a, b, c, a],
+        hatch: { spacing: 18, angle: 90 },
+      });
+      setHatchCorners([]);
+      setDirectSelection(true);
+      if (expanded) setShowProperties(true);
+      return;
+    }
     if (tool === 'pipe' || tool === 'line' || tool === 'dimension') {
       if (!origin) {
         setStart(p);
@@ -430,8 +594,6 @@ export function DrawingEditor({
             type: 'point',
             reportPointId: pointKey(point),
             ...p,
-            labelX: Math.min(960, p.x + 40),
-            labelY: Math.max(30, p.y - 40),
           },
           [...points, point],
         );
@@ -439,7 +601,18 @@ export function DrawingEditor({
         return;
       }
       if (data.elements.some((e) => e.type === 'point' && e.reportPointId === pointTarget)) {
-        setMessage('Este ponto já está marcado nesta prancha. Selecione a marcação para movê-la.');
+        const existing = data.elements.find(
+          (e) => e.type === 'point' && e.reportPointId === pointTarget,
+        );
+        if (existing?.type !== 'point') return;
+        updateElement(moveElement(existing, p.x - existing.x, p.y - existing.y));
+        if (canEditPoints) setPointTarget('new');
+        setNewNumber(undefined);
+        setMessage(
+          canEditPoints
+            ? 'Marcação reposicionada. A numeração automática está pronta para o próximo ponto.'
+            : 'Marcação reposicionada. Use Alterar para escolher outro ponto.',
+        );
         return;
       }
       add({
@@ -447,14 +620,23 @@ export function DrawingEditor({
         type: 'point',
         reportPointId: pointTarget,
         ...p,
-        labelX: Math.min(960, p.x + 40),
-        labelY: Math.max(30, p.y - 40),
       });
+      const next = unplacedPoints.find((point) => pointKey(point) !== pointTarget);
+      setPointTarget(next ? pointKey(next) : canEditPoints ? 'new' : pointTarget);
+      setNewNumber(undefined);
+      setMessage(
+        next
+          ? `Ponto marcado. Agora toque para posicionar o ponto ${next.number}.`
+          : canEditPoints
+            ? 'Ponto marcado. Continue tocando para criar os próximos números.'
+            : 'Ponto marcado. Use Alterar para escolher outro ponto.',
+      );
       return;
     }
     if (tool === 'text') {
       if (!text.trim()) {
-        setMessage('Escreva o texto antes de posicioná-lo.');
+        setTextPosition(p);
+        setEntry('text');
         return;
       }
       add({
@@ -465,6 +647,10 @@ export function DrawingEditor({
         size: textSize,
         rotation: textRotation,
       });
+      setText('');
+      setMessage(
+        'Texto inserido. Segure sobre ele para mover. Toque em outro local para escrever novamente.',
+      );
       return;
     }
     if (tool === 'symbol')
@@ -478,6 +664,7 @@ export function DrawingEditor({
       });
   };
   const resetGesture = () => {
+    cancelHold();
     gesture.current = undefined;
     pinch.current = undefined;
     setDraftElement(undefined);
@@ -486,6 +673,7 @@ export function DrawingEditor({
     setStroke([]);
   };
   wheelHandler.current = (event) => {
+    resetGesture();
     event.preventDefault();
     const bounds = (surface.current as unknown as HTMLElement)?.getBoundingClientRect();
     if (!bounds) return;
@@ -520,6 +708,7 @@ export function DrawingEditor({
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (event) => {
+      cancelHold();
       multiTouch.current = false;
       pinch.current = undefined;
       touchOrigin.current = {
@@ -537,12 +726,51 @@ export function DrawingEditor({
         (p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 800)
       )
         return;
-      const found =
-        tool === 'select' && data
-          ? hitElement(data.elements, p, Math.max(12, (14 / width) * view.w))
-          : undefined;
+      const found = data
+        ? hitElement(data.elements, p, Math.max(12, (14 / width) * view.w), points)
+        : undefined;
       if (tool === 'select') setSelected(found?.id ?? '');
-      gesture.current = { start: p, original: found, view, width, samples: [p] };
+      const corner =
+        editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
+          ? selectedElement.points
+              .slice(0, 3)
+              .findIndex(
+                (c) => Math.hypot(c.x - p.x, c.y - p.y) < Math.max(12, (16 / width) * view.w),
+              )
+          : -1;
+      const current = {
+        start: p,
+        original: corner >= 0 ? selectedElement : tool === 'select' ? found : undefined,
+        corner: corner >= 0 ? corner : undefined,
+        view,
+        width,
+        samples: [p],
+        dx: 0,
+        dy: 0,
+        held: false,
+      };
+      gesture.current = current;
+      if (editable && found && tool !== 'select' && corner < 0) {
+        holdTimer.current = setTimeout(() => {
+          if (
+            gesture.current !== current ||
+            multiTouch.current ||
+            Math.hypot(current.dx, current.dy) > 8
+          )
+            return;
+          current.original = found;
+          current.held = true;
+          setHatchCorners([]);
+          setSelected(found.id);
+          setDirectSelection(true);
+          setStart(undefined);
+          setStroke([]);
+          setTraceStart(undefined);
+          setTraceEnd(undefined);
+          setDraftElement(found);
+          setMessage('');
+        }, 1000);
+      }
       if (editable && sketchTools.includes(tool)) {
         setStroke([p]);
         setTraceStart(p);
@@ -589,6 +817,27 @@ export function DrawingEditor({
       if (multiTouch.current) return;
       const g = gesture.current;
       if (!g) return;
+      g.dx = state.dx;
+      g.dy = state.dy;
+      if (g.corner !== undefined && g.original) {
+        setDraftElement(
+          moveHatchCorner(
+            g.original,
+            g.corner,
+            (state.dx / g.width) * g.view.w,
+            (state.dy / g.width) * g.view.w,
+          ),
+        );
+        return;
+      }
+      if (!g.held && Math.hypot(state.dx, state.dy) > 8) cancelHold();
+      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= 8) return;
+      if (g.held && g.original) {
+        setDraftElement(
+          moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
+        );
+        return;
+      }
       if (!editable || tool === 'pan' || (tool === 'select' && !g.original)) {
         setView({
           ...g.view,
@@ -622,6 +871,7 @@ export function DrawingEditor({
         );
     },
     onPanResponderRelease: (_event, state) => {
+      cancelHold();
       if (multiTouch.current || !editable) {
         multiTouch.current = false;
         resetGesture();
@@ -629,7 +879,27 @@ export function DrawingEditor({
       }
       const g = gesture.current;
       if (!g) return;
-      if (sketchTools.includes(tool)) {
+      if (g.corner !== undefined && g.original) {
+        if (Math.hypot(state.dx, state.dy) > 3)
+          updateElement(
+            moveHatchCorner(
+              g.original,
+              g.corner,
+              (state.dx / g.width) * g.view.w,
+              (state.dy / g.width) * g.view.w,
+            ),
+          );
+      } else if (g.held && g.original) {
+        if (Math.hypot(state.dx, state.dy) > 3)
+          updateElement(
+            moveElement(
+              g.original,
+              (state.dx / g.width) * g.view.w,
+              (state.dy / g.width) * g.view.w,
+            ),
+          );
+        if (expanded) setShowProperties(true);
+      } else if (sketchTools.includes(tool)) {
         const end = clampPosition({
           x: g.start.x + (state.dx / g.width) * g.view.w,
           y: g.start.y + (state.dy / g.width) * g.view.w,
@@ -693,6 +963,19 @@ export function DrawingEditor({
   const preview = useMemo(() => {
     if (!data) return '';
     const elements = data.elements.map((e) => (draftElement?.id === e.id ? draftElement : e));
+    hatchCorners.forEach((p, i) =>
+      elements.push({ id: 'hatch-corner-' + i, type: 'marker', number: String(i + 1), ...p }),
+    );
+    if (hatchCorners.length === 2)
+      elements.push({
+        id: 'hatch-edge',
+        type: 'line',
+        x1: hatchCorners[0]!.x,
+        y1: hatchCorners[0]!.y,
+        x2: hatchCorners[1]!.x,
+        y2: hatchCorners[1]!.y,
+        strokeWidth,
+      });
     if (traceStart && traceEnd) {
       if (sketchTools.includes(tool)) {
         const element = sketchElement(
@@ -702,7 +985,7 @@ export function DrawingEditor({
           stroke,
           'trace-preview',
         );
-        if (element) elements.push(element);
+        if (element && hasDrawingStroke(element)) elements.push({ ...element, strokeWidth });
       } else {
         const end =
           tool === 'dimension'
@@ -711,6 +994,7 @@ export function DrawingEditor({
         elements.push({
           id: 'trace-preview',
           type: 'line',
+          strokeWidth,
           x1: traceStart.x,
           y1: traceStart.y,
           x2: end.x,
@@ -729,6 +1013,8 @@ export function DrawingEditor({
       });
     return drawingSvg({ ...data, elements }, points, {
       selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
+      selectionFrame: editingSelection && !traceEnd,
+      selectionOpacity,
       viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
     });
   }, [
@@ -746,6 +1032,10 @@ export function DrawingEditor({
     traceEnd,
     tool,
     stroke,
+    strokeWidth,
+    hatchCorners,
+    editingSelection,
+    selectionOpacity,
   ]);
   const addSheet = () => {
     if (!editable || value.length >= 12) return;
@@ -826,11 +1116,154 @@ export function DrawingEditor({
           } as ViewStyle
         }
       />
+      {!!message && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            right: 8,
+            borderRadius: 12,
+            padding: 10,
+            backgroundColor: t.colors.surface,
+            borderWidth: 1,
+            borderColor: t.colors.blue,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={[styles.text, { flex: 1, fontSize: 12 }]}
+          >
+            {message}
+          </Text>
+          <IconButton
+            label="Fechar aviso do desenho"
+            icon="close"
+            small
+            onPress={() => setMessage('')}
+          />
+        </View>
+      )}
     </View>
+  );
+  const annotation = data ? (
+    <View ref={annotationField} collapsable={false} style={{ gap: 6 }}>
+      <Field
+        label="Anotação abaixo do desenho"
+        value={data.notes ?? ''}
+        editable={editable}
+        onChangeText={(notes) => updateData({ ...data, notes })}
+        multiline
+        maxLength={2000}
+        placeholder="Escreva uma observação para acompanhar este desenho no relatório"
+      />
+      <Text style={[styles.muted, { fontSize: 12 }]}>Aparece no PDF, abaixo deste desenho.</Text>
+    </View>
+  ) : null;
+  const pointEntry = (
+    <>
+      {pointTarget === 'new' && canEditPoints && (
+        <Field
+          label="Número do novo ponto"
+          value={newNumber ?? nextPointNumber(points)}
+          selectTextOnFocus
+          hint="Você pode mudar o número. Depois, toque no desenho para marcar."
+          onChangeText={setNewNumber}
+          maxLength={100}
+        />
+      )}
+      {!!duplicateNumber && (
+        <Text accessibilityRole="alert" style={styles.muted}>
+          O ponto {duplicateNumber.number} já existe. Ao continuar, você vai posicionar esse mesmo
+          ponto, preservando seus dados e fotos.
+        </Text>
+      )}
+      {pointTarget !== 'new' &&
+        data?.elements.some(
+          (element) => element.type === 'point' && element.reportPointId === pointTarget,
+        ) && (
+          <Text style={styles.muted}>
+            Este ponto já está neste desenho. O próximo toque muda sua posição.
+          </Text>
+        )}
+      <SelectField
+        label="Ponto a marcar"
+        value={pointTarget}
+        clearable={false}
+        options={[
+          ...(canEditPoints ? [{ value: 'new', label: 'Criar ponto numerado' }] : []),
+          ...points
+            .filter((p) => pointKey(p))
+            .map((p) => ({
+              value: pointKey(p),
+              label: 'Ponto ' + p.number,
+              description: p.label,
+            })),
+        ]}
+        onChange={setPointTarget}
+      />
+      {!!unplacedPoints.length && (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.label}>Pontos cadastrados sem marcação</Text>
+          <Text style={styles.muted}>
+            Escolha um número e toque no desenho para posicionar. As fotos e resultados serão
+            mantidos.
+          </Text>
+          <View style={[styles.row, { flexWrap: 'wrap' }]}>
+            {unplacedPoints.slice(0, 8).map((point) => (
+              <Button
+                key={pointKey(point)}
+                title={'Posicionar ' + point.number}
+                icon="pin"
+                small
+                secondary={pointTarget !== pointKey(point)}
+                onPress={() => setPointTarget(pointKey(point))}
+              />
+            ))}
+          </View>
+          {unplacedPoints.length > 8 && (
+            <Text style={styles.muted}>
+              Mais {unplacedPoints.length - 8} pontos disponíveis no campo Ponto a marcar acima.
+            </Text>
+          )}
+        </View>
+      )}
+    </>
+  );
+  const textEntry = (
+    <>
+      <Field
+        label="Texto a inserir"
+        value={text}
+        onChangeText={setText}
+        maxLength={300}
+        multiline
+        placeholder={'Ex.: TQ\nÁGUA IONIZADA'}
+      />
+      <Numeric label="Tamanho do texto" value={textSize} min={10} max={40} onChange={setTextSize} />
+      <SelectField
+        label="Inclinação do texto"
+        value={String(textRotation)}
+        clearable={false}
+        options={[
+          { value: '0', label: 'Horizontal' },
+          { value: '30', label: 'Isométrica · 30°' },
+          { value: '-30', label: 'Isométrica · −30°' },
+          { value: '90', label: 'Vertical' },
+        ]}
+        onChange={(value) => setTextRotation(Number(value))}
+      />
+    </>
   );
   const properties =
     data && editable ? (
       <View
+        ref={propertiesView}
+        collapsable={false}
         style={{
           width: expanded || mobile ? '100%' : 260,
           gap: 14,
@@ -842,89 +1275,8 @@ export function DrawingEditor({
         }}
       >
         {!expanded && <Text style={[styles.label, { fontSize: 14 }]}>Ajustes do desenho</Text>}
-        {tool === 'point' && (
-          <>
-            {!!unplacedPoints.length && (
-              <View style={{ gap: 8 }}>
-                <Text style={styles.label}>Pontos cadastrados sem marcação</Text>
-                <Text style={styles.muted}>
-                  Escolha um número e toque no desenho para posicionar. As fotos e resultados serão
-                  mantidos.
-                </Text>
-                <View style={[styles.row, { flexWrap: 'wrap' }]}>
-                  {unplacedPoints.map((point) => (
-                    <Button
-                      key={pointKey(point)}
-                      title={'Posicionar ' + point.number}
-                      icon="pin"
-                      small
-                      secondary={pointTarget !== pointKey(point)}
-                      onPress={() => setPointTarget(pointKey(point))}
-                    />
-                  ))}
-                </View>
-              </View>
-            )}
-            {pointTarget === 'new' && canEditPoints && (
-              <Field
-                label="Número do novo ponto"
-                value={newNumber ?? nextPointNumber(points)}
-                selectTextOnFocus
-                hint="Você pode mudar o número. Depois, toque no desenho para marcar."
-                onChangeText={setNewNumber}
-                maxLength={100}
-              />
-            )}
-            <SelectField
-              label="Ponto a marcar"
-              value={pointTarget}
-              clearable={false}
-              options={[
-                ...(canEditPoints ? [{ value: 'new', label: 'Criar ponto numerado' }] : []),
-                ...points
-                  .filter((p) => pointKey(p))
-                  .map((p) => ({
-                    value: pointKey(p),
-                    label: 'Ponto ' + p.number,
-                    description: p.label,
-                  })),
-              ]}
-              onChange={setPointTarget}
-            />
-          </>
-        )}
-        {tool === 'text' && (
-          <>
-            <Field
-              label="Texto a inserir"
-              value={text}
-              onChangeText={setText}
-              maxLength={300}
-              multiline
-              placeholder={'Ex.: TQ\nÁGUA IONIZADA'}
-            />
-            <Numeric
-              label="Tamanho do texto"
-              value={textSize}
-              min={10}
-              max={40}
-              onChange={setTextSize}
-            />
-            <SelectField
-              label="Inclinação do texto"
-              value={String(textRotation)}
-              clearable={false}
-              options={[
-                { value: '0', label: 'Horizontal' },
-                { value: '30', label: 'Isométrica · 30°' },
-                { value: '-30', label: 'Isométrica · −30°' },
-                { value: '90', label: 'Vertical' },
-              ]}
-              onChange={(value) => setTextRotation(Number(value))}
-            />
-          </>
-        )}
-        {tool === 'dimension' && (
+        {tool === 'annotation' && !editingSelection && annotation}
+        {tool === 'dimension' && !editingSelection && (
           <Field
             label="Medida da cota"
             value={dimension}
@@ -933,7 +1285,7 @@ export function DrawingEditor({
             maxLength={100}
           />
         )}
-        {tool === 'symbol' && (
+        {tool === 'symbol' && !editingSelection && (
           <>
             <Text style={styles.label}>Escolha o componente e toque no desenho</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -944,7 +1296,11 @@ export function DrawingEditor({
                   accessibilityLabel={'Componente ' + item.name.toLowerCase()}
                   accessibilityState={selectionState(symbol === item.code)}
                   aria-pressed={symbol === item.code}
-                  onPress={() => setSymbol(item.code)}
+                  onPress={() => {
+                    setSymbol(item.code);
+                    setSelected('');
+                    setDirectSelection(false);
+                  }}
                   style={{
                     width: '31%',
                     minWidth: 70,
@@ -985,15 +1341,44 @@ export function DrawingEditor({
             />
             <Numeric
               label="Rotação do componente"
-              value={rotation}
+              value={insertedSymbol?.rotation ?? rotation}
               min={-360}
               max={360}
-              onChange={setRotation}
+              onChange={changeSymbolRotation}
             />
+            <RotationButtons
+              value={insertedSymbol?.rotation ?? rotation}
+              onChange={changeSymbolRotation}
+            />
+            <Text style={styles.muted}>
+              {insertedSymbol
+                ? 'A rotação altera este símbolo e vale também para a próxima inserção.'
+                : 'Defina o ângulo e toque no desenho para inserir.'}
+            </Text>
           </>
         )}
-        {tool === 'select' && selectedElement ? (
+        {editingSelection && selectedElement ? (
           <>
+            <SelectField
+              label="Visibilidade durante a seleção"
+              value={String(selectionOpacity)}
+              clearable={false}
+              options={[
+                { value: '0.25', label: '25% · Mais transparente' },
+                { value: '0.5', label: '50% · Equilibrado' },
+                { value: '0.75', label: '75% · Mais visível' },
+                { value: '1', label: '100% · Sem transparência' },
+              ]}
+              onChange={(value) => setSelectionOpacity(Number(value))}
+            />
+            <Text style={[styles.muted, { fontSize: 11 }]}>
+              O contorno e a transparência ajudam na edição. O PDF mantém a aparência original.
+            </Text>
+            <Text style={styles.muted}>
+              {tool === 'select'
+                ? 'Arraste o elemento para mover.'
+                : 'Para mover de novo, segure o elemento por 1 segundo e arraste. Sua ferramenta continua ativa para desenhar em seguida.'}
+            </Text>
             <Text style={[styles.label, { color: t.colors.blue }]}>
               {selectedElement.type === 'point'
                 ? 'Ponto ' + (linkedPoint?.number ?? '')
@@ -1088,6 +1473,10 @@ export function DrawingEditor({
                   max={360}
                   onChange={(rotation) => updateElement({ ...selectedElement, rotation })}
                 />
+                <RotationButtons
+                  value={selectedElement.rotation ?? 0}
+                  onChange={(rotation) => updateElement({ ...selectedElement, rotation })}
+                />
               </>
             )}
             {selectedElement.type === 'symbol' && (
@@ -1113,6 +1502,10 @@ export function DrawingEditor({
                   max={360}
                   onChange={(rotation) => updateElement({ ...selectedElement, rotation })}
                 />
+                <RotationButtons
+                  value={selectedElement.rotation}
+                  onChange={(rotation) => updateElement({ ...selectedElement, rotation })}
+                />
               </>
             )}
             <Button
@@ -1121,6 +1514,92 @@ export function DrawingEditor({
               secondary
               onPress={() => setPrecisePosition(!precisePosition)}
             />
+            {selectedElement.type === 'polyline' && selectedElement.hatch && (
+              <View style={{ gap: 10 }}>
+                <Text style={styles.label}>Hachura triangular</Text>
+                <Text style={styles.muted}>
+                  Arraste as bolinhas dos cantos para ajustar. Segure no meio por 1 segundo para
+                  mover inteira.
+                </Text>
+                <View style={[styles.row, { gap: 6 }]}>
+                  <Button
+                    title="Diminuir triângulo"
+                    small
+                    secondary
+                    onPress={() => updateElement(transformHatch(selectedElement, 0.85, 0.85))}
+                  />
+                  <Button
+                    title="Aumentar triângulo"
+                    small
+                    secondary
+                    onPress={() => updateElement(transformHatch(selectedElement, 1.15, 1.15))}
+                  />
+                  <Button
+                    title="Girar triângulo 15°"
+                    small
+                    secondary
+                    onPress={() => updateElement(transformHatch(selectedElement, 1, 1, 15))}
+                  />
+                  <Button
+                    title="Espelhar triângulo"
+                    small
+                    secondary
+                    onPress={() => updateElement(transformHatch(selectedElement, -1, 1))}
+                  />
+                </View>
+                <Numeric
+                  label="Espaçamento das linhas"
+                  min={6}
+                  max={80}
+                  value={selectedElement.hatch.spacing}
+                  onChange={(spacing) =>
+                    updateElement({
+                      ...selectedElement,
+                      hatch: { ...selectedElement.hatch!, spacing },
+                    })
+                  }
+                />
+                <Numeric
+                  label="Inclinação da hachura (graus)"
+                  min={-180}
+                  max={180}
+                  value={selectedElement.hatch.angle}
+                  onChange={(angle) =>
+                    updateElement({
+                      ...selectedElement,
+                      hatch: { ...selectedElement.hatch!, angle },
+                    })
+                  }
+                />
+                <Text style={styles.muted}>
+                  Ajuste cada canto para acompanhar o trecho. As posições são do desenho; informe
+                  medidas reais com Texto ou Cota.
+                </Text>
+                {selectedElement.points.slice(0, 3).map((corner, i) => (
+                  <FormGrid key={i}>
+                    {(['x', 'y'] as const).map((axis) => (
+                      <FormCell key={axis}>
+                        <Numeric
+                          label={'Canto ' + (i + 1) + ' · ' + axis.toUpperCase()}
+                          max={axis === 'x' ? 1000 : 800}
+                          value={corner[axis]}
+                          onChange={(v) => {
+                            updateElement(
+                              moveHatchCorner(
+                                selectedElement,
+                                i,
+                                axis === 'x' ? v - corner.x : 0,
+                                axis === 'y' ? v - corner.y : 0,
+                              ),
+                            );
+                          }}
+                        />
+                      </FormCell>
+                    ))}
+                  </FormGrid>
+                ))}
+              </View>
+            )}
             {precisePosition && (
               <>
                 {selectedElement.type === 'line' || selectedElement.type === 'dimension' ? (
@@ -1174,29 +1653,21 @@ export function DrawingEditor({
                         updateElement(moveElement(selectedElement, 0, y - selectedElement.y))
                       }
                     />
-                    {(selectedElement.type === 'point' || selectedElement.type === 'marker') && (
-                      <>
-                        <Numeric
-                          label="Número X"
-                          value={selectedElement.labelX ?? selectedElement.x + 32}
-                          onChange={(labelX) => updateElement({ ...selectedElement, labelX })}
-                        />
-                        <Numeric
-                          label="Número Y"
-                          value={selectedElement.labelY ?? selectedElement.y - 32}
-                          max={800}
-                          onChange={(labelY) => updateElement({ ...selectedElement, labelY })}
-                        />
-                      </>
-                    )}
                   </>
                 ) : null}
+                <Numeric
+                  label="Passo do movimento"
+                  value={moveStep}
+                  min={1}
+                  max={100}
+                  onChange={setMoveStep}
+                />
                 <View style={[styles.row, { gap: 5 }]}>
                   {[
-                    { name: 'Mover à esquerda', x: -10, y: 0 },
-                    { name: 'Mover à direita', x: 10, y: 0 },
-                    { name: 'Mover acima', x: 0, y: -10 },
-                    { name: 'Mover abaixo', x: 0, y: 10 },
+                    { name: 'Mover à esquerda', x: -moveStep, y: 0 },
+                    { name: 'Mover à direita', x: moveStep, y: 0 },
+                    { name: 'Mover acima', x: 0, y: -moveStep },
+                    { name: 'Mover abaixo', x: 0, y: moveStep },
                   ].map((m) => (
                     <Button
                       key={m.name}
@@ -1253,14 +1724,33 @@ export function DrawingEditor({
     <ConfirmDialog
       visible={!!clearMode}
       title={
-        clearMode === 'strokes'
-          ? 'Limpar os traços desta prancha?'
-          : 'Limpar todo o desenho desta prancha?'
+        clearMode === 'points'
+          ? 'Limpar os pontos deste desenho?'
+          : clearMode === 'strokes'
+            ? 'Limpar os traços desta prancha?'
+            : 'Limpar todo o desenho desta prancha?'
       }
       description={
-        clearMode === 'strokes'
-          ? 'Linhas, formas, textos e símbolos serão removidos. As marcações de pontos ficam no desenho. Você pode desfazer.'
-          : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
+        clearMode === 'points'
+          ? 'Remover somente as marcações deste desenho? ' +
+            points.filter(
+              (point) =>
+                data?.elements.some(
+                  (e) => e.type === 'point' && e.reportPointId === pointKey(point),
+                ) &&
+                (pointPhotoCount(pointKey(point)) > 0 ||
+                  point.label ||
+                  point.value != null ||
+                  Object.entries(point.data ?? {}).some(([key, value]) =>
+                    key !== 'discontinuity'
+                      ? value !== '' && value != null
+                      : value !== '-' && value !== '',
+                  )),
+            ).length +
+            ' ponto(s) têm dados ou fotos preenchidos. Os cadastros, fotos e resultados abaixo serão mantidos. Você pode desfazer.'
+          : clearMode === 'strokes'
+            ? 'Linhas, formas, textos e símbolos serão removidos. As marcações de pontos ficam no desenho. Você pode desfazer.'
+            : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
       }
       confirmLabel="Confirmar limpeza"
       danger
@@ -1270,12 +1760,17 @@ export function DrawingEditor({
           updateData({
             ...data,
             elements:
-              clearMode === 'strokes'
-                ? data.elements.filter((e) => e.type === 'point' || e.type === 'marker')
-                : [],
+              clearMode === 'points'
+                ? data.elements.filter((e) => e.type !== 'point' && e.type !== 'marker')
+                : clearMode === 'strokes'
+                  ? data.elements.filter((e) => e.type === 'point' || e.type === 'marker')
+                  : [],
           });
         setClearMode(undefined);
         setSelected('');
+        setPointTarget('new');
+        setNewNumber(undefined);
+        setMessage('');
         setStart(undefined);
         resetGesture();
       }}
@@ -1336,11 +1831,104 @@ export function DrawingEditor({
   );
   const quickActions =
     editable && data ? (
-      <ScrollView
-        horizontal
-        style={{ flexGrow: 0, flexShrink: 0 }}
-        contentContainerStyle={{ gap: 6, paddingVertical: 6, paddingHorizontal: expanded ? 8 : 0 }}
-      >
+      <DrawingToolStrip label="ações do desenho">
+        {editingSelection && selectedElement && (
+          <>
+            <Button
+              title="Ajustar selecionado"
+              small
+              secondary
+              icon="tool"
+              onPress={() => {
+                Keyboard.dismiss();
+                setPrecisePosition(true);
+                if (expanded) setShowProperties(true);
+                else revealInline(propertiesView.current);
+              }}
+            />
+            <Button
+              title="Excluir selecionado"
+              small
+              secondary
+              icon="trash"
+              onPress={removeSelected}
+            />
+            {selectedElement.type !== 'point' && (
+              <Button
+                title="Duplicar"
+                small
+                secondary
+                icon="plus"
+                onPress={() => add({ ...moveElement(selectedElement, 25, 25), id: drawingId() })}
+              />
+            )}
+            <Button
+              title="Concluir ajuste"
+              small
+              secondary
+              onPress={() => {
+                setSelected('');
+                setDirectSelection(false);
+                setShowProperties(false);
+              }}
+            />
+          </>
+        )}
+        {expanded && (
+          <Button
+            title="Limpar pontos do desenho"
+            small
+            secondary
+            icon="pin"
+            disabled={!data.elements.some((e) => e.type === 'point' || e.type === 'marker')}
+            onPress={() => setClearMode('points')}
+          />
+        )}
+        {!!hatchCorners.length && (
+          <Button
+            title="Cancelar hachura"
+            small
+            secondary
+            icon="close"
+            onPress={() => {
+              setHatchCorners([]);
+              setMessage('');
+            }}
+          />
+        )}
+        {showStrokeControls && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Button
+              title="Afinar"
+              small
+              secondary
+              icon="minus"
+              disabled={currentStrokeWidth <= 0.5}
+              onPress={() => changeStrokeWidth(-0.5)}
+            />
+            <View style={{ alignItems: 'center', gap: 4, minWidth: 85 }}>
+              <Text style={[styles.muted, { fontSize: 11 }]}>
+                {strokeTarget ? 'Selecionado' : 'Novos traços'} · {currentStrokeWidth.toFixed(1)}
+              </Text>
+              <View
+                style={{
+                  width: 40,
+                  height: currentStrokeWidth,
+                  backgroundColor: t.colors.text,
+                  borderRadius: 6,
+                }}
+              />
+            </View>
+            <Button
+              title="Engrossar"
+              small
+              secondary
+              icon="plus"
+              disabled={currentStrokeWidth >= 12}
+              onPress={() => changeStrokeWidth(0.5)}
+            />
+          </View>
+        )}
         {expanded && (
           <>
             <Button
@@ -1363,27 +1951,6 @@ export function DrawingEditor({
             />
           </>
         )}
-        {tool === 'select' && selectedElement && (
-          <>
-            <Button
-              title="Excluir selecionado"
-              small
-              secondary
-              icon="trash"
-              onPress={removeSelected}
-            />
-            {selectedElement.type !== 'point' && (
-              <Button
-                title="Duplicar"
-                small
-                secondary
-                icon="plus"
-                onPress={() => add({ ...moveElement(selectedElement, 25, 25), id: drawingId() })}
-              />
-            )}
-            <Button title="Soltar seleção" small secondary onPress={() => setSelected('')} />
-          </>
-        )}
         <Button
           title="Limpar traços"
           small
@@ -1400,8 +1967,101 @@ export function DrawingEditor({
           disabled={!data.elements.length}
           onPress={() => setClearMode('all')}
         />
-      </ScrollView>
+      </DrawingToolStrip>
     ) : null;
+  const closeEntry = () => {
+    Keyboard.dismiss();
+    setEntry(undefined);
+    setTextPosition(undefined);
+  };
+  const pointToMark = points.find((point) => pointKey(point) === pointTarget);
+  const entryControls =
+    editable && !editingSelection && (tool === 'point' || tool === 'text') ? (
+      <View style={{ padding: 6, gap: 6 }}>
+        <Button
+          title={
+            tool === 'point'
+              ? `Marcar ponto ${pointToMark?.number ?? newNumber ?? nextPointNumber(points)} · Alterar`
+              : text.trim()
+                ? 'Texto pronto · Editar'
+                : 'Escrever texto'
+          }
+          small
+          secondary
+          icon={tool === 'point' ? 'pin' : 'edit'}
+          onPress={() => {
+            setTextPosition(undefined);
+            setEntry(tool === 'point' ? 'point' : 'text');
+          }}
+        />
+        {(!expanded || screen.height >= 500) && (
+          <Text style={[styles.muted, { fontSize: 11 }]}>
+            {tool === 'point'
+              ? 'Toque no desenho para marcar. O próximo número aparece automaticamente.'
+              : text.trim()
+                ? 'Toque no desenho para posicionar o texto.'
+                : 'Escreva acima ou toque primeiro no lugar onde deseja inserir.'}
+          </Text>
+        )}
+      </View>
+    ) : null;
+  const entryDialog = (
+    <PickerSheet
+      visible={!!entry}
+      title={entry === 'text' ? 'Inserir texto no desenho' : 'Escolher ponto para marcar'}
+      icon={entry === 'text' ? 'edit' : 'pin'}
+      onClose={closeEntry}
+      footer={
+        <Button
+          title={
+            entry === 'text'
+              ? textPosition
+                ? 'Inserir neste local'
+                : 'Posicionar texto no desenho'
+              : 'Marcar no desenho'
+          }
+          icon="check"
+          disabled={entry === 'text' && !text.trim()}
+          onPress={() => {
+            if (entry === 'point' && duplicateNumber) setPointTarget(pointKey(duplicateNumber));
+            if (entry === 'text' && textPosition) {
+              if (!data || data.elements.length >= 600) {
+                closeEntry();
+                setMessage('Limite de 600 elementos. Crie outro desenho para continuar.');
+                return;
+              }
+              add({
+                id: drawingId(),
+                type: 'text',
+                text: text.trim(),
+                ...textPosition,
+                size: textSize,
+                rotation: textRotation,
+              });
+              setText('');
+              setMessage('Texto inserido. Segure sobre ele para mover.');
+            }
+            closeEntry();
+            if (!expanded) revealInline(surface.current);
+          }}
+        />
+      }
+    >
+      <View style={{ padding: 16, gap: 14 }}>
+        {entry === 'text' ? textEntry : pointEntry}
+        {entry === 'point' && canEditPoints && (
+          <Button
+            title="Voltar à numeração automática"
+            secondary
+            onPress={() => {
+              setPointTarget('new');
+              setNewNumber(undefined);
+            }}
+          />
+        )}
+      </View>
+    </PickerSheet>
+  );
   const content = (
     <View style={{ gap: 18 }}>
       <PanelHeader
@@ -1409,13 +2069,15 @@ export function DrawingEditor({
         subtitle="Desenhos de inspeção com pontos vinculados às fotos e aos resultados."
         icon="layers"
         action={
-          <Button
-            title={expanded ? 'Concluir desenho' : 'Tela cheia'}
-            small
-            secondary
-            icon={expanded ? 'check' : 'expand'}
-            onPress={() => setExpanded(!expanded)}
-          />
+          !data && (
+            <Button
+              title={expanded ? 'Concluir desenho' : 'Tela cheia'}
+              small
+              secondary
+              icon={expanded ? 'check' : 'expand'}
+              onPress={() => setExpanded(!expanded)}
+            />
+          )
         }
       />
       <View style={[styles.row, { justifyContent: 'space-between' }]}>
@@ -1581,7 +2243,7 @@ export function DrawingEditor({
                   small
                   secondary
                   icon="undo"
-                  disabled={!history.length}
+                  disabled={!history.length && !hatchCorners.length}
                   onPress={() => undo()}
                 />
                 <Button
@@ -1634,9 +2296,13 @@ export function DrawingEditor({
                 </View>
               </View>
               {quickActions}
+              <Button title="Tela cheia" icon="expand" onPress={() => setExpanded(true)} />
+              {entryControls}
               {canvas}
+              {annotation}
               <Text style={[styles.muted, { fontSize: 11 }]}>
-                Dois dedos: mover e ampliar · Mouse: roda para zoom
+                Segure 1 segundo em um elemento e arraste para mover. Dois dedos: mover e ampliar ·
+                Mouse: roda para zoom
               </Text>
               <View style={[styles.row, { justifyContent: 'space-between' }]}>
                 <Text style={[styles.muted, { fontSize: 11 }]}>
@@ -1644,36 +2310,28 @@ export function DrawingEditor({
                   {data.elements.filter((e) => e.type === 'point' || e.type === 'marker').length}{' '}
                   pontos marcados
                 </Text>
+                {editable && (
+                  <Button
+                    title="Limpar pontos do desenho"
+                    small
+                    secondary
+                    icon="pin"
+                    disabled={!data.elements.some((e) => e.type === 'point' || e.type === 'marker')}
+                    onPress={() => setClearMode('points')}
+                  />
+                )}
                 <Text style={[styles.muted, { fontSize: 11 }]}>
                   Azul: pendente · Verde: aceitável · Vermelho: não aceitável
                 </Text>
               </View>
-              {!!message && (
-                <Text accessibilityRole="alert" style={[styles.text, { color: t.colors.danger }]}>
-                  {message}
-                </Text>
-              )}
             </View>
             {editable &&
-              (advanced ||
-                ['point', 'text', 'symbol', 'dimension'].includes(tool) ||
-                (tool === 'select' && !!selectedElement)) && (
+              (advanced || ['symbol', 'dimension'].includes(tool) || editingSelection) && (
                 <InputVisibilityContext.Provider value={revealInline}>
                   {properties}
                 </InputVisibilityContext.Provider>
               )}
           </View>
-          {sheetDetails && (
-            <Field
-              label="Notas do desenho"
-              value={data.notes}
-              editable={editable}
-              onChangeText={(notes) => updateData({ ...data, notes })}
-              placeholder="Identificação da linha, continuidade entre pranchas e observações de campo"
-              multiline
-              maxLength={2000}
-            />
-          )}
           <View style={{ gap: 10 }}>
             <PanelHeader
               title="Pontos neste desenho"
@@ -1769,6 +2427,7 @@ export function DrawingEditor({
           )}
         </>
       )}
+      {entryDialog}
       {clearDialog}
       {deleteDialog}
       {pointRemovalDialog}
@@ -1778,17 +2437,14 @@ export function DrawingEditor({
     <DrawingWorkspace
       title={data?.title ?? 'Desenho técnico'}
       toolName={tools.find((item) => item.id === tool)?.name ?? 'Desenho'}
-      hint={tools.find((item) => item.id === tool)?.hint ?? ''}
+      hint={
+        (tools.find((item) => item.id === tool)?.hint ?? '') +
+        ' Segure 1 segundo em qualquer elemento e arraste para mover.'
+      }
       message={message}
       tools={
         data && editable ? (
-          <ScrollView
-            horizontal
-            style={{ flexGrow: 0, flexShrink: 0 }}
-            contentContainerStyle={{ gap: 6, padding: 8 }}
-            showsHorizontalScrollIndicator
-            keyboardShouldPersistTaps="handled"
-          >
+          <DrawingToolStrip label="ferramentas">
             {tools.map((item) => (
               <Pressable
                 key={item.id}
@@ -1823,10 +2479,17 @@ export function DrawingEditor({
                 </Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </DrawingToolStrip>
         ) : null
       }
-      actions={data ? quickActions : null}
+      actions={
+        data ? (
+          <>
+            {quickActions}
+            {entryControls}
+          </>
+        ) : null
+      }
       canvas={
         data ? (
           canvas
@@ -1842,67 +2505,77 @@ export function DrawingEditor({
       onClose={() => {
         setExpanded(false);
         selectTool(tool);
+        setEntry(undefined);
         setShowProperties(false);
       }}
       dialogs={
         <>
+          {entryDialog}
           {data ? clearDialog : null}
           {deleteDialog}
           {pointRemovalDialog}
         </>
       }
       footer={
-        <ScrollView
-          horizontal
-          style={{ flexGrow: 0, flexShrink: 0, minHeight: 44 }}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ gap: 4, alignItems: 'center' }}
-          showsHorizontalScrollIndicator={false}
-        >
-          <IconButton
-            label="Desfazer"
-            icon="undo"
-            disabled={!editable || !history.length}
-            onPress={() => undo()}
-          />
-          <IconButton
-            label="Refazer"
-            icon="redo"
-            disabled={!editable || !future.length}
-            onPress={() => undo(true)}
-          />
-          <IconButton label="Diminuir zoom" icon="minus" onPress={() => zoom(1.25)} />
-          <IconButton label="Ampliar zoom" icon="plus" onPress={() => zoom(0.8)} />
-          {screen.width >= 360 ? (
-            <Button title="Ajustar" small secondary onPress={fit} style={{ minHeight: 44 }} />
-          ) : (
-            <IconButton label="Ajustar" icon="expand" onPress={fit} />
+        <View style={{ gap: 4 }}>
+          {!!data?.notes && (
+            <ScrollView style={{ maxHeight: 70 }} contentContainerStyle={{ paddingHorizontal: 8 }}>
+              <Text style={[styles.muted, { fontSize: 12 }]}>Anotação do desenho · PDF</Text>
+              <Text style={styles.text}>{data.notes}</Text>
+            </ScrollView>
           )}
-          {editable &&
-            (screen.width >= 360 ? (
-              <Button
-                title={showProperties ? 'Fechar ajustes' : 'Ajustes'}
-                small
-                secondary
-                icon="tool"
-                style={{ minHeight: 44 }}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setShowProperties(!showProperties);
-                }}
-              />
+          <ScrollView
+            horizontal
+            style={{ flexGrow: 0, flexShrink: 0, minHeight: 44 }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 4, alignItems: 'center' }}
+            showsHorizontalScrollIndicator={false}
+          >
+            <IconButton
+              label="Desfazer"
+              icon="undo"
+              disabled={!editable || (!history.length && !hatchCorners.length)}
+              onPress={() => undo()}
+            />
+            <IconButton
+              label="Refazer"
+              icon="redo"
+              disabled={!editable || !future.length}
+              onPress={() => undo(true)}
+            />
+            <IconButton label="Diminuir zoom" icon="minus" onPress={() => zoom(1.25)} />
+            <IconButton label="Ampliar zoom" icon="plus" onPress={() => zoom(0.8)} />
+            {screen.width >= 360 ? (
+              <Button title="Ajustar" small secondary onPress={fit} style={{ minHeight: 44 }} />
             ) : (
-              <IconButton
-                label={showProperties ? 'Fechar ajustes' : 'Ajustes'}
-                icon="tool"
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setShowProperties(!showProperties);
-                }}
-              />
-            ))}
-          {start && <Button title="Concluir traçado" small onPress={() => setStart(undefined)} />}
-        </ScrollView>
+              <IconButton label="Ajustar" icon="expand" onPress={fit} />
+            )}
+            {editable &&
+              (screen.width >= 360 ? (
+                <Button
+                  title={showProperties ? 'Fechar ajustes' : 'Ajustes'}
+                  small
+                  secondary
+                  icon="tool"
+                  style={{ minHeight: 44 }}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowProperties(!showProperties);
+                  }}
+                />
+              ) : (
+                <IconButton
+                  label={showProperties ? 'Fechar ajustes' : 'Ajustes'}
+                  icon="tool"
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowProperties(!showProperties);
+                  }}
+                />
+              ))}
+            {start && <Button title="Concluir traçado" small onPress={() => setStart(undefined)} />}
+          </ScrollView>
+        </View>
       }
     />
   ) : (

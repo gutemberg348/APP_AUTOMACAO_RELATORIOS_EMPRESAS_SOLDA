@@ -17,6 +17,13 @@ import { PickerSheet } from '../../components/picker-sheet';
 
 const links = [
   {
+    label: 'Visão geral',
+    short: 'Início',
+    path: '/dashboard',
+    icon: 'dashboard',
+    permission: 'reports.view',
+  },
+  {
     label: 'Usuários',
     short: 'Usuários',
     path: '/users',
@@ -29,13 +36,6 @@ const links = [
     path: '/people',
     icon: 'user',
     permission: 'people.view',
-  },
-  {
-    label: 'Visão geral',
-    short: 'Início',
-    path: '/dashboard',
-    icon: 'dashboard',
-    permission: 'reports.view',
   },
   {
     label: 'Empresas',
@@ -93,12 +93,20 @@ export default function ProtectedLayout() {
   if (!ready) return <Loading />;
   if (!session) return <Redirect href="/login" />;
   const operator = session.user.role.code === 'OPERATOR';
-  if (operator && !path.startsWith('/reports') && !path.startsWith('/tutorials'))
-    return <Redirect href="/reports" />;
+  if (
+    operator &&
+    path !== '/dashboard' &&
+    !path.startsWith('/reports') &&
+    !path.startsWith('/tutorials')
+  )
+    return <Redirect href="/dashboard" />;
   const visibleLinks = links.filter(
     (link) =>
       hasUserPermission(session.user, link.permission) &&
-      (!operator || link.path === '/reports' || link.path === '/tutorials'),
+      (!operator ||
+        link.path === '/dashboard' ||
+        link.path === '/reports' ||
+        link.path === '/tutorials'),
   );
   const canManageUsers = hasUserPermission(session.user, 'users.view');
   const canViewPeople = hasUserPermission(session.user, 'people.view');

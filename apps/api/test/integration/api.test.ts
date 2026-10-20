@@ -52,6 +52,90 @@ async function createFixtureCompany(data: Parameters<typeof prisma.company.creat
 }
 const auth = (role = 'ADMIN') => ({ Authorization: `Bearer ${sessions[role]!.accessToken}` });
 describe('REST with PostgreSQL', () => {
+  it('allows both photo slots on one point, rejects cross-point reuse and makes upload retries idempotent', async () => {
+    const company = await createFixtureCompany({ data: { name: 'Photo reuse QA' } });
+    const project = await prisma.project.create({
+      data: { name: 'Photo reuse work', companyId: company.id },
+    });
+    const create = () =>
+      prisma.report.create({
+        data: {
+          companyId: company.id,
+          projectId: project.id,
+          reportTypeId: typeId,
+          createdById: sessions.ADMIN!.user.id,
+          title: 'Photo reuse',
+          points: {
+            create: [
+              { number: '1', type: 'WELD' },
+              { number: '2', type: 'WELD' },
+            ],
+          },
+        },
+        include: { points: true },
+      });
+    const first = await create(),
+      second = await create();
+    const bytes = await sharp({
+      create: { width: 17, height: 19, channels: 3, background: '#aabbcc' },
+    })
+      .png()
+      .toBuffer();
+    const upload = (
+      reportId: string,
+      pointId: string,
+      version: number,
+      key: string,
+      image = bytes,
+    ) =>
+      request(app)
+        .post(`/reports/${reportId}/media`)
+        .set(auth())
+        .field('version', String(version))
+        .field('reportPointId', pointId)
+        .field('clientUploadId', key)
+        .attach('file', image, 'renamed.png');
+    const one = await upload(first.id, first.points[0]!.id, 1, 'slot-one');
+    expect(one.status).toBe(201);
+    const retry = await upload(first.id, first.points[0]!.id, 1, 'slot-one');
+    expect(retry.status).toBe(201);
+    expect(retry.body.data.id).toBe(one.body.data.id);
+    expect(await prisma.reportMedia.count({ where: { reportId: first.id } })).toBe(1);
+    const check = (pointId: string) =>
+      request(app)
+        .post('/reports/media/check')
+        .set(auth())
+        .field('reportId', first.id)
+        .field('reportPointId', pointId)
+        .attach('file', bytes, 'check.png');
+    expect((await check(first.points[0]!.id)).status).toBe(200);
+    expect((await check(first.points[1]!.id)).status).toBe(409);
+    const two = await upload(first.id, first.points[0]!.id, 2, 'slot-two');
+    expect(two.status).toBe(201);
+    expect(await prisma.reportMedia.count({ where: { reportId: first.id } })).toBe(2);
+    expect((await upload(first.id, first.points[1]!.id, 3, 'other-point')).status).toBe(409);
+    expect((await upload(second.id, second.points[0]!.id, 1, 'other-report')).status).toBe(409);
+    expect(
+      (
+        await request(app)
+          .patch(`/reports/${first.id}/media/${one.body.data.id}`)
+          .set(auth())
+          .send({
+            version: 3,
+            caption: '',
+            sectionKey: 'photos',
+            reportPointId: first.points[1]!.id,
+          })
+      ).status,
+    ).toBe(409);
+    // Different reports cannot race to claim the same photo for different points.
+    const concurrentBytes = await sharp(bytes).negate().png().toBuffer();
+    const results = await Promise.all([
+      upload(first.id, first.points[1]!.id, 3, 'race-a', concurrentBytes),
+      upload(second.id, second.points[0]!.id, 1, 'race-b', concurrentBytes),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+  });
   it('limits login attempts per client IP behind the production proxy', async () => {
     expect(app.get('trust proxy')).toBe(1);
     for (let index = 0; index < 20; index++) {

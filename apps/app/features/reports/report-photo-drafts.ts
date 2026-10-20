@@ -116,6 +116,7 @@ export async function saveReportPhotos(
       progress('Preparando foto ' + (completed + 1) + ' de ' + total + '…', detail);
       await appendUploadFile(form, photo.asset, 10 * 1024 * 1024);
       form.append('version', String(current.version));
+      form.append('clientUploadId', photo.id);
       form.append('sectionKey', 'photos');
       if (photo.pointKey) form.append('reportPointId', photo.pointKey);
       form.append('caption', photo.caption);

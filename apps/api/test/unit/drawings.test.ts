@@ -1,17 +1,167 @@
 import { describe, it, expect } from 'vitest';
+import { render as renderEvs } from '../../src/modules/pdf/templates/reports/evs';
+import { drawings as renderReferenceDrawings } from '../../src/modules/pdf/templates/reports/reference-layout';
+import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
 import {
   drawingDataSchema,
   drawingSvg,
+  drawingPointLabel,
   newDrawingData,
   nextPointNumber,
   snapPosition,
   constrainPosition,
   hitElement,
   moveElement,
+  moveHatchCorner,
+  transformHatch,
+  triangleHatchSegments,
   type DrawingElement,
   removePointFromDrawings,
 } from '@weldcosta/shared';
 describe('Technical drawing geometry and safe rendering', () => {
+  it('keeps selection transparency and moving outlines out of saved drawings and PDFs', () => {
+    const elements: DrawingElement[] = [
+      { id: 'line', type: 'line', x1: 100, y1: 100, x2: 250, y2: 150 },
+      { id: 'text', type: 'text', x: 300, y: 200, text: 'TQ\nÁGUA', size: 24, rotation: 30 },
+      { id: 'symbol', type: 'symbol', x: 400, y: 300, symbolCode: 'valve', scale: 2, rotation: 90 },
+      { id: 'point', type: 'point', reportPointId: 'p1', x: 950, y: 400 },
+      { id: 'marker', type: 'marker', number: '99', x: 300, y: 450 },
+      {
+        id: 'dim',
+        type: 'dimension',
+        x1: 200,
+        y1: 500,
+        x2: 400,
+        y2: 500,
+        text: '200 mm',
+        offset: 35,
+      },
+      {
+        id: 'shape',
+        type: 'polyline',
+        points: [
+          { x: 500, y: 100 },
+          { x: 650, y: 100 },
+          { x: 600, y: 300 },
+          { x: 500, y: 100 },
+        ],
+        hatch: { spacing: 18, angle: 90 },
+      },
+    ];
+    for (const element of elements) {
+      const data = { ...newDrawingData(), elements: [element] };
+      const original = JSON.stringify(data);
+      const points = [{ id: 'p1', number: '12345' }];
+      const normal = drawingSvg(data, points);
+      const selected = drawingSvg(data, points, {
+        selectedId: element.id,
+        selectionFrame: true,
+        selectionOpacity: 0.25,
+      });
+      expect(selected).toContain('<g opacity="0.25">');
+      expect(selected).toContain('data-selection-frame="true"');
+      expect(selected).not.toContain('NaN');
+      expect(selected).not.toContain('Infinity');
+      const moved = drawingSvg({ ...data, elements: [moveElement(element, -20, 10)] }, points, {
+        selectedId: element.id,
+        selectionFrame: true,
+      });
+      expect(moved).not.toEqual(selected);
+      expect(JSON.stringify(data)).toBe(original);
+      expect(drawingSvg(data, points)).toBe(normal);
+      expect(normal).not.toContain('data-selection-frame');
+      expect(normal).not.toContain('<g opacity=');
+    }
+  });
+  it('clips triangular hatching, resizes and rotates it while preserving closure and PDF data', () => {
+    const triangle: DrawingElement = {
+      id: 'h',
+      type: 'polyline',
+      points: [
+        { x: 100, y: 100 },
+        { x: 400, y: 100 },
+        { x: 100, y: 400 },
+        { x: 100, y: 100 },
+      ],
+      hatch: { spacing: 20, angle: 90 },
+      strokeWidth: 4,
+    };
+    const segments = triangleHatchSegments(triangle.points, 20, 90);
+    expect(segments.length).toBeGreaterThan(5);
+    for (const { a, b } of segments)
+      for (const p of [a, b]) {
+        expect(p.x).toBeGreaterThanOrEqual(99.999);
+        expect(p.y).toBeGreaterThanOrEqual(99.999);
+        expect(p.x + p.y).toBeLessThanOrEqual(500.001);
+      }
+    const changed = moveHatchCorner(triangle, 0, -50, 20);
+    expect(changed).toMatchObject({
+      points: [
+        { x: 50, y: 120 },
+        { x: 400, y: 100 },
+        { x: 100, y: 400 },
+        { x: 50, y: 120 },
+      ],
+    });
+    expect(moveHatchCorner(triangle, 0, 150, 150)).toEqual(triangle); // Collapsed triangle rejected.
+    for (const e of [
+      changed,
+      transformHatch(triangle, 1.5, 0.7, 30),
+      transformHatch(triangle, -1, 1),
+    ]) {
+      const data = drawingDataSchema.parse(
+        JSON.parse(JSON.stringify({ ...newDrawingData(), grid: 'none', elements: [e] })),
+      );
+      const shape = data.elements[0];
+      expect(shape?.type).toBe('polyline');
+      if (shape?.type === 'polyline') expect(shape.points[0]).toEqual(shape.points[3]);
+      const svg = drawingSvg(data, []);
+      expect(svg).toContain('<polyline');
+      expect(svg).toContain('<line');
+      expect(svg).not.toContain('NaN');
+      expect(svg).not.toContain('<pattern');
+      expect(hitElement([triangle], { x: 160, y: 160 })?.id).toBe('h');
+    }
+    expect(
+      drawingDataSchema.safeParse({
+        ...newDrawingData(),
+        elements: [{ ...triangle, points: triangle.points.slice(0, 3) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      drawingDataSchema.safeParse({
+        ...newDrawingData(),
+        elements: [{ ...triangle, hatch: { spacing: 0, angle: 90 } }],
+      }).success,
+    ).toBe(false);
+  });
+  it('prints each annotation below its own drawing in the report, escaping user text', () => {
+    const report = {
+      number: 'QA-01',
+      reportDate: new Date('2026-10-18'),
+      title: 'Inspection',
+      specificData: {},
+      project: { name: 'Test' },
+      reportType: { name: 'EVS' },
+      points: [],
+      signatures: [],
+      media: [],
+      drawings: [
+        { data: { ...newDrawingData(), title: 'Drawing A', notes: 'NOTE_A <script> & test' } },
+        { data: { ...newDrawingData(), title: 'Drawing B', notes: 'NOTE_B' } },
+      ],
+    } as unknown as PdfReport;
+    for (const render of [renderEvs, renderReferenceDrawings]) {
+      const html = render(report, new Map());
+      const sheets = html.split('<article').filter((part) => part.includes('class="evs-drawing"'));
+      expect(sheets).toHaveLength(2);
+      expect(sheets[0]).toContain('NOTE_A &lt;script&gt; &amp; test');
+      expect(sheets[0]).not.toContain('NOTE_B');
+      expect(sheets[1]).toContain('NOTE_B');
+      expect(sheets[1]).not.toContain('NOTE_A');
+      expect(sheets[0]!.indexOf('NOTE_A')).toBeGreaterThan(sheets[0]!.indexOf('</svg>'));
+    }
+  });
   it('keeps an independent numbered marker when removing a point and preserves its geometry in PDF', () => {
     const point = { id: 'point-01', number: '01', data: { acceptable: true } };
     const drawings = [
@@ -47,7 +197,7 @@ describe('Technical drawing geometry and safe rendering', () => {
     const svg = drawingSvg(data, []);
     expect(svg).toContain('>01</text>');
     expect(svg).toContain('#16725B');
-    expect(hitElement(data.elements, { x: 240, y: 210 })?.id).toBe('mark');
+    expect(hitElement(data.elements, { x: 220, y: 250 })?.id).toBe('mark');
     expect(moveElement(data.elements[1]!, 10, 20)).toMatchObject({
       x: 210,
       y: 270,
@@ -64,6 +214,78 @@ describe('Technical drawing geometry and safe rendering', () => {
     const angle = Math.abs((Math.atan2(end.y - a.y, end.x - a.x) * 180) / Math.PI);
     expect([30, 90, 150].some((n) => Math.abs(angle - n) < 0.001)).toBe(true);
     expect(snapPosition({ x: 103, y: 196 }, 'orthogonal')).toEqual({ x: 100, y: 200 });
+  });
+  it('renders both linked and independent points as only a dot and adjacent number, including legacy labels', () => {
+    const data = drawingDataSchema.parse({
+      ...newDrawingData(),
+      grid: 'none',
+      elements: [
+        { id: 'p', type: 'point', reportPointId: 'key', x: 100, y: 200, labelX: 800, labelY: 600 },
+        { id: 'm', type: 'marker', number: '42', x: 995, y: 795 },
+      ],
+    });
+    const svg = drawingSvg(data, [{ id: 'key', number: '01' }]);
+    expect(svg).not.toContain('<path');
+    expect(svg.match(/<rect/g)).toHaveLength(1); // Only the white sheet, no label boxes.
+    expect(svg).toContain('<text x="112" y="206" text-anchor="start"');
+    expect(svg).toContain('<text x="983" y="796" text-anchor="end"');
+    expect(svg).toContain('>01</text>');
+    expect(svg).toContain('>42</text>');
+    expect(drawingPointLabel({ x: 5, y: 0 }, '01').y).toBe(18);
+    expect(hitElement(data.elements, { x: 800, y: 600 })).toBeUndefined();
+    expect(hitElement(data.elements, { x: 970, y: 790 })?.id).toBe('m');
+  });
+  it('persists stroke widths through parsing and moving, without changing the preview thickness on selection', () => {
+    const data = drawingDataSchema.parse({
+      ...newDrawingData(),
+      grid: 'none',
+      elements: [
+        { id: 'l', type: 'line', x1: 50, y1: 50, x2: 200, y2: 200, strokeWidth: 8 },
+        {
+          id: 'p',
+          type: 'polyline',
+          points: [
+            { x: 20, y: 40 },
+            { x: 80, y: 90 },
+          ],
+          strokeWidth: 0.5,
+        },
+        {
+          id: 's',
+          type: 'symbol',
+          symbolCode: 'valve',
+          x: 400,
+          y: 400,
+          rotation: 0,
+          strokeWidth: 6,
+        },
+        {
+          id: 'd',
+          type: 'dimension',
+          x1: 50,
+          y1: 500,
+          x2: 200,
+          y2: 500,
+          text: '100 mm',
+          strokeWidth: 3,
+        },
+        { id: 'old', type: 'line', x1: 50, y1: 600, x2: 200, y2: 600 },
+      ],
+    });
+    const restored = drawingDataSchema.parse(JSON.parse(JSON.stringify(data)));
+    expect(moveElement(restored.elements[0]!, 10, 20)).toMatchObject({ strokeWidth: 8 });
+    for (const selectedId of [undefined, 'l']) {
+      const svg = drawingSvg(restored, [], { selectedId });
+      for (const width of [8, 0.5, 6, 3, 2.6]) expect(svg).toContain(`stroke-width="${width}"`);
+    }
+    for (const width of [0, -1, 13, Infinity]) {
+      expect(
+        drawingDataSchema.safeParse({
+          ...data,
+          elements: [{ ...data.elements[0], strokeWidth: width }],
+        }).success,
+      ).toBe(false);
+    }
   });
   it('moves geometry without distorting it at the sheet boundary and selects by distance', () => {
     const line: DrawingElement = { id: 'l', type: 'line', x1: 100, y1: 100, x2: 300, y2: 200 };

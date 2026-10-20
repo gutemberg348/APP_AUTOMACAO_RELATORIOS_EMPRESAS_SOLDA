@@ -40,13 +40,22 @@ export const drawingSymbols = [
   },
 ] as const;
 const line = { x1: coord, y1: xy.y, x2: coord, y2: xy.y };
+const strokeWidth = z.number().finite().min(0.5).max(12).optional();
 export const drawingElementSchema = z.discriminatedUnion('type', [
-  z.object({ id, type: z.literal('line'), ...line }).strict(),
+  z.object({ id, type: z.literal('line'), ...line, strokeWidth }).strict(),
   z
     .object({
       id,
       type: z.literal('polyline'),
+      strokeWidth,
       points: z.array(z.object(xy).strict()).min(2).max(300),
+      hatch: z
+        .object({
+          spacing: z.number().finite().min(6).max(80),
+          angle: z.number().finite().min(-180).max(180),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -84,6 +93,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
     .object({
       id,
       type: z.literal('symbol'),
+      strokeWidth,
       symbolCode: z.enum(drawingSymbols.map((symbol) => symbol.code)),
       ...xy,
       rotation: z.number().finite().min(-360).max(360),
@@ -94,6 +104,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
     .object({
       id,
       type: z.literal('dimension'),
+      strokeWidth,
       ...line,
       text: z.string().min(1).max(100),
       offset: z.number().min(-150).max(150).default(35),
@@ -111,6 +122,20 @@ export const drawingDataSchema = z
   })
   .strict()
   .superRefine((data, ctx) => {
+    for (const [index, e] of data.elements.entries()) {
+      if (
+        e.type === 'polyline' &&
+        e.hatch &&
+        (e.points.length !== 4 ||
+          e.points[0]!.x !== e.points[3]!.x ||
+          e.points[0]!.y !== e.points[3]!.y)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          path: ['elements', index, 'hatch'],
+          message: 'Feche os três cantos da hachura triangular.',
+        });
+    }
     if (new Set(data.elements.map((e) => e.id)).size !== data.elements.length)
       ctx.addIssue({
         code: 'custom',
@@ -129,6 +154,27 @@ export const reportDrawingSchema = z
   .object({ id: z.uuid().optional(), data: drawingDataSchema })
   .strict();
 export type DrawingElement = z.infer<typeof drawingElementSchema>;
+export function hasDrawingStroke(
+  element: DrawingElement,
+): element is Extract<DrawingElement, { type: 'line' | 'polyline' | 'symbol' | 'dimension' }> {
+  return ['line', 'polyline', 'symbol', 'dimension'].includes(element.type);
+}
+export const drawingStrokeWidth = (element: DrawingElement) =>
+  hasDrawingStroke(element)
+    ? (element.strokeWidth ?? (element.type === 'dimension' ? 1.2 : 2.6))
+    : 2.6;
+
+// Old label coordinates remain readable, but all point numbers now sit next to their dot.
+export function drawingPointLabel(position: DrawingPosition, number = '000') {
+  const width = Math.max(12, number.length * 11);
+  const onLeft = position.x + 12 + width > drawingWidth - 4;
+  return {
+    x: position.x + (onLeft ? -12 : 12),
+    y: Math.max(18, Math.min(drawingHeight - 4, position.y + 6)),
+    anchor: onLeft ? 'end' : 'start',
+    width,
+  };
+}
 export type DrawingData = z.infer<typeof drawingDataSchema>;
 export type ReportDrawing = z.infer<typeof reportDrawingSchema>;
 export type DrawingPosition = { x: number; y: number };
@@ -247,7 +293,12 @@ const distance = (p: DrawingPosition, a: DrawingPosition, b: DrawingPosition) =>
     t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 };
-export function hitElement(elements: DrawingElement[], p: DrawingPosition, tolerance = 18) {
+export function hitElement(
+  elements: DrawingElement[],
+  p: DrawingPosition,
+  tolerance = 18,
+  points: DrawingPoint[] = [],
+) {
   return [...elements].reverse().find((e) => {
     if (e.type === 'dimension') {
       const length = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1;
@@ -273,11 +324,21 @@ export function hitElement(elements: DrawingElement[], p: DrawingPosition, toler
       }
       return inside;
     }
-    if (
-      (e.type === 'point' || e.type === 'marker') &&
-      Math.hypot((e.labelX ?? e.x + 32) - p.x, (e.labelY ?? e.y - 32) - p.y) < tolerance + 10
-    )
-      return true;
+    if (e.type === 'point' || e.type === 'marker') {
+      const number =
+        e.type === 'marker'
+          ? e.number
+          : points.find((point) => pointKey(point) === e.reportPointId)?.number;
+      const label = drawingPointLabel(e, number);
+      const left = label.anchor === 'end' ? label.x - label.width : label.x;
+      if (
+        p.x >= left - tolerance &&
+        p.x <= left + label.width + tolerance &&
+        p.y >= label.y - 18 - tolerance &&
+        p.y <= label.y + tolerance
+      )
+        return true;
+    }
     if (e.type === 'text') {
       const angle = ((e.rotation ?? 0) * Math.PI) / 180;
       const dx = p.x - e.x,
@@ -307,14 +368,7 @@ export function moveElement(e: DrawingElement, dx: number, dy: number): DrawingE
         ]
       : e.type === 'polyline'
         ? e.points
-        : [
-            { x: e.x, y: e.y },
-            ...((e.type === 'point' || e.type === 'marker') &&
-            e.labelX !== undefined &&
-            e.labelY !== undefined
-              ? [{ x: e.labelX, y: e.labelY }]
-              : []),
-          ];
+        : [{ x: e.x, y: e.y }];
   dx = Math.max(
     -Math.min(...coords.map((p) => p.x)),
     Math.min(drawingWidth - Math.max(...coords.map((p) => p.x)), dx),
@@ -334,8 +388,64 @@ export function moveElement(e: DrawingElement, dx: number, dy: number): DrawingE
     ...((e.type === 'point' || e.type === 'marker') &&
     e.labelX !== undefined &&
     e.labelY !== undefined
-      ? { labelX: e.labelX + dx, labelY: e.labelY + dy }
+      ? {
+          labelX: clampPosition({ x: e.labelX + dx, y: e.labelY + dy }).x,
+          labelY: clampPosition({ x: e.labelX + dx, y: e.labelY + dy }).y,
+        }
       : {}),
+  };
+}
+export function moveHatchCorner(
+  e: DrawingElement,
+  index: number,
+  dx: number,
+  dy: number,
+): DrawingElement {
+  if (e.type !== 'polyline' || !e.hatch || index < 0 || index > 2) return e;
+  const corners = e.points
+    .slice(0, 3)
+    .map((p, i) => (i === index ? clampPosition({ x: p.x + dx, y: p.y + dy }) : p));
+  const [a, b, c] = corners as [DrawingPosition, DrawingPosition, DrawingPosition];
+  if (Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) < 20) return e;
+  return { ...e, points: [...corners, corners[0]!] };
+}
+export function transformHatch(
+  e: DrawingElement,
+  scaleX = 1,
+  scaleY = 1,
+  angle = 0,
+): DrawingElement {
+  if (e.type !== 'polyline' || !e.hatch) return e;
+  const corners = e.points.slice(0, 3),
+    cx = corners.reduce((sum, p) => sum + p.x, 0) / 3,
+    cy = corners.reduce((sum, p) => sum + p.y, 0) / 3;
+  const radians = (angle * Math.PI) / 180;
+  const next = corners.map((p) => {
+    const x = (p.x - cx) * scaleX,
+      y = (p.y - cy) * scaleY;
+    return {
+      x: cx + x * Math.cos(radians) - y * Math.sin(radians),
+      y: cy + x * Math.sin(radians) + y * Math.cos(radians),
+    };
+  });
+  const minX = Math.min(...next.map((p) => p.x)),
+    maxX = Math.max(...next.map((p) => p.x));
+  const minY = Math.min(...next.map((p) => p.y)),
+    maxY = Math.max(...next.map((p) => p.y));
+  if (
+    maxX - minX > drawingWidth ||
+    maxY - minY > drawingHeight ||
+    maxX - minX < 2 ||
+    maxY - minY < 2
+  )
+    return e;
+  const dx = Math.max(0, -minX) - Math.max(0, maxX - drawingWidth),
+    dy = Math.max(0, -minY) - Math.max(0, maxY - drawingHeight);
+  const shifted = next.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  return {
+    ...e,
+    points: [...shifted, shifted[0]!],
+    hatch: { ...e.hatch, angle: ((e.hatch.angle + angle + 540) % 360) - 180 },
   };
 }
 const esc = (v: unknown) =>
@@ -344,10 +454,44 @@ const esc = (v: unknown) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 const num = (v: number) => Number(v.toFixed(3));
+// Explicit clipped segments work identically in native SVG and PDF rendering.
+export function triangleHatchSegments(points: DrawingPosition[], spacing: number, angle: number) {
+  const radians = (angle * Math.PI) / 180,
+    ux = Math.cos(radians),
+    uy = Math.sin(radians);
+  const normal = (p: DrawingPosition) => -uy * p.x + ux * p.y;
+  const vertices = points.slice(0, 3),
+    levels = vertices.map(normal);
+  const result: { a: DrawingPosition; b: DrawingPosition }[] = [];
+  for (
+    let level = Math.ceil(Math.min(...levels) / spacing) * spacing;
+    level < Math.max(...levels);
+    level += Math.max(6, spacing)
+  ) {
+    const hits: DrawingPosition[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = vertices[i]!,
+        b = vertices[(i + 1) % 3]!,
+        na = normal(a),
+        nb = normal(b);
+      if (Math.abs(nb - na) < 0.00001) continue;
+      const t = (level - na) / (nb - na);
+      if (t >= 0 && t < 1) hits.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    if (hits.length === 2) result.push({ a: hits[0]!, b: hits[1]! });
+  }
+  return result;
+}
 export function drawingSvg(
   data: DrawingData,
   points: DrawingPoint[],
-  options: { selectedId?: string; viewBox?: string; showGrid?: boolean } = {},
+  options: {
+    selectedId?: string;
+    viewBox?: string;
+    showGrid?: boolean;
+    selectionOpacity?: number;
+    selectionFrame?: boolean;
+  } = {},
 ) {
   const grid = data.grid ?? 'isometric';
   let body = '<rect width="1000" height="800" fill="#fff"/>';
@@ -364,14 +508,91 @@ export function drawingSvg(
     }
     body += `<path d="${d}" stroke="#E4EAF2" stroke-width=".7" fill="none"/>`;
   }
+  let selectionOverlay = '';
   for (const e of data.elements) {
     const selected = options.selectedId === e.id,
       color = selected ? '#1764C0' : '#263D52';
-    const stroke = `stroke="${color}" stroke-width="${selected ? 4 : 2.6}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+    if (selected && options.selectionFrame) {
+      const opacity = Number.isFinite(options.selectionOpacity)
+        ? Math.max(0.2, Math.min(1, options.selectionOpacity!))
+        : 0.5;
+      body += `<g opacity="${opacity}">`;
+      let positions: DrawingPosition[];
+      let transform = '';
+      if (e.type === 'polyline') positions = e.points;
+      else if (e.type === 'line' || e.type === 'dimension') {
+        positions = [
+          { x: e.x1, y: e.y1 },
+          { x: e.x2, y: e.y2 },
+        ];
+        if (e.type === 'dimension') {
+          const length = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1;
+          const dx = (-(e.y2 - e.y1) / length) * e.offset,
+            dy = ((e.x2 - e.x1) / length) * e.offset;
+          positions.push(
+            { x: e.x1 + dx, y: e.y1 + dy },
+            { x: e.x2 + dx, y: e.y2 + dy },
+            { x: (e.x1 + e.x2) / 2 + dx - e.text.length * 5, y: (e.y1 + e.y2) / 2 + dy - 26 },
+            { x: (e.x1 + e.x2) / 2 + dx + e.text.length * 5, y: (e.y1 + e.y2) / 2 + dy },
+          );
+        }
+      } else if (e.type === 'text') {
+        const lines = e.text.split(/\r?\n/),
+          size = e.size ?? 20;
+        positions = [
+          { x: e.x, y: e.y - size },
+          {
+            x: e.x + Math.max(...lines.map((line) => line.length)) * size * 0.65,
+            y: e.y + (lines.length - 1) * size * 1.25 + size * 0.2,
+          },
+        ];
+        transform = ` transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})"`;
+      } else if (e.type === 'symbol') {
+        const radius = 35 * (e.scale ?? 1);
+        positions = [
+          { x: e.x - radius, y: e.y - radius },
+          { x: e.x + radius, y: e.y + radius },
+        ];
+        transform = ` transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
+      } else {
+        const number =
+          e.type === 'marker'
+            ? e.number
+            : points.find((point) => pointKey(point) === e.reportPointId)?.number;
+        const label = drawingPointLabel(e, number);
+        positions = [
+          { x: e.x - 5, y: e.y - 5 },
+          { x: e.x + 5, y: e.y + 5 },
+          { x: label.anchor === 'end' ? label.x - label.width : label.x, y: label.y - 18 },
+          { x: label.anchor === 'end' ? label.x : label.x + label.width, y: label.y + 3 },
+        ];
+      }
+      const x = Math.min(...positions.map((p) => p.x)) - 8,
+        y = Math.min(...positions.map((p) => p.y)) - 8;
+      const width = Math.max(...positions.map((p) => p.x)) - x + 8,
+        height = Math.max(...positions.map((p) => p.y)) - y + 8;
+      selectionOverlay = `<rect data-selection-frame="true" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" rx="4"${transform} fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+    }
+    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
     if (e.type === 'line')
       body += `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${stroke}/>`;
     if (e.type === 'polyline')
       body += `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${stroke}/>`;
+    if (e.type === 'polyline' && e.hatch)
+      body += triangleHatchSegments(e.points, e.hatch.spacing, e.hatch.angle)
+        .map(
+          ({ a, b }) =>
+            `<line x1="${num(a.x)}" y1="${num(a.y)}" x2="${num(b.x)}" y2="${num(b.y)}" stroke="${color}" stroke-width="${Math.max(0.5, drawingStrokeWidth(e) * 0.45)}"/>`,
+        )
+        .join('');
+    if (selected && e.type === 'polyline' && e.hatch)
+      body += e.points
+        .slice(0, 3)
+        .map(
+          (p) =>
+            `<circle cx="${p.x}" cy="${p.y}" r="8" fill="white" stroke="#1764C0" stroke-width="2"/>`,
+        )
+        .join('');
     if (e.type === 'symbol')
       body += `<path d="${drawingSymbols.find((s) => s.code === e.symbolCode)?.path ?? ''}" transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})" ${stroke}/>`;
     if (e.type === 'text')
@@ -390,16 +611,15 @@ export function drawingSvg(
         oy = ny * e.offset;
       const a = { x: e.x1 + ox, y: e.y1 + oy },
         b = { x: e.x2 + ox, y: e.y2 + oy };
-      body += `<path d="M${e.x1} ${e.y1}L${a.x + nx * 8} ${a.y + ny * 8} M${e.x2} ${e.y2}L${b.x + nx * 8} ${b.y + ny * 8} M${a.x} ${a.y}L${b.x} ${b.y} M${a.x - 6} ${a.y - 6}l12 12 M${b.x - 6} ${b.y - 6}l12 12" stroke="${color}" stroke-width="1.2" fill="none"/>`;
+      body += `<path d="M${e.x1} ${e.y1}L${a.x + nx * 8} ${a.y + ny * 8} M${e.x2} ${e.y2}L${b.x + nx * 8} ${b.y + ny * 8} M${a.x} ${a.y}L${b.x} ${b.y} M${a.x - 6} ${a.y - 6}l12 12 M${b.x - 6} ${b.y - 6}l12 12" ${stroke}/>`;
       body += `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}" text-anchor="middle" font-family="Arial" font-size="18" fill="${color}" stroke="white" stroke-width="4" paint-order="stroke">${esc(e.text)}</text>`;
     }
     if (e.type === 'point' || e.type === 'marker') {
       const point =
           e.type === 'point' ? points.find((p) => pointKey(p) === e.reportPointId) : undefined,
         number = e.type === 'marker' ? e.number : point?.number || '?',
-        x = e.labelX ?? Math.min(960, e.x + 32),
-        y = e.labelY ?? Math.max(26, e.y - 32),
         status = e.type === 'marker' ? e.acceptable : point?.data?.acceptable;
+      const { x, y, anchor } = drawingPointLabel(e, number);
       const tone = selected
         ? '#1764C0'
         : status === false
@@ -407,8 +627,9 @@ export function drawingSvg(
           : status === true
             ? '#16725B'
             : '#1764C0';
-      body += `<path d="M${e.x} ${e.y}L${x} ${y}" stroke="${tone}" stroke-width="1.5"/><circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}" stroke="white" stroke-width="1.5"/><rect x="${x - Math.max(18, number.length * 6 + 6)}" y="${y - 15}" width="${Math.max(36, number.length * 12 + 12)}" height="30" rx="8" fill="white" stroke="${tone}" stroke-width="2"/><text x="${x}" y="${y + 6}" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
+      body += `<circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}"/><text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
     }
+    if (selected && options.selectionFrame) body += '</g>';
     if (selected && (e.type === 'line' || e.type === 'dimension'))
       for (const p of [
         { x: e.x1, y: e.y1 },
@@ -416,5 +637,5 @@ export function drawingSvg(
       ])
         body += `<circle cx="${p.x}" cy="${p.y}" r="5" fill="white" stroke="#1764C0" stroke-width="2"/>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}</svg>`;
 }

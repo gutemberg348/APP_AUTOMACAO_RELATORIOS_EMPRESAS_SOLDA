@@ -38,7 +38,7 @@ import { CompanyAccessField } from '../users/company-access-field';
 export const personRoles = [
   { value: 'INSPECTOR', label: 'Inspetor' },
   { value: 'TECHNICAL_RESPONSIBLE', label: 'Responsável técnico' },
-  { value: 'CLIENT', label: 'Cliente' },
+  { value: 'CLIENT', label: 'Representante do cliente' },
   { value: 'REVIEWER', label: 'Revisor' },
   { value: 'OTHER', label: 'Outro' },
 ];
@@ -53,11 +53,13 @@ export function personSigner(person: Person): ReportSigner {
 export function PersonForm({
   person,
   initial,
+  reportRole,
   onSaved,
   onCancel,
 }: {
   person?: Person;
   initial?: Partial<PersonInput>;
+  reportRole?: ReportSigner['role'];
   onSaved(person: Person): void;
   onCancel(): void;
 }) {
@@ -73,7 +75,7 @@ export function PersonForm({
   const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [data, setData] = useState<PersonInput>(() => ({
     name: person?.name ?? initial?.name ?? '',
-    role: person?.role ?? initial?.role ?? 'INSPECTOR',
+    role: reportRole ?? person?.role ?? initial?.role ?? 'INSPECTOR',
     registrationNumber: person?.registrationNumber ?? initial?.registrationNumber ?? '',
     company: person?.company ?? '',
     email: person?.email ?? '',
@@ -134,12 +136,12 @@ export function PersonForm({
         </FormCell>
         <FormCell>
           <SelectField
-            label="Função padrão"
+            label={reportRole ? 'Função neste relatório' : 'Função padrão'}
             value={data.role}
             options={personRoles}
             clearable={false}
             onChange={(v) => field('role', v)}
-            disabled={busy}
+            disabled={busy || !!reportRole}
           />
         </FormCell>
         <FormCell>
@@ -469,17 +471,24 @@ export function PersonPicker({
   onClose,
   onSelect,
   onNew,
+  roleLabel,
 }: {
   visible: boolean;
   onClose(): void;
   onSelect(person: Person): void;
   onNew(): void;
+  roleLabel?: string;
 }) {
+  const canManagePeople = usePermission('people.manage');
   return (
     <PickerSheet
       visible={visible}
-      title="Escolher pessoa cadastrada"
-      subtitle="Nome, registro e assinatura serão preenchidos no relatório."
+      title={roleLabel ? `Escolher pessoa · ${roleLabel}` : 'Escolher pessoa cadastrada'}
+      subtitle={
+        roleLabel
+          ? `Nome, registro e assinatura serão preenchidos como ${roleLabel.toLowerCase()}, mantendo a função neste relatório.`
+          : 'Nome, registro e assinatura serão preenchidos no relatório.'
+      }
       icon="user"
       onClose={onClose}
     >
@@ -488,7 +497,7 @@ export function PersonPicker({
         contentContainerStyle={{ padding: 20, gap: 18 }}
       >
         {visible && <PeopleList onSelect={onSelect} />}
-        <Button title="Cadastrar nova pessoa" icon="plus" onPress={onNew} />
+        {canManagePeople && <Button title="Cadastrar nova pessoa" icon="plus" onPress={onNew} />}
       </ScrollView>
     </PickerSheet>
   );

@@ -1,4 +1,5 @@
 import { useTheme } from '../../utils/theme';
+import { reportPanelStyle } from './report-panel-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Keyboard } from 'react-native';
 import { Controller, useForm, useWatch } from 'react-hook-form';
@@ -189,7 +190,7 @@ export function ReportForm({
   const previousReveal = useRef({ step, error, sectionNavigation });
   const sectionViews = useRef<Record<string, View | null>>({});
   const errorSection = useRef<string | undefined>(undefined);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [openSectionTitle, setOpenSectionTitle] = useState<string | null>();
   const editingBusy = pickingPhoto || saving || acting;
   const config = reportConfigSchema.parse(type.config);
   const baseSections: ReportSection[] = reportSections[type.code] ?? [
@@ -230,15 +231,28 @@ export function ReportForm({
   const stages = [{ title: 'Inspeção' }, { title: 'Concluir' }];
   const sectionStage = (section: Section) =>
     section.content === 'signatures' || ['Laudo', 'Observação'].includes(section.title) ? 1 : 0;
+  const defaultSection =
+    sections.find(
+      (section) =>
+        sectionStage(section) === step &&
+        (section.content === 'points' || ['Laudo', 'Observação'].includes(section.title)),
+    ) ?? sections.find((section) => sectionStage(section) === step);
   const isSectionOpen = (section: Section) =>
-    openSections[section.title] ??
-    (section.content === 'points' || ['Laudo', 'Observação'].includes(section.title));
+    !identityOpen &&
+    section.title === (openSectionTitle === undefined ? defaultSection?.title : openSectionTitle);
+  const goToStep = (next: number) => {
+    Keyboard.dismiss();
+    setIdentityOpen(false);
+    setOpenSectionTitle(undefined);
+    setStep(next);
+  };
   const openSection = (index: number) => {
     const section = sections[index];
     if (!section) return;
     errorSection.current = section.title;
     setStep(sectionStage(section));
-    setOpenSections((old) => ({ ...old, [section.title]: true }));
+    setIdentityOpen(false);
+    setOpenSectionTitle(section.title);
   };
   const orderedSections = [
     ...sections.filter((s) => sectionStage(s) === 0),
@@ -250,7 +264,7 @@ export function ReportForm({
     Keyboard.dismiss();
     const next = section ? nextSection(section) : orderedSections[0];
     setIdentityOpen(false);
-    setOpenSections(Object.fromEntries(sections.map((s) => [s.title, s.title === next?.title])));
+    setOpenSectionTitle(next?.title ?? null);
     if (next) setStep(sectionStage(next));
     errorSection.current = next?.title ?? '__save';
     setSectionNavigation((n) => n + 1);
@@ -518,6 +532,7 @@ export function ReportForm({
     if (target >= 0) openSection(target);
     else {
       setIdentityOpen(true);
+      setOpenSectionTitle(null);
       setStep(0);
     }
   };
@@ -652,7 +667,7 @@ export function ReportForm({
               accessibilityState={selectionState(step === index, editingBusy)}
               aria-pressed={step === index}
               disabled={editingBusy}
-              onPress={() => setStep(index)}
+              onPress={() => goToStep(index)}
               style={{
                 flexDirection: 'row',
                 flex: 1,
@@ -726,14 +741,18 @@ export function ReportForm({
         </Card>
       )}
       {step === 0 && (
-        <Card>
+        <Card style={reportPanelStyle(t, identityOpen)}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Editar identificação do relatório"
             accessibilityState={{ expanded: identityOpen, disabled: editingBusy }}
             aria-expanded={identityOpen}
             disabled={editingBusy}
-            onPress={() => setIdentityOpen(!identityOpen)}
+            onPress={() => {
+              Keyboard.dismiss();
+              setIdentityOpen(!identityOpen);
+              setOpenSectionTitle(null);
+            }}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 }}
           >
             <Icon name="report" color={t.colors.blue} />
@@ -848,7 +867,7 @@ export function ReportForm({
           </Text>
         </Card>
       )}
-      <Card style={{ padding: 0, overflow: 'hidden', gap: 0 }}>
+      <View style={{ gap: 14 }}>
         {sections
           .filter((section) => sectionStage(section) === step)
           .map((section) => (
@@ -857,7 +876,7 @@ export function ReportForm({
               ref={(view) => {
                 sectionViews.current[section.title] = view;
               }}
-              style={{ borderBottomWidth: 1, borderColor: t.colors.line }}
+              style={[reportPanelStyle(t, isSectionOpen(section)), { overflow: 'hidden' }]}
             >
               <Pressable
                 accessibilityRole="button"
@@ -865,15 +884,22 @@ export function ReportForm({
                 accessibilityState={{ expanded: isSectionOpen(section), disabled: editingBusy }}
                 aria-expanded={isSectionOpen(section)}
                 disabled={editingBusy}
-                onPress={() =>
-                  setOpenSections((old) => ({ ...old, [section.title]: !isSectionOpen(section) }))
-                }
+                onPress={() => {
+                  Keyboard.dismiss();
+                  const opening = !isSectionOpen(section);
+                  setIdentityOpen(false);
+                  setOpenSectionTitle(opening ? section.title : null);
+                  if (opening) {
+                    errorSection.current = section.title;
+                    setSectionNavigation((n) => n + 1);
+                  }
+                }}
                 style={{
                   padding: 20,
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 12,
-                  backgroundColor: isSectionOpen(section) ? t.colors.soft : t.colors.surface,
+                  backgroundColor: isSectionOpen(section) ? t.colors.blueSoft : t.colors.surface,
                 }}
               >
                 <Icon
@@ -888,6 +914,19 @@ export function ReportForm({
                   color={t.colors.blue}
                 />
                 <View style={{ flex: 1, gap: 4 }}>
+                  <Text
+                    style={{
+                      color: t.colors.blue,
+                      fontFamily: t.fonts.bold,
+                      fontSize: 10,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    ETAPA{' '}
+                    {String(
+                      orderedSections.findIndex((item) => item.title === section.title) + 1,
+                    ).padStart(2, '0')}
+                  </Text>
                   <Text style={[styles.text, { fontFamily: t.fonts.bold }]}>{section.title}</Text>
                   <Text style={[styles.muted, { fontSize: 12 }]}>{sectionSummary(section)}</Text>
                 </View>
@@ -1136,7 +1175,7 @@ export function ReportForm({
                 small
                 icon="arrow-left"
                 disabled={editingBusy || step === 0}
-                onPress={() => setStep(step - 1)}
+                onPress={() => goToStep(step - 1)}
               />
             )}
             {step === 0 ? (
@@ -1145,12 +1184,12 @@ export function ReportForm({
                 small
                 iconRight="arrow-right"
                 disabled={editingBusy || step >= stages.length - 1}
-                onPress={() => setStep(step + 1)}
+                onPress={() => goToStep(step + 1)}
               />
             ) : null}
           </View>
         </View>
-      </Card>
+      </View>
       {step === 1 && (
         <View ref={conclusionActions}>
           <ReportActions

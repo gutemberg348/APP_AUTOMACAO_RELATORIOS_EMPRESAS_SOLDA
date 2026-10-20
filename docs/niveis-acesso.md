@@ -9,6 +9,8 @@
 
 Os quatro perfis acima são as opções de cadastro. Revisor e Visualizador permanecem nas contas antigas para preservar os registros, mas não podem ser escolhidos em novos cadastros. Ao editar uma dessas contas, selecione um perfil atual e confira as empresas liberadas; não há promoção automática para Gerente.
 
+Todos os perfis começam na **Visão geral** após entrar ou abrir a raiz do app/painel. Essa opção aparece primeiro no menu; para o Operador, os números e relatórios exibidos continuam limitados às empresas liberadas e aos próprios relatórios.
+
 ## Liberar empresas
 
 O administrador abre **Usuários → Novo usuário** ou **Editar dados**, escolhe **Inspetor** ou **Operador** e marca as empresas em **Empresas liberadas**. O campo permite pesquisar, marcar várias e remover acessos. No cadastro de uma pessoa com login, a mesma seleção acompanha a senha/perfil.

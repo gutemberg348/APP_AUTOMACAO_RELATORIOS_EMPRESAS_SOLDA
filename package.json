@@ -21,6 +21,7 @@
     "test:deployment": "node --test scripts/test/deployment.test.mjs",
     "dev:api": "npm run dev --workspace @weldcosta/api",
     "dev:app": "npm run start --workspace @weldcosta/app",
+    "dev:mobile": "node scripts/dev-mobile.mjs",
     "dev:app:clean": "npm run start --workspace @weldcosta/app -- --clear",
     "dev:web": "npm run web --workspace @weldcosta/app",
     "build": "npm run build --workspace @weldcosta/shared && npm run build --workspace @weldcosta/api",

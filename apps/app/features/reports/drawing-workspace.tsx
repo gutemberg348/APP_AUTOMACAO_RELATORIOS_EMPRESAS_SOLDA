@@ -258,7 +258,7 @@ function WorkspaceContent(props: WorkspaceProps) {
             </View>
           )}
         </View>
-        {!!props.message && (
+        {!!props.message && inputMode && (
           <Text
             accessibilityRole="alert"
             style={[styles.text, { color: t.colors.danger, padding: 8 }]}

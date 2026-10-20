@@ -10,9 +10,11 @@ import { requirePermission } from '../../middlewares/auth';
 import { idParam, send } from '../../utils/http';
 import { LocalStorageProvider } from '../../services/storage/local-storage-provider';
 import { assertEditable } from './reports.policy';
+import { reportScope } from '../../middlewares/access-scope';
+import { assertPhotoPoint, lockPhotoHash } from './reports.media-duplicates';
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 5 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 6 },
 });
 const storage = new LocalStorageProvider(env.STORAGE_PATH);
 const metadata = z
@@ -21,6 +23,7 @@ const metadata = z
     caption: z.string().max(2000).optional(),
     sectionKey: z.enum(['photos', 'drawing']).default('photos'),
     reportPointId: z.uuid().optional(),
+    clientUploadId: z.string().min(1).max(100).optional(),
   })
   .strict();
 async function prepareImage(file: Express.Multer.File | undefined) {
@@ -43,12 +46,6 @@ async function prepareImage(file: Express.Multer.File | undefined) {
     );
   }
   const sha256 = createHash('sha256').update(file.buffer).digest('hex');
-  if (await prisma.reportMedia.findUnique({ where: { sha256 }, select: { id: true } }))
-    throw new AppError(
-      409,
-      'DUPLICATE_MEDIA',
-      'Esta imagem já foi utilizada. Não é permitido repetir a mesma foto. Escolha outra imagem.',
-    );
   return { content, sha256 };
 }
 
@@ -59,7 +56,29 @@ reportMediaCheckRoutes.post(
   requirePermission('media.upload'),
   upload.single('file'),
   async (req, res) => {
+    const target = z
+      .object({ reportId: z.uuid().optional(), reportPointId: z.uuid().optional() })
+      .strict()
+      .parse(req.body);
+    if (target.reportPointId && !target.reportId)
+      throw new AppError(400, 'INVALID_POINT', 'Selecione o relatório deste ponto.');
+    if (target.reportId) {
+      const report = await prisma.report.findFirst({
+        where: { id: target.reportId, deletedAt: null, ...reportScope(req.user!) },
+      });
+      if (!report)
+        throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado ou não liberado para você.');
+      assertEditable(report.status, req.user!);
+      if (
+        target.reportPointId &&
+        !(await prisma.reportPoint.findFirst({
+          where: { id: target.reportPointId, reportId: target.reportId },
+        }))
+      )
+        throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
+    }
     const { sha256 } = await prepareImage(req.file);
+    await assertPhotoPoint(prisma, sha256, target);
     send(res, { sha256 });
   },
 );
@@ -85,6 +104,25 @@ reportMediaRoutes.post(
           !(await tx.reportPoint.findFirst({ where: { id: input.reportPointId, reportId } }))
         )
           throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
+        await lockPhotoHash(tx, sha256);
+        if (input.clientUploadId) {
+          const previous = await tx.reportMedia.findFirst({
+            where: { reportId, clientUploadId: input.clientUploadId },
+          });
+          if (previous) {
+            if (
+              previous.sha256 !== sha256 ||
+              previous.reportPointId !== (input.reportPointId ?? null)
+            )
+              throw new AppError(
+                409,
+                'UPLOAD_CONFLICT',
+                'Esta seleção de foto mudou. Remova a foto pendente e selecione novamente.',
+              );
+            return { id: previous.id, reused: true };
+          }
+        }
+        await assertPhotoPoint(tx, sha256, { reportId, reportPointId: input.reportPointId });
         const changed = await tx.report.updateMany({
           where: { id: reportId, version: input.version, status: report.status },
           data: { version: { increment: 1 } },
@@ -104,6 +142,7 @@ reportMediaRoutes.post(
             mimeType: 'image/jpeg',
             fileSize: content.length,
             sha256,
+            clientUploadId: input.clientUploadId,
             uploadedById: req.user!.id,
             sortOrder: await tx.reportMedia.count({ where: { reportId } }),
           },
@@ -117,9 +156,10 @@ reportMediaRoutes.post(
             metadata: { mediaId: media.id },
           },
         });
-        return { id: media.id };
+        return { id: media.id, reused: false };
       });
-      send(res, saved, 201);
+      if (saved.reused) await storage.delete(filePath).catch(() => {});
+      send(res, { id: saved.id }, 201);
     } catch (error) {
       await storage.delete(filePath).catch(() => {});
       throw error;
@@ -192,6 +232,9 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       !(await tx.reportPoint.findFirst({ where: { id: input.reportPointId, reportId } }))
     )
       throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
+    const targetPointId = input.sectionKey === 'drawing' ? null : input.reportPointId;
+    await lockPhotoHash(tx, item.sha256);
+    await assertPhotoPoint(tx, item.sha256, { reportId, reportPointId: targetPointId }, item.id);
     const changed = await tx.report.updateMany({
       where: { id: reportId, version: input.version, status: report.status },
       data: { version: { increment: 1 } },
@@ -204,7 +247,7 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
         caption: input.caption,
         sectionKey: input.sectionKey,
         type: input.sectionKey === 'drawing' ? 'DRAWING' : 'IMAGE',
-        reportPointId: input.sectionKey === 'drawing' ? null : input.reportPointId,
+        reportPointId: targetPointId,
       },
     });
     await tx.auditLog.create({

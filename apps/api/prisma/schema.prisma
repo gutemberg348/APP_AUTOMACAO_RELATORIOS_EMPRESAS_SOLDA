@@ -221,7 +221,8 @@ model ReportMedia {
   mimeType String
   fileSize Int
   filePath String
-  sha256 String @unique @db.Char(64)
+  sha256 String @db.Char(64)
+  clientUploadId String? @db.VarChar(100)
   caption String?
   sortOrder Int @default(0)
   uploadedById String @db.Uuid
@@ -229,6 +230,8 @@ model ReportMedia {
   createdAt DateTime @default(now())
   @@index([reportId])
   @@index([reportPointId])
+  @@index([sha256])
+  @@unique([reportId, clientUploadId])
   @@map("report_media")
 }
 model ReportDrawing {

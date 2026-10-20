@@ -24,7 +24,7 @@ body{margin:0;font:11px Arial,sans-serif;color:#111}p{margin:0}img{max-width:100
 .evs-weld-tab td{color:#1683ac}
 .evs-photo-pair{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0}
 .evs-photo-pair>div{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.evs-photo-pair>div+div{border-left:1px solid #111}.evs-photo-pair img{width:100%;height:100%;object-fit:contain}
+.evs-photo-pair>div+div{border-left:1px solid #111}.evs-photo-pair img{display:block;width:100%;height:100%;object-fit:cover;object-position:center}
 .evs-photo-pair span{color:#666;font-size:10px}
 .evs-annotation{padding:2mm 4mm;white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px;border-bottom:1px solid #111}
 .evs-verdict{padding:8mm 7mm;min-height:62mm;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.5}
