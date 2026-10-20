@@ -395,6 +395,63 @@ export function moveElement(e: DrawingElement, dx: number, dy: number): DrawingE
       : {}),
   };
 }
+/** Resize and rotate around the element's center, then translate, preserving point links. */
+export function transformDrawingElement(
+  e: DrawingElement,
+  angle: number,
+  dx = 0,
+  dy = 0,
+  scale = 1,
+): DrawingElement {
+  if (![angle, dx, dy, scale].every(Number.isFinite) || scale <= 0) return e;
+  const normalize = (value: number) => ((((value + 180) % 360) + 360) % 360) - 180;
+  if (e.type === 'symbol' || e.type === 'text')
+    return moveElement(
+      {
+        ...e,
+        rotation: normalize((e.rotation ?? 0) + angle),
+        ...(e.type === 'symbol'
+          ? { scale: Math.max(0.5, Math.min(3, (e.scale ?? 1) * scale)) }
+          : { size: Math.max(10, Math.min(40, (e.size ?? 20) * scale)) }),
+      },
+      dx,
+      dy,
+    );
+  if (e.type === 'point' || e.type === 'marker') return moveElement(e, dx, dy);
+  const positions =
+    e.type === 'polyline'
+      ? e.points
+      : [
+          { x: e.x1, y: e.y1 },
+          { x: e.x2, y: e.y2 },
+        ];
+  const cx = (Math.min(...positions.map((p) => p.x)) + Math.max(...positions.map((p) => p.x))) / 2;
+  const cy = (Math.min(...positions.map((p) => p.y)) + Math.max(...positions.map((p) => p.y))) / 2;
+  const radians = (angle * Math.PI) / 180;
+  const span = Math.max(
+    Math.max(...positions.map((p) => p.x)) - Math.min(...positions.map((p) => p.x)),
+    Math.max(...positions.map((p) => p.y)) - Math.min(...positions.map((p) => p.y)),
+  );
+  if (span > 0) scale = Math.max(2 / span, scale);
+  const rotated = positions.map((p) => ({
+    x: cx + scale * ((p.x - cx) * Math.cos(radians) - (p.y - cy) * Math.sin(radians)),
+    y: cy + scale * ((p.x - cx) * Math.sin(radians) + (p.y - cy) * Math.cos(radians)),
+  }));
+  if (
+    Math.max(...rotated.map((p) => p.x)) - Math.min(...rotated.map((p) => p.x)) > drawingWidth ||
+    Math.max(...rotated.map((p) => p.y)) - Math.min(...rotated.map((p) => p.y)) > drawingHeight
+  )
+    return moveElement(e, dx, dy);
+  const next: DrawingElement =
+    e.type === 'polyline'
+      ? {
+          ...e,
+          points: rotated,
+          ...(e.hatch ? { hatch: { ...e.hatch, angle: normalize(e.hatch.angle + angle) } } : {}),
+        }
+      : { ...e, x1: rotated[0]!.x, y1: rotated[0]!.y, x2: rotated[1]!.x, y2: rotated[1]!.y };
+  return moveElement(next, dx, dy);
+}
 export function moveHatchCorner(
   e: DrawingElement,
   index: number,

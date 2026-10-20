@@ -81,13 +81,24 @@ describe('specific schemas', () => {
       }),
     ).toThrow();
   });
-  it('accepts a draft without number, title or date but blocks submission', () => {
-    const draft = reportCreateSchema.parse({
+  it('requires a report number even for drafts, while other incomplete fields remain allowed', () => {
+    const input = {
       companyId: randomUUID(),
       projectId: randomUUID(),
       reportTypeId: randomUUID(),
-    });
-    expect(draft.number).toBe('');
+    };
+    for (const number of [undefined, '', '   ']) {
+      const result = reportCreateSchema.safeParse({ ...input, number });
+      expect(result.success).toBe(false);
+      if (!result.success)
+        expect(result.error.issues[0]).toMatchObject({
+          path: ['number'],
+          message: 'Informe o número do relatório.',
+        });
+    }
+    expect(reportUpdateSchema.safeParse({ version: 1, number: '   ' }).success).toBe(false);
+    const draft = reportCreateSchema.parse({ ...input, number: '  REL-001  ' });
+    expect(draft.number).toBe('REL-001');
     expect(reportSubmissionSchema.safeParse(draft).success).toBe(false);
   });
 });

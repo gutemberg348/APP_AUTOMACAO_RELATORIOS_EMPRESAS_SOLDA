@@ -78,7 +78,9 @@ export function ReportActions({
     },
     mutationFn: async ({ action, confirmed }: { action: Action; confirmed?: Report }) => {
       setMessage('');
-      let saved = confirmed ?? (save && (hasChanges || !report) ? await save() : report);
+      let saved =
+        confirmed ??
+        (save && (hasChanges || !report || !report.number.trim()) ? await save() : report);
       if (!saved) return;
       if (!confirmed && ['download', 'share', 'send', 'approve'].includes(action)) {
         const warnings = reportReviewWarnings(saved);

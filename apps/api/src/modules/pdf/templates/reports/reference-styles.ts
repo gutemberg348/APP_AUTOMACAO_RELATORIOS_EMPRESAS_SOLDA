@@ -13,7 +13,7 @@ export const referenceStyles = `
 .reference-photo-tab{border-bottom:1px solid #111;padding:1mm;font-size:10px;overflow-wrap:anywhere}
 .reference-photo-tab span{color:#16789c}
 .reference-photo-image{flex:1;min-height:0;overflow:hidden;display:flex;justify-content:center;align-items:center;color:#666}
-.reference-photo-image img{display:block;width:100%;height:100%;object-fit:cover;object-position:center}
+.reference-photo-image img{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .lp-technical .reference-table-block{margin-top:4mm}.lp-technical .reference-table td{height:7mm}
 .th-technical .reference-table-block{margin-top:7mm}.th-technical .reference-table td{height:17mm}
 .th-technical .reference-band{padding:8mm 2mm}
@@ -26,7 +26,7 @@ export const referenceStyles = `
 .measurement-columns{display:grid;grid-template-columns:1fr 1fr}
 .measurement-cell{min-width:0}.measurement-cell+.measurement-cell{border-left:1px solid #111}
 .measurement-photo{height:64mm;overflow:hidden;display:flex;align-items:center;justify-content:center}
-.measurement-photo img{display:block;width:100%;height:100%;object-fit:cover;object-position:center}
+.measurement-photo img{display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .measurement-reading{padding:2mm 1mm;border-bottom:1px solid #111;min-height:8mm;font-size:11px;overflow-wrap:anywhere}
 .measurement-reading span{color:#16789c}.measurement-block{break-inside:avoid;border-bottom:1px solid #111}
 .rdo-sheet .evs-header{height:19mm;grid-template-columns:22% 48% 30%}.rdo-sheet .evs-heading{font-size:17px}

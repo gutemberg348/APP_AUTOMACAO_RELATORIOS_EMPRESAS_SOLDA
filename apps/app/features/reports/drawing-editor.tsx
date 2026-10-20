@@ -2,6 +2,7 @@ import { useTheme } from '../../utils/theme';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
+  Vibration,
   Keyboard,
   ScrollView,
   Platform,
@@ -28,6 +29,7 @@ import {
   drawingStrokeWidth,
   hitElement,
   moveElement,
+  transformDrawingElement,
   moveHatchCorner,
   transformHatch,
   newDrawingData,
@@ -75,19 +77,20 @@ type Tool =
   | SketchTool;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
 const primaryTools: Tool[] = [
-  'hatch',
-  'pencil',
   'straighten',
+  'pipe',
+  'pencil',
+  'select',
+  'point',
+  'symbol',
+  'text',
+  'hatch',
   'circle',
   'rectangle',
-  'pipe',
-  'point',
-  'text',
   'annotation',
-  'symbol',
   'dimension',
-  'select',
   'pan',
+  'line',
 ];
 const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
   {
@@ -175,6 +178,7 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     hint: 'Arraste para mover. Com dois dedos, mova e amplie em qualquer ferramenta. No computador, use a roda do mouse.',
   },
 ];
+tools.sort((a, b) => primaryTools.indexOf(a.id) - primaryTools.indexOf(b.id));
 type Snapshot = { drawings: ReportDrawing[]; points: ReportPoint[] };
 export function DrawingPreview({ data, points }: { data: DrawingData; points: ReportPoint[] }) {
   const { tokens: t } = useTheme();
@@ -246,6 +250,7 @@ export function DrawingEditor({
   measurement = false,
   savedVersion,
   onRemovePoint,
+  onRemovePoints,
   pointPhotoCount,
 }: {
   value: ReportDrawing[];
@@ -257,12 +262,14 @@ export function DrawingEditor({
   measurement?: boolean;
   savedVersion?: number;
   onRemovePoint(key: string): boolean;
+  onRemovePoints(keys: string[], clearDrawingIndex: number): boolean;
   pointPhotoCount(key: string): number;
 }) {
   const { tokens: t, styles } = useTheme();
   const revealInline = usePageScroll();
   const lastCanvasLayout = useRef<{ expanded: boolean; width: number } | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all'>();
   const [entry, setEntry] = useState<'point' | 'text'>();
   const [textPosition, setTextPosition] = useState<DrawingPosition>();
@@ -284,6 +291,9 @@ export function DrawingEditor({
         view: { x: number; y: number; w: number; h: number };
         width: number;
         height: number;
+        angle: number;
+        element?: DrawingElement;
+        result?: DrawingElement;
       }
     | undefined
   >(undefined);
@@ -334,6 +344,7 @@ export function DrawingEditor({
         width: number;
         samples: DrawingPosition[];
         held?: boolean;
+        selectionOnly?: boolean;
         corner?: number;
         dx: number;
         dy: number;
@@ -382,7 +393,6 @@ export function DrawingEditor({
     setStroke([]);
     setTraceStart(undefined);
     setTraceEnd(undefined);
-    setDirectSelection(false);
   }, [activeIndex, expanded, editable, savedVersion, cancelHold]);
   const linkedPoint =
     selectedElement?.type === 'point'
@@ -415,7 +425,7 @@ export function DrawingEditor({
       return;
     }
     updateData({ ...data, elements: data.elements.filter((e) => e.id !== selected) });
-    setSelected('');
+    finishSelection();
   };
   const commit = (drawings: ReportDrawing[], nextPoints = points) => {
     setHistory((old) => [...old.slice(-39), { drawings: value, points }]);
@@ -438,7 +448,11 @@ export function DrawingEditor({
       : element;
     updateData({ ...data, elements: [...data.elements, next] }, nextPoints);
     setSelected(element.id);
-    setDirectSelection(false);
+    setDirectSelection(element.type === 'symbol' || element.type === 'text');
+    if (element.type === 'symbol' || element.type === 'text') {
+      setShowProperties(false);
+      setToolsOpen(false);
+    }
     setMessage('');
     return true;
   };
@@ -452,8 +466,10 @@ export function DrawingEditor({
     cancelHold();
     setHatchCorners([]);
     setDirectSelection(false);
+    if (next !== 'select') setSelected('');
     Keyboard.dismiss();
     setTool(next);
+    setToolsOpen(false);
     if (next === 'point' && !canEditPoints && pointTarget === 'new' && points.length) {
       setPointTarget(pointKey(unplacedPoints[0] ?? points[0]!));
     }
@@ -469,6 +485,14 @@ export function DrawingEditor({
     if (expanded) setShowProperties(['annotation', 'symbol', 'dimension'].includes(next));
     else if (next === 'annotation') revealInline(annotationField.current);
     setMessage('');
+  };
+  const finishSelection = () => {
+    cancelHold();
+    setSelected('');
+    setDirectSelection(false);
+    setShowProperties(false);
+    setStart(undefined);
+    setTool('select');
   };
   const undo = (redo = false) => {
     cancelHold();
@@ -493,7 +517,8 @@ export function DrawingEditor({
     }
     onChange(last.drawings);
     if (canEditPoints) onPointsChange(last.points);
-    setSelected('');
+    if (editingSelection) finishSelection();
+    else setSelected('');
     setStart(undefined);
   };
   const changePoint = (patch: Partial<ReportPoint>) => {
@@ -648,9 +673,7 @@ export function DrawingEditor({
         rotation: textRotation,
       });
       setText('');
-      setMessage(
-        'Texto inserido. Segure sobre ele para mover. Toque em outro local para escrever novamente.',
-      );
+      setMessage('');
       return;
     }
     if (tool === 'symbol')
@@ -721,6 +744,7 @@ export function DrawingEditor({
       };
       if (
         editable &&
+        !editingSelection &&
         tool !== 'pan' &&
         tool !== 'select' &&
         (p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 800)
@@ -729,7 +753,14 @@ export function DrawingEditor({
       const found = data
         ? hitElement(data.elements, p, Math.max(12, (14 / width) * view.w), points)
         : undefined;
-      if (tool === 'select') setSelected(found?.id ?? '');
+      // Selection owns the entire gesture, including its release. A tap outside
+      // must never fall through to the previous insertion/drawing tool.
+      const selectionOnly = editable && (editingSelection || tool === 'select');
+      if (selectionOnly && found) {
+        setSelected(found.id);
+        setDirectSelection(true);
+        setShowProperties(false);
+      }
       const corner =
         editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
           ? selectedElement.points
@@ -740,22 +771,23 @@ export function DrawingEditor({
           : -1;
       const current = {
         start: p,
-        original: corner >= 0 ? selectedElement : tool === 'select' ? found : undefined,
+        original: corner >= 0 ? selectedElement : selectionOnly ? found : undefined,
         corner: corner >= 0 ? corner : undefined,
         view,
         width,
         samples: [p],
         dx: 0,
         dy: 0,
-        held: false,
+        held: selectionOnly && !!found,
+        selectionOnly,
       };
       gesture.current = current;
-      if (editable && found && tool !== 'select' && corner < 0) {
+      if (editable && found && tool !== 'select' && corner < 0 && !current.held) {
         holdTimer.current = setTimeout(() => {
           if (
             gesture.current !== current ||
             multiTouch.current ||
-            Math.hypot(current.dx, current.dy) > 8
+            Math.hypot(current.dx, current.dy) > 10
           )
             return;
           current.original = found;
@@ -768,15 +800,24 @@ export function DrawingEditor({
           setTraceStart(undefined);
           setTraceEnd(undefined);
           setDraftElement(found);
+          setShowProperties(false);
+          setToolsOpen(false);
+          Vibration.vibrate(20);
           setMessage('');
-        }, 1000);
+        }, 350);
       }
-      if (editable && sketchTools.includes(tool)) {
+      if (editable && !selectionOnly && !current.original && sketchTools.includes(tool)) {
         setStroke([p]);
         setTraceStart(p);
         setTraceEnd(p);
       }
-      if (editable && data && ['pipe', 'line', 'dimension'].includes(tool)) {
+      if (
+        editable &&
+        !selectionOnly &&
+        !current.original &&
+        data &&
+        ['pipe', 'line', 'dimension'].includes(tool)
+      ) {
         setTraceStart(start ?? snapPosition(p, data.grid));
         setTraceEnd(p);
       }
@@ -787,7 +828,13 @@ export function DrawingEditor({
         const [a, b] = touches;
         const center = { x: (a!.pageX + b!.pageX) / 2, y: (a!.pageY + b!.pageY) / 2 };
         const distance = Math.max(1, Math.hypot(a!.pageX - b!.pageX, a!.pageY - b!.pageY));
+        const angle = (Math.atan2(b!.pageY - a!.pageY, b!.pageX - a!.pageX) * 180) / Math.PI;
         if (!pinch.current) {
+          // Only transform an element when the first finger started on it.
+          // Starting in blank space always keeps the familiar pan/zoom gesture.
+          const element = editable ? gesture.current?.original : undefined;
+          const initialElement =
+            element && draftElement?.id === element.id ? draftElement : element;
           resetGesture();
           multiTouch.current = true;
           setStart(undefined);
@@ -798,19 +845,38 @@ export function DrawingEditor({
             view,
             width,
             height,
+            angle,
+            element: initialElement,
           };
+          if (initialElement) {
+            setSelected(initialElement.id);
+            setDirectSelection(true);
+            setShowProperties(false);
+            setToolsOpen(false);
+          }
         } else {
           const initial = pinch.current;
-          setView(
-            zoomDrawingAt(
-              initial.view,
-              initial.width,
-              initial.height,
-              initial.anchor,
+          if (initial.element) {
+            const delta = ((angle - initial.angle + 540) % 360) - 180;
+            initial.result = transformDrawingElement(
+              initial.element,
+              delta,
+              ((center.x - initial.center.x) * initial.view.w) / initial.width,
+              ((center.y - initial.center.y) * initial.view.w) / initial.width,
               distance / initial.distance,
-              { x: center.x - initial.center.x, y: center.y - initial.center.y },
-            ),
-          );
+            );
+            setDraftElement(initial.result);
+          } else
+            setView(
+              zoomDrawingAt(
+                initial.view,
+                initial.width,
+                initial.height,
+                initial.anchor,
+                distance / initial.distance,
+                { x: center.x - initial.center.x, y: center.y - initial.center.y },
+              ),
+            );
         }
         return;
       }
@@ -830,15 +896,15 @@ export function DrawingEditor({
         );
         return;
       }
-      if (!g.held && Math.hypot(state.dx, state.dy) > 8) cancelHold();
-      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= 8) return;
+      if (!g.held && Math.hypot(state.dx, state.dy) > 10) cancelHold();
+      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= 10) return;
       if (g.held && g.original) {
         setDraftElement(
           moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
         );
         return;
       }
-      if (!editable || tool === 'pan' || (tool === 'select' && !g.original)) {
+      if (!editable || tool === 'pan' || (g.selectionOnly && !g.original)) {
         setView({
           ...g.view,
           x: g.view.x - (state.dx / g.width) * g.view.w,
@@ -873,6 +939,7 @@ export function DrawingEditor({
     onPanResponderRelease: (_event, state) => {
       cancelHold();
       if (multiTouch.current || !editable) {
+        if (editable && pinch.current?.result) updateElement(pinch.current.result);
         multiTouch.current = false;
         resetGesture();
         return;
@@ -898,7 +965,8 @@ export function DrawingEditor({
               (state.dy / g.width) * g.view.w,
             ),
           );
-        if (expanded) setShowProperties(true);
+      } else if (g.selectionOnly) {
+        if (!g.original && Math.hypot(state.dx, state.dy) < 10) finishSelection();
       } else if (sketchTools.includes(tool)) {
         const end = clampPosition({
           x: g.start.x + (state.dx / g.width) * g.view.w,
@@ -1072,7 +1140,7 @@ export function DrawingEditor({
           !previous || previous.expanded !== expanded || previous.width !== screen.width;
         lastCanvasLayout.current = { expanded, width: screen.width };
         if (expanded && needsFit) {
-          const w = Math.max(
+          const w = Math.min(
             1000,
             (800 * e.nativeEvent.layout.width) / Math.max(1, e.nativeEvent.layout.height),
           );
@@ -1732,7 +1800,7 @@ export function DrawingEditor({
       }
       description={
         clearMode === 'points'
-          ? 'Remover somente as marcações deste desenho? ' +
+          ? 'Excluir as marcações deste desenho e os pontos correspondentes da lista de soldas? ' +
             points.filter(
               (point) =>
                 data?.elements.some(
@@ -1747,7 +1815,7 @@ export function DrawingEditor({
                       : value !== '-' && value !== '',
                   )),
             ).length +
-            ' ponto(s) têm dados ou fotos preenchidos. Os cadastros, fotos e resultados abaixo serão mantidos. Você pode desfazer.'
+            ' ponto(s) têm dados ou fotos preenchidos. Os dados, resultados, fotos vinculadas e marcações desses pontos nos outros desenhos também serão excluídos ao salvar. Pontos que não estão neste desenho serão mantidos.'
           : clearMode === 'strokes'
             ? 'Linhas, formas, textos e símbolos serão removidos. As marcações de pontos ficam no desenho. Você pode desfazer.'
             : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
@@ -1756,15 +1824,35 @@ export function DrawingEditor({
       danger
       onClose={() => setClearMode(undefined)}
       onConfirm={() => {
-        if (data && editable)
+        if (data && editable && clearMode === 'points') {
+          const keys = [
+            ...new Set(
+              data.elements.flatMap((element) =>
+                element.type === 'point'
+                  ? [element.reportPointId]
+                  : element.type === 'marker'
+                    ? points
+                        .filter((point) => point.number.trim() === element.number.trim())
+                        .map(pointKey)
+                    : [],
+              ),
+            ),
+          ];
+          if (!onRemovePoints(keys, activeIndex)) {
+            setClearMode(undefined);
+            setMessage('Você precisa de permissão para excluir os pontos, suas fotos e marcações.');
+            return;
+          }
+          // Photo deletion is queued with the report: do not expose an incomplete drawing-only undo.
+          setHistory([]);
+          setFuture([]);
+        } else if (data && editable)
           updateData({
             ...data,
             elements:
-              clearMode === 'points'
-                ? data.elements.filter((e) => e.type !== 'point' && e.type !== 'marker')
-                : clearMode === 'strokes'
-                  ? data.elements.filter((e) => e.type === 'point' || e.type === 'marker')
-                  : [],
+              clearMode === 'strokes'
+                ? data.elements.filter((e) => e.type === 'point' || e.type === 'marker')
+                : [],
           });
         setClearMode(undefined);
         setSelected('');
@@ -1832,48 +1920,23 @@ export function DrawingEditor({
   const quickActions =
     editable && data ? (
       <DrawingToolStrip label="ações do desenho">
-        {editingSelection && selectedElement && (
-          <>
-            <Button
-              title="Ajustar selecionado"
-              small
-              secondary
-              icon="tool"
-              onPress={() => {
-                Keyboard.dismiss();
-                setPrecisePosition(true);
-                if (expanded) setShowProperties(true);
-                else revealInline(propertiesView.current);
-              }}
-            />
-            <Button
-              title="Excluir selecionado"
-              small
-              secondary
-              icon="trash"
-              onPress={removeSelected}
-            />
-            {selectedElement.type !== 'point' && (
-              <Button
-                title="Duplicar"
-                small
-                secondary
-                icon="plus"
-                onPress={() => add({ ...moveElement(selectedElement, 25, 25), id: drawingId() })}
-              />
-            )}
-            <Button
-              title="Concluir ajuste"
-              small
-              secondary
-              onPress={() => {
-                setSelected('');
-                setDirectSelection(false);
-                setShowProperties(false);
-              }}
-            />
-          </>
-        )}
+        <Button
+          title="Limpar traços"
+          small
+          secondary
+          icon="trash"
+          disabled={!data.elements.some((e) => e.type !== 'point' && e.type !== 'marker')}
+          onPress={() => setClearMode('strokes')}
+        />
+        <Button
+          title="Limpar desenho"
+          small
+          secondary
+          icon="trash"
+          disabled={!data.elements.length}
+          onPress={() => setClearMode('all')}
+        />
+
         {expanded && (
           <Button
             title="Limpar pontos do desenho"
@@ -1882,6 +1945,15 @@ export function DrawingEditor({
             icon="pin"
             disabled={!data.elements.some((e) => e.type === 'point' || e.type === 'marker')}
             onPress={() => setClearMode('points')}
+          />
+        )}
+        {editingSelection && selectedElement && selectedElement.type !== 'point' && (
+          <Button
+            title="Duplicar"
+            small
+            secondary
+            icon="plus"
+            onPress={() => add({ ...moveElement(selectedElement, 25, 25), id: drawingId() })}
           />
         )}
         {!!hatchCorners.length && (
@@ -1951,22 +2023,6 @@ export function DrawingEditor({
             />
           </>
         )}
-        <Button
-          title="Limpar traços"
-          small
-          secondary
-          icon="trash"
-          disabled={!data.elements.some((e) => e.type !== 'point' && e.type !== 'marker')}
-          onPress={() => setClearMode('strokes')}
-        />
-        <Button
-          title="Limpar desenho"
-          small
-          secondary
-          icon="trash"
-          disabled={!data.elements.length}
-          onPress={() => setClearMode('all')}
-        />
       </DrawingToolStrip>
     ) : null;
   const closeEntry = () => {
@@ -1994,7 +2050,7 @@ export function DrawingEditor({
             setEntry(tool === 'point' ? 'point' : 'text');
           }}
         />
-        {(!expanded || screen.height >= 500) && (
+        {!expanded && (
           <Text style={[styles.muted, { fontSize: 11 }]}>
             {tool === 'point'
               ? 'Toque no desenho para marcar. O próximo número aparece automaticamente.'
@@ -2039,7 +2095,7 @@ export function DrawingEditor({
                 rotation: textRotation,
               });
               setText('');
-              setMessage('Texto inserido. Segure sobre ele para mover.');
+              setMessage('');
             }
             closeEntry();
             if (!expanded) revealInline(surface.current);
@@ -2061,6 +2117,104 @@ export function DrawingEditor({
         )}
       </View>
     </PickerSheet>
+  );
+  const toolPalette = (
+    <DrawingToolStrip label="ferramentas" rows={2}>
+      {tools.map((item) => (
+        <Pressable
+          key={item.id}
+          accessibilityRole="button"
+          accessibilityLabel={'Ferramenta ' + item.name.toLowerCase()}
+          aria-pressed={tool === item.id}
+          accessibilityState={selectionState(tool === item.id)}
+          onPress={() => selectTool(item.id)}
+          style={{
+            minHeight: 44,
+            paddingHorizontal: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            borderRadius: 8,
+            backgroundColor: tool === item.id ? t.colors.primary : t.colors.soft,
+            borderWidth: 1,
+            borderColor: tool === item.id ? t.colors.blue : t.colors.line,
+          }}
+        >
+          <Icon
+            name={item.icon}
+            size={18}
+            color={tool === item.id ? t.colors.white : t.colors.text}
+          />
+          <Text
+            numberOfLines={1}
+            style={{
+              flex: 1,
+              fontFamily: t.fonts.semibold,
+              fontSize: 12,
+              color: tool === item.id ? t.colors.white : t.colors.text,
+            }}
+          >
+            {item.name}
+          </Text>
+        </Pressable>
+      ))}
+    </DrawingToolStrip>
+  );
+  const selectionControls = editingSelection ? (
+    <View
+      style={{
+        paddingHorizontal: 8,
+        gap: 2,
+        ...(screen.width >= 600 ? { flexDirection: 'row', alignItems: 'center' } : {}),
+      }}
+    >
+      <Text style={[styles.muted, { fontSize: 11 }, screen.width >= 600 && { flex: 1 }]}>
+        Arraste para mover. Dois dedos giram e ajustam o tamanho.
+      </Text>
+      <View
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}
+      >
+        {selectedElement.type !== 'point' && selectedElement.type !== 'marker' && (
+          <>
+            <IconButton
+              label="Diminuir selecionado"
+              icon="minus"
+              small
+              disabled={
+                (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) <= 0.5) ||
+                (selectedElement.type === 'text' && (selectedElement.size ?? 20) <= 10)
+              }
+              onPress={() =>
+                updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1 / 1.15))
+              }
+            />
+            <IconButton
+              label="Aumentar selecionado"
+              icon="plus"
+              small
+              disabled={
+                (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) >= 3) ||
+                (selectedElement.type === 'text' && (selectedElement.size ?? 20) >= 40)
+              }
+              onPress={() => updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1.15))}
+            />
+          </>
+        )}
+        <IconButton
+          label="Ajustar selecionado"
+          icon="tool"
+          small
+          onPress={() => {
+            if (expanded) setShowProperties(true);
+            else revealInline(propertiesView.current);
+          }}
+        />
+        <IconButton label="Excluir selecionado" icon="trash" small onPress={removeSelected} />
+        <IconButton label="Concluir ajuste" icon="check" small onPress={finishSelection} />
+      </View>
+    </View>
+  ) : (
+    entryControls
   );
   const content = (
     <View style={{ gap: 18 }}>
@@ -2174,69 +2328,9 @@ export function DrawingEditor({
             </FormGrid>
           )}
           {editable && (
-            <View
-              style={{
-                gap: 12,
-                padding: 12,
-                backgroundColor: t.colors.soft,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: t.colors.line,
-              }}
-            >
-              <View style={[styles.row, { gap: 6 }]}>
-                {tools
-                  .filter((item) => advanced || primaryTools.includes(item.id))
-                  .map((item) => (
-                    <Pressable
-                      key={item.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={'Ferramenta ' + item.name.toLowerCase()}
-                      aria-pressed={tool === item.id}
-                      onPress={() => selectTool(item.id)}
-                      style={{
-                        minHeight: 44,
-                        paddingHorizontal: 12,
-                        borderRadius: 8,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 7,
-                        backgroundColor: tool === item.id ? t.colors.primary : t.colors.surface,
-                        borderWidth: 1,
-                        borderColor: tool === item.id ? t.colors.blue : t.colors.line,
-                      }}
-                    >
-                      <Icon
-                        name={item.icon}
-                        size={17}
-                        color={tool === item.id ? 'white' : t.colors.text}
-                      />
-                      <Text
-                        style={{
-                          fontFamily: t.fonts.semibold,
-                          fontSize: 12,
-                          color: tool === item.id ? 'white' : t.colors.text,
-                        }}
-                      >
-                        {item.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                <Button
-                  title={advanced ? 'Menos ferramentas' : 'Mais ferramentas'}
-                  small
-                  secondary
-                  onPress={() => {
-                    setAdvanced(!advanced);
-                    if (advanced && !primaryTools.includes(tool)) selectTool('pencil');
-                  }}
-                />
-              </View>
-              <Text style={[styles.muted, { fontSize: 12 }]}>
-                {start && ['pipe', 'line', 'dimension'].includes(tool)
-                  ? 'Início marcado. Toque em outro lugar para criar a linha.'
-                  : tools.find((item) => item.id === tool)?.hint}
-              </Text>
+            <>
+              {toolPalette}
+              {quickActions}
               <View style={styles.row}>
                 <Button
                   title="Desfazer"
@@ -2254,16 +2348,14 @@ export function DrawingEditor({
                   disabled={!future.length}
                   onPress={() => undo(true)}
                 />
-                {start && (
-                  <Button
-                    title="Concluir traçado"
-                    small
-                    icon="check"
-                    onPress={() => setStart(undefined)}
-                  />
-                )}
+                <Button
+                  title={advanced ? 'Menos ajustes' : 'Mais ajustes'}
+                  small
+                  secondary
+                  onPress={() => setAdvanced(!advanced)}
+                />
               </View>
-            </View>
+            </>
           )}
           <View
             style={{ flexDirection: mobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}
@@ -2295,14 +2387,13 @@ export function DrawingEditor({
                   <Button title="Ajustar" small secondary onPress={fit} />
                 </View>
               </View>
-              {quickActions}
               <Button title="Tela cheia" icon="expand" onPress={() => setExpanded(true)} />
-              {entryControls}
+              {selectionControls}
               {canvas}
               {annotation}
               <Text style={[styles.muted, { fontSize: 11 }]}>
-                Segure 1 segundo em um elemento e arraste para mover. Dois dedos: mover e ampliar ·
-                Mouse: roda para zoom
+                Segure brevemente para selecionar e arraste. Dois dedos no selecionado: girar, mover
+                e redimensionar · Mouse: roda para zoom
               </Text>
               <View style={[styles.row, { justifyContent: 'space-between' }]}>
                 <Text style={[styles.muted, { fontSize: 11 }]}>
@@ -2436,60 +2527,27 @@ export function DrawingEditor({
   return expanded ? (
     <DrawingWorkspace
       title={data?.title ?? 'Desenho técnico'}
-      toolName={tools.find((item) => item.id === tool)?.name ?? 'Desenho'}
+      toolName={
+        editingSelection && selectedElement
+          ? selectedElement.type === 'symbol'
+            ? 'Símbolo selecionado'
+            : selectedElement.type === 'text'
+              ? 'Texto selecionado'
+              : 'Elemento selecionado'
+          : (tools.find((item) => item.id === tool)?.name ?? 'Desenho')
+      }
       hint={
-        (tools.find((item) => item.id === tool)?.hint ?? '') +
-        ' Segure 1 segundo em qualquer elemento e arraste para mover.'
+        (tools.find((item) => item.id === tool)?.hint ?? '') + ' Segure brevemente para selecionar.'
       }
       message={message}
-      tools={
-        data && editable ? (
-          <DrawingToolStrip label="ferramentas">
-            {tools.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={'Ferramenta ' + item.name.toLowerCase()}
-                aria-pressed={tool === item.id}
-                accessibilityState={selectionState(tool === item.id)}
-                onPress={() => selectTool(item.id)}
-                style={{
-                  minHeight: 44,
-                  paddingHorizontal: 12,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  borderRadius: 8,
-                  backgroundColor: tool === item.id ? t.colors.primary : t.colors.soft,
-                }}
-              >
-                <Icon
-                  name={item.icon}
-                  size={18}
-                  color={tool === item.id ? t.colors.white : t.colors.text}
-                />
-                <Text
-                  style={{
-                    color: tool === item.id ? t.colors.white : t.colors.text,
-                    fontFamily: t.fonts.semibold,
-                    fontSize: 12,
-                  }}
-                >
-                  {item.name}
-                </Text>
-              </Pressable>
-            ))}
-          </DrawingToolStrip>
-        ) : null
-      }
-      actions={
-        data ? (
-          <>
-            {quickActions}
-            {entryControls}
-          </>
-        ) : null
-      }
+      toolsOpen={toolsOpen}
+      onToolsChange={(open) => {
+        setToolsOpen(open);
+        if (open) setShowProperties(false);
+      }}
+      tools={data && editable ? toolPalette : null}
+      actions={data ? quickActions : null}
+      selection={data ? selectionControls : null}
       canvas={
         data ? (
           canvas
@@ -2518,12 +2576,6 @@ export function DrawingEditor({
       }
       footer={
         <View style={{ gap: 4 }}>
-          {!!data?.notes && (
-            <ScrollView style={{ maxHeight: 70 }} contentContainerStyle={{ paddingHorizontal: 8 }}>
-              <Text style={[styles.muted, { fontSize: 12 }]}>Anotação do desenho · PDF</Text>
-              <Text style={styles.text}>{data.notes}</Text>
-            </ScrollView>
-          )}
           <ScrollView
             horizontal
             style={{ flexGrow: 0, flexShrink: 0, minHeight: 44 }}

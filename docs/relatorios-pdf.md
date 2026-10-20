@@ -36,6 +36,12 @@ A API verifica a imagem decodificada, limita pixels, ajusta orientação e taman
 
 ## PDF e aprovação
 
+O número do relatório é obrigatório desde o primeiro salvamento, inclusive em rascunho. A identificação abre automaticamente em relatórios novos ou antigos sem número. O app destaca o campo e preserva o preenchimento quando faltar o número; a API também exige o número para salvar, enviar para análise, aprovar ou gerar PDF. O aviso para continuar com outras pendências não dispensa essa identificação.
+
+As fotos são exibidas inteiras e centralizadas nos quadros do PDF, mantendo a proporção original. Imagens verticais ou panorâmicas podem deixar espaço branco, evitando cortes e distorção. Duas imagens continuam lado a lado.
+
+**Limpar pontos do desenho** pede confirmação e remove também os pontos correspondentes da lista de soldas, seus resultados, fotos e marcações em outros desenhos ao salvar. Pontos não presentes no desenho limpo são preservados. **Limpar traços** mantém os pontos; **Limpar desenho** continua removendo apenas os elementos da prancha.
+
 O topo mostra somente três etapas: **Rascunho → Análise → Aprovado**. No fim da Inspeção, **Ir para conclusão** abre a etapa Concluir. Somente nessa etapa aparece o bloco do rodapé com **Salvar**, **Baixar PDF** e **Enviar**, além de aprovação e observações quando permitidas. Voltar à Inspeção esconde esse bloco e preserva o preenchimento. Enviar oferece **Enviar para análise** e **Compartilhar PDF**; aprovar ou reabrir depende das permissões do usuário. Ao baixar ou enviar, alterações do formulário são salvas primeiro.
 
 Campos obrigatórios ausentes, pontos sem resultado/leitura, fotos faltantes no EVS, pontos sem marcação em desenhos existentes e responsáveis cadastrados sem assinatura aparecem em um aviso. O usuário pode conferir os dados ou continuar com as pendências. Continuar não exclui pontos, não preenche resultados e não transforma uma inspeção incompleta em aceitável. A API exige confirmação explícita para dispensar os campos obrigatórios da transição, mantendo autenticação, permissões, versão e validação da estrutura dos dados. A confirmação e as pendências são registradas na auditoria.

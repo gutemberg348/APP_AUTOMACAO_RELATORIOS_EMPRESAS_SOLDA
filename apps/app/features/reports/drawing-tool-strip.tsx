@@ -1,52 +1,57 @@
-import { useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Children, useState, type ReactNode } from 'react';
+import { ScrollView, View } from 'react-native';
 import { Icon } from '../../components/icon';
 import { useTheme } from '../../utils/theme';
 
-/** Keep the scroll controls outside the strip so they never disappear with its tools. */
-export function DrawingToolStrip({ children, label }: { children: ReactNode; label: string }) {
+/** Passive edge hints leave the full width and all touch gestures to the tools. */
+export function DrawingToolStrip({
+  children,
+  label,
+  rows = 1,
+}: {
+  children: ReactNode;
+  label: string;
+  rows?: 1 | 2;
+}) {
   const { tokens: t } = useTheme();
-  const scroll = useRef<ScrollView>(null);
-  const offset = useRef(0);
   const [position, setPosition] = useState(0);
   const [width, setWidth] = useState(0);
   const [contentWidth, setContentWidth] = useState(0);
   const end = Math.max(0, contentWidth - width);
+  const items = Children.toArray(children);
+  const columns = Math.ceil(items.length / 2);
   const arrow = (direction: -1 | 1) => {
-    const disabled = direction < 0 ? position <= 1 : position >= end - 1;
+    const visible = direction < 0 ? position > 1 : position < end - 1;
+    if (!visible) return null;
     return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Rolar ${label} para a ${direction < 0 ? 'esquerda' : 'direita'}`}
-        accessibilityState={{ disabled }}
-        disabled={disabled}
-        onPress={() => {
-          const x = Math.max(0, Math.min(end, offset.current + direction * width * 0.8));
-          offset.current = x;
-          scroll.current?.scrollTo({ x, animated: true });
-        }}
+      <View
+        pointerEvents="none"
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        testID={`scroll-hint-${label}-${direction < 0 ? 'left' : 'right'}`}
         style={{
-          width: 44,
-          height: 44,
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          [direction < 0 ? 'left' : 'right']: 2,
+          width: 18,
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: 8,
-          backgroundColor: t.colors.blueSoft,
-          opacity: disabled ? 0.3 : 1,
-          flexShrink: 0,
+          opacity: 0.55,
         }}
       >
-        <Icon name={direction < 0 ? 'arrow-left' : 'arrow-right'} size={22} color={t.colors.text} />
-      </Pressable>
+        <Icon name={direction < 0 ? 'arrow-left' : 'arrow-right'} size={18} color={t.colors.text} />
+      </View>
     );
   };
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-      {arrow(-1)}
+    <View style={{ position: 'relative', flexShrink: 0 }}>
       <ScrollView
-        ref={scroll}
         horizontal
-        style={{ flex: 1, minWidth: 0 }}
+        accessibilityLabel={label}
+        accessibilityHint="Deslize para os lados para ver mais opções."
+        style={{ width: '100%', minWidth: 0 }}
         contentContainerStyle={{ gap: 6, paddingVertical: 8 }}
         showsHorizontalScrollIndicator
         keyboardShouldPersistTaps="handled"
@@ -54,12 +59,19 @@ export function DrawingToolStrip({ children, label }: { children: ReactNode; lab
         onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
         onContentSizeChange={(nextWidth) => setContentWidth(nextWidth)}
         onScroll={(event) => {
-          offset.current = event.nativeEvent.contentOffset.x;
-          setPosition(offset.current);
+          setPosition(event.nativeEvent.contentOffset.x);
         }}
       >
-        {children}
+        {rows === 1
+          ? children
+          : items.slice(0, columns).map((item, index) => (
+              <View key={index} style={{ gap: 6, width: 144 }}>
+                {item}
+                {items[index + columns]}
+              </View>
+            ))}
       </ScrollView>
+      {arrow(-1)}
       {arrow(1)}
     </View>
   );

@@ -182,7 +182,7 @@ export function ReportForm({
   const [reapply, setReapply] = useState(false);
   const [saving, setSaving] = useState(false);
   const [acting, setActing] = useState(false);
-  const [identityOpen, setIdentityOpen] = useState(false);
+  const [identityOpen, setIdentityOpen] = useState(!report?.number.trim());
   const reveal = usePageScroll();
   const formTop = useRef<View>(null);
   const conclusionActions = useRef<View>(null);
@@ -536,6 +536,51 @@ export function ReportForm({
       setStep(0);
     }
   };
+  const removeDrawingPoints = (keys: string[], clearDrawingIndex?: number) => {
+    const removedKeys = new Set(keys);
+    const mediaIds = (report?.media ?? [])
+      .filter((photo) => !!photo.reportPointId && removedKeys.has(photo.reportPointId))
+      .map((photo) => photo.id);
+    if (
+      !canEdit('points') ||
+      !drawingEditable ||
+      (mediaIds.length && !user.permissions.includes('media.delete'))
+    ) {
+      setError(
+        new Error('Você precisa de permissão para excluir o ponto, suas fotos e marcações.'),
+      );
+      return false;
+    }
+    setValue(
+      'drawings',
+      getValues('drawings').map((drawing, drawingIndex) => ({
+        ...drawing,
+        data: {
+          ...drawing.data,
+          elements: drawing.data.elements.filter(
+            (element) =>
+              (element.type !== 'point' || !removedKeys.has(element.reportPointId)) &&
+              (drawingIndex !== clearDrawingIndex || element.type !== 'marker'),
+          ),
+        },
+      })),
+      { shouldDirty: true },
+    );
+    setValue(
+      'points',
+      getValues('points').filter((point) => !removedKeys.has(pointKey(point))),
+      { shouldDirty: true },
+    );
+    useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
+      ...draft,
+      photos: draft.photos.filter((photo) => !photo.pointKey || !removedKeys.has(photo.pointKey)),
+      removedIds: [...new Set([...draft.removedIds, ...mediaIds])],
+      captionEdits: Object.fromEntries(
+        Object.entries(draft.captionEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
+      ),
+    }));
+    return true;
+  };
   const mutation = useMutation({
     onMutate: () => {
       Keyboard.dismiss();
@@ -786,6 +831,7 @@ export function ReportForm({
                     render={({ field }) => (
                       <Field
                         label="Número do relatório"
+                        required
                         placeholder="Identificação do relatório"
                         value={field.value}
                         onChangeText={field.onChange}
@@ -999,53 +1045,8 @@ export function ReportForm({
                             ).length +
                             photoDrafts.photos.filter((photo) => photo.pointKey === key).length
                           }
-                          onRemovePoint={(key) => {
-                            const mediaIds = (report?.media ?? [])
-                              .filter((photo) => photo.reportPointId === key)
-                              .map((photo) => photo.id);
-                            if (
-                              !canEdit('points') ||
-                              !drawingEditable ||
-                              (mediaIds.length && !user.permissions.includes('media.delete'))
-                            ) {
-                              setError(
-                                new Error(
-                                  'Você precisa de permissão para excluir o ponto, suas fotos e marcações.',
-                                ),
-                              );
-                              return false;
-                            }
-                            setValue(
-                              'drawings',
-                              getValues('drawings').map((drawing) => ({
-                                ...drawing,
-                                data: {
-                                  ...drawing.data,
-                                  elements: drawing.data.elements.filter(
-                                    (element) =>
-                                      element.type !== 'point' || element.reportPointId !== key,
-                                  ),
-                                },
-                              })),
-                              { shouldDirty: true },
-                            );
-                            setValue(
-                              'points',
-                              getValues('points').filter((point) => pointKey(point) !== key),
-                              { shouldDirty: true },
-                            );
-                            useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
-                              ...draft,
-                              photos: draft.photos.filter((photo) => photo.pointKey !== key),
-                              removedIds: [...new Set([...draft.removedIds, ...mediaIds])],
-                              captionEdits: Object.fromEntries(
-                                Object.entries(draft.captionEdits ?? {}).filter(
-                                  ([id]) => !mediaIds.includes(id),
-                                ),
-                              ),
-                            }));
-                            return true;
-                          }}
+                          onRemovePoint={(key) => removeDrawingPoints([key])}
+                          onRemovePoints={removeDrawingPoints}
                           measurement={type.code === 'ME'}
                         />
                       )}

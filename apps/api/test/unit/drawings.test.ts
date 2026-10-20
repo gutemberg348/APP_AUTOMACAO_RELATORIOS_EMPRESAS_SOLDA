@@ -12,6 +12,7 @@ import {
   constrainPosition,
   hitElement,
   moveElement,
+  transformDrawingElement,
   moveHatchCorner,
   transformHatch,
   triangleHatchSegments,
@@ -19,6 +20,157 @@ import {
   removePointFromDrawings,
 } from '@weldcosta/shared';
 describe('Technical drawing geometry and safe rendering', () => {
+  it('resizes selections proportionally, enforces size limits and preserves inspection data', () => {
+    const symbol: DrawingElement = {
+      id: 'valve',
+      type: 'symbol',
+      x: 400,
+      y: 300,
+      symbolCode: 'valve',
+      scale: 2,
+      rotation: 30,
+    };
+    expect(transformDrawingElement(symbol, 60, 10, 20, 0.5)).toMatchObject({
+      id: 'valve',
+      x: 410,
+      y: 320,
+      rotation: 90,
+      scale: 1,
+    });
+    expect(transformDrawingElement(symbol, 0, 0, 0, 0.01)).toMatchObject({ scale: 0.5 });
+    expect(transformDrawingElement(symbol, 0, 0, 0, 100)).toMatchObject({ scale: 3 });
+    const text: DrawingElement = {
+      id: 'text',
+      type: 'text',
+      text: 'ÁGUA',
+      x: 300,
+      y: 300,
+      size: 20,
+    };
+    expect(transformDrawingElement(text, 0, 0, 0, 0.5)).toMatchObject({ text: 'ÁGUA', size: 10 });
+    expect(transformDrawingElement(text, 0, 0, 0, 10)).toMatchObject({ size: 40 });
+    const dimension: DrawingElement = {
+      id: 'dim',
+      type: 'dimension',
+      x1: 100,
+      y1: 100,
+      x2: 300,
+      y2: 100,
+      text: '200 mm',
+      offset: 35,
+      strokeWidth: 4,
+    };
+    expect(transformDrawingElement(dimension, 0, 0, 0, 0.5)).toEqual({
+      ...dimension,
+      x1: 150,
+      x2: 250,
+    });
+    const point: DrawingElement = {
+      id: 'point',
+      type: 'point',
+      x: 200,
+      y: 300,
+      reportPointId: 'weld-7',
+    };
+    expect(transformDrawingElement(point, 90, 0, 0, 0.1)).toEqual(point);
+    for (const factor of [NaN, Infinity, 0, -1]) {
+      expect(transformDrawingElement(symbol, 0, 0, 0, factor)).toBe(symbol);
+    }
+    expect(symbol.scale).toBe(2);
+  });
+  it('keeps resized closed shapes valid at page and minimum size limits', () => {
+    const shape: DrawingElement = {
+      id: 'shape',
+      type: 'polyline',
+      points: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 0 },
+      ],
+      hatch: { spacing: 12, angle: 0 },
+    };
+    for (const factor of [0.001, 0.5, 2, 100]) {
+      const result = transformDrawingElement(shape, 30, -100, -100, factor);
+      expect(result.type).toBe('polyline');
+      if (result.type !== 'polyline') continue;
+      expect(result.points[0]).toEqual(result.points.at(-1));
+      expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: [result] }).success).toBe(
+        true,
+      );
+    }
+  });
+  it('rotates and moves selected elements without changing their identity or size', () => {
+    const line: DrawingElement = {
+      id: 'line',
+      type: 'line',
+      x1: 100,
+      y1: 100,
+      x2: 300,
+      y2: 100,
+      strokeWidth: 4,
+    };
+    expect(transformDrawingElement(line, 90, 20, 50)).toMatchObject({
+      id: 'line',
+      x1: 220,
+      y1: 50,
+      x2: 220,
+      y2: 250,
+      strokeWidth: 4,
+    });
+    const text: DrawingElement = {
+      id: 'text',
+      type: 'text',
+      text: 'TQ',
+      x: 400,
+      y: 300,
+      rotation: 170,
+      size: 24,
+    };
+    expect(transformDrawingElement(text, 40, 15, -20)).toMatchObject({
+      x: 415,
+      y: 280,
+      rotation: -150,
+      text: 'TQ',
+      size: 24,
+    });
+    const point: DrawingElement = {
+      id: 'point',
+      type: 'point',
+      reportPointId: 'weld-7',
+      x: 990,
+      y: 790,
+    };
+    expect(transformDrawingElement(point, 90, 500, 500)).toMatchObject({
+      reportPointId: 'weld-7',
+      x: 1000,
+      y: 800,
+    });
+    expect(line.x1).toBe(100);
+  });
+  it('keeps rotated hatches closed and in bounds, and rejects rotations too large for the page', () => {
+    const hatch: DrawingElement = {
+      id: 'triangle',
+      type: 'polyline',
+      points: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 0, y: 100 },
+        { x: 0, y: 0 },
+      ],
+      hatch: { spacing: 12, angle: 170 },
+    };
+    const rotated = transformDrawingElement(hatch, 45, -100, -100);
+    expect(rotated.type).toBe('polyline');
+    if (rotated.type !== 'polyline') return;
+    expect(rotated.points[0]).toEqual(rotated.points.at(-1));
+    expect(rotated.hatch).toEqual({ spacing: 12, angle: -145 });
+    expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: [rotated] }).success).toBe(
+      true,
+    );
+    const wide: DrawingElement = { id: 'wide', type: 'line', x1: 0, y1: 400, x2: 1000, y2: 400 };
+    expect(transformDrawingElement(wide, 90)).toEqual(wide);
+  });
   it('keeps selection transparency and moving outlines out of saved drawings and PDFs', () => {
     const elements: DrawingElement[] = [
       { id: 'line', type: 'line', x1: 100, y1: 100, x2: 250, y2: 150 },

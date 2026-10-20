@@ -81,13 +81,18 @@ export const projectSchema = z
     path: ['endDate'],
   });
 export const statusSchema = z.object({ status: z.enum(recordStatuses) }).strict();
+export const reportNumberSchema = z
+  .string({ error: 'Informe o número do relatório.' })
+  .trim()
+  .min(1, 'Informe o número do relatório.')
+  .max(100);
 export const reportCreateSchema = z
   .object({
     reportTypeId: z.uuid(),
     prefillFromProject: z.boolean().default(true),
     companyId: z.uuid(),
     projectId: z.uuid(),
-    number: z.string().max(100).default(''),
+    number: reportNumberSchema,
     title: z.string().max(300).default(''),
     reportDate: z.iso.date().nullable().optional(),
     specificData: z.record(z.string(), z.unknown()).default({}),
@@ -99,7 +104,7 @@ export const reportCreateSchema = z
 export const reportUpdateSchema = z
   .object({
     removePointMediaIds: z.array(z.uuid()).max(2000).optional(),
-    number: z.string().max(100).optional(),
+    number: reportNumberSchema.optional(),
     title: z.string().max(300).optional(),
     reportDate: z.iso.date().nullable().optional(),
     specificData: z.record(z.string(), z.unknown()).optional(),
@@ -110,7 +115,7 @@ export const reportUpdateSchema = z
   })
   .strict();
 export const reportSubmissionSchema = z.object({
-  number: z.string().trim().min(1, 'Informe o número do relatório.'),
+  number: reportNumberSchema,
   title: z.string().trim().min(1, 'Informe o título do relatório.'),
   reportDate: z.date({ error: 'Informe uma data válida para o relatório.' }),
 });

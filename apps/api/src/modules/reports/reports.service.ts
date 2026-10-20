@@ -25,8 +25,7 @@ import { LocalStorageProvider } from '../../services/storage/local-storage-provi
 import { env } from '../../config/env';
 import { reportScope, assertCompanyAccess, signatureScope } from '../../middlewares/access-scope';
 const reportListInclude = { company: true, project: true, reportType: true } as const;
-// The list selector changes status independently of the manually assigned number.
-const statusSelectSchema = reportSubmissionSchema.omit({ number: true });
+const reportNumberRequired = reportCreateSchema.pick({ number: true });
 export const reportInclude = {
   ...reportListInclude,
   points: { orderBy: { sortOrder: 'asc' as const } },
@@ -339,6 +338,7 @@ export class ReportsService {
       assertEditable(report.status, user);
       if (report.version !== input.version) throw conflict();
       const { version, points, signatures, drawings, removePointMediaIds = [], ...fields } = input;
+      reportNumberRequired.parse({ number: input.number ?? report.number });
       if (drawings && !user.permissions.includes('drawing.edit'))
         throw new AppError(403, 'FORBIDDEN', 'Você não possui permissão para editar desenhos.');
       const previous = {
@@ -529,7 +529,8 @@ export class ReportsService {
           'Você não possui permissão para alterar para este status.',
         );
       if (input.status === 'IN_REVIEW' || input.status === 'APPROVED') {
-        if (!input.acknowledgeIncomplete) statusSelectSchema.parse(report);
+        reportNumberRequired.parse(report);
+        if (!input.acknowledgeIncomplete) reportSubmissionSchema.parse(report);
         specific(
           report.reportType.code,
           report.specificData,

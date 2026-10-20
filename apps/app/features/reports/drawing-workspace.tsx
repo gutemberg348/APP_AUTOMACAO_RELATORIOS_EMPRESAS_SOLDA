@@ -21,6 +21,9 @@ interface WorkspaceProps {
   toolName: string;
   hint: string;
   tools: ReactNode;
+  toolsOpen: boolean;
+  onToolsChange(open: boolean): void;
+  selection: ReactNode;
   actions: ReactNode;
   canvas: ReactNode;
   inspector: ReactNode;
@@ -171,7 +174,7 @@ function WorkspaceContent(props: WorkspaceProps) {
         <View
           testID="drawing-workspace-header"
           style={{
-            padding: inputMode && window.height < 500 ? 2 : 10,
+            padding: window.height < 500 ? (inputMode ? 2 : 4) : 10,
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
@@ -184,11 +187,6 @@ function WorkspaceContent(props: WorkspaceProps) {
             <Text numberOfLines={1} style={[styles.text, { fontFamily: t.fonts.bold }]}>
               {props.title}
             </Text>
-            {!inputMode && window.height >= 500 && (
-              <Text numberOfLines={1} style={[styles.muted, { fontSize: 11 }]}>
-                Salve o relatório ao terminar.
-              </Text>
-            )}
           </View>
           <Button
             title="Concluir desenho"
@@ -200,14 +198,33 @@ function WorkspaceContent(props: WorkspaceProps) {
         </View>
         {!inputMode && (
           <>
-            {props.tools}
-            {props.actions}
-            <Text
-              numberOfLines={window.height < 500 ? 1 : 2}
-              style={[styles.muted, { fontSize: 11, paddingHorizontal: 12, paddingBottom: 6 }]}
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                flexDirection: 'row',
+                gap: 8,
+                alignItems: 'center',
+              }}
             >
-              {props.hint}
-            </Text>
+              <Text numberOfLines={1} style={[styles.label, { flex: 1 }]}>
+                {props.toolName}
+              </Text>
+              <Button
+                title={props.toolsOpen ? 'Recolher ferramentas' : 'Ferramentas'}
+                icon={props.toolsOpen ? 'chevron-up' : 'chevron-down'}
+                small
+                secondary
+                onPress={() => props.onToolsChange(!props.toolsOpen)}
+              />
+            </View>
+            {props.toolsOpen && (
+              <>
+                {props.tools}
+                {props.actions}
+              </>
+            )}
+            {props.selection}
           </>
         )}
         <View

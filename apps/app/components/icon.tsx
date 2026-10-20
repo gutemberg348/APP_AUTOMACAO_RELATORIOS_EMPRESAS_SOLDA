@@ -12,6 +12,7 @@ export type IconName =
   | 'arrow-left'
   | 'chevron-right'
   | 'chevron-down'
+  | 'chevron-up'
   | 'check'
   | 'check-circle'
   | 'clock'
@@ -188,6 +189,8 @@ export function Icon({
         return <Path d="m9 6 6 6-6 6" />;
       case 'chevron-down':
         return <Path d="m6 9 6 6 6-6" />;
+      case 'chevron-up':
+        return <Path d="m6 15 6-6 6 6" />;
       case 'check':
         return <Path d="m5 12 4 4L19 6" />;
       case 'check-circle':

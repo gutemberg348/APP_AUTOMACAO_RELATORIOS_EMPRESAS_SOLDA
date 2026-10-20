@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { reportCreateSchema } from '@weldcosta/shared';
 import { access } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 import type { Report } from '../../generated/prisma/client';
@@ -67,6 +68,7 @@ export class PdfService implements PdfProvider {
     );
   }
   private async render(report: PdfReport, final: boolean) {
+    reportCreateSchema.pick({ number: true }).parse(report);
     const template = renderers[report.reportType.code];
     if (!template)
       throw new AppError(

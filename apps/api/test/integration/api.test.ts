@@ -63,6 +63,7 @@ describe('REST with PostgreSQL', () => {
           companyId: company.id,
           projectId: project.id,
           reportTypeId: typeId,
+          number: 'QA-64',
           createdById: sessions.ADMIN!.user.id,
           title: 'Photo reuse',
           points: {
@@ -167,6 +168,7 @@ describe('REST with PostgreSQL', () => {
           companyId: company.id,
           projectId: project.id,
           reportTypeId: typeId,
+          number: 'QA-168',
           createdById: sessions.ADMIN!.user.id,
           status,
           title: 'Delete check ' + status,
@@ -287,7 +289,7 @@ describe('REST with PostgreSQL', () => {
     expect((await request(app).get('/projects?limit=101').set(auth())).status).toBe(400);
   });
   it('checks type, association and draft data on report creation', async () => {
-    const data = { companyId, projectId, reportTypeId: typeId };
+    const data = { companyId, projectId, reportTypeId: typeId, number: 'QA-CREATE' };
     expect(
       (
         await request(app)
@@ -316,7 +318,7 @@ describe('REST with PostgreSQL', () => {
     expect(created.status).toBe(201);
     report = created.body.data;
     expect(report.status).toBe('DRAFT');
-    expect(report.number).toBe('');
+    expect(report.number).toBe(data.number);
     const submit = await request(app)
       .patch(`/reports/${report.id}/status`)
       .set(auth('INSPECTOR'))
@@ -452,7 +454,7 @@ describe('REST with PostgreSQL', () => {
         await request(app)
           .post('/reports')
           .set(auth())
-          .send({ companyId, projectId, reportTypeId: typeId })
+          .send({ companyId, projectId, reportTypeId: typeId, number: 'QA-INACTIVE' })
       ).status,
     ).toBe(409);
   });
@@ -672,6 +674,7 @@ describe('REST with PostgreSQL', () => {
       companyId: company.id,
       projectId: project.id,
       reportTypeId: typeId,
+      number: 'QA-673',
       prefillFromProject: false,
       specificData: {},
     });
@@ -872,6 +875,7 @@ describe('REST with PostgreSQL', () => {
         companyId,
         projectId,
         reportTypeId: typeId,
+        number: 'QA-873',
         points: [{ clientId: 'local-point', number: '01', type: 'WELD' }],
         drawings: [{ data }],
       });
@@ -895,6 +899,7 @@ describe('REST with PostgreSQL', () => {
         companyId: company.id,
         projectId: project.id,
         reportTypeId: typeId,
+        number: 'QA-896',
         points: [
           { clientId: 'remove', number: '01', type: 'WELD' },
           { clientId: 'keep', number: '02', type: 'WELD' },
@@ -990,6 +995,7 @@ describe('REST with PostgreSQL', () => {
         companyId: base.companyId,
         projectId: base.projectId,
         reportTypeId: base.reportTypeId,
+        number: 'QA-991',
         createdById: sessions.ADMIN!.user.id,
         status: 'APPROVED',
         title: 'Failure test',
@@ -1113,7 +1119,7 @@ describe('REST with PostgreSQL', () => {
     expect(concluded.body.data.media).toHaveLength(2);
     expect(concluded.body.data.specificData.finalReport).toBe('Inspeção concluída');
   });
-  it('changes status without a number, reopens approved/finalized reports and preserves prior PDF versions', async () => {
+  it('changes status with a number, reopens approved/finalized reports and preserves prior PDF versions', async () => {
     const company = await createFixtureCompany({ data: { name: 'Quick status company' } });
     const project = await prisma.project.create({
       data: { name: 'Quick status project', companyId: company.id },
@@ -1176,7 +1182,7 @@ describe('REST with PostgreSQL', () => {
       expect(response.status, JSON.stringify(response.body)).toBe(200);
       current = response.body.data;
       expect(current.status).toBe(status);
-      expect(current.number).toBe('');
+      expect(current.number).toBe(created.body.data.number);
       expect(current.points).toHaveLength(1);
       expect(current.drawings![0]!.data.elements).toHaveLength(1);
       if (status === 'DRAFT') {
@@ -1203,10 +1209,12 @@ describe('REST with PostgreSQL', () => {
     });
     expect(logs).toHaveLength(2);
     expect(logs[1]!.metadata).toMatchObject({ source: 'STATUS_SELECT', to: 'DRAFT' });
-    const incomplete = await request(app)
-      .post('/reports')
-      .set(auth())
-      .send({ companyId: company.id, projectId: project.id, reportTypeId: typeId });
+    const incomplete = await request(app).post('/reports').set(auth()).send({
+      companyId: company.id,
+      projectId: project.id,
+      reportTypeId: typeId,
+      number: 'QA-INCOMPLETE',
+    });
     const denied = await request(app)
       .patch('/reports/' + incomplete.body.data.id + '/status')
       .set(auth())
@@ -1216,7 +1224,7 @@ describe('REST with PostgreSQL', () => {
       (await prisma.report.findUniqueOrThrow({ where: { id: incomplete.body.data.id } })).status,
     ).toBe('DRAFT');
   }, 90000);
-  it('allows numberless selector changes for every report type while retaining other validations', async () => {
+  it('requires a number for every report type and retains other status validations', async () => {
     const company = await createFixtureCompany({ data: { name: 'Numberless selector company' } });
     const project = await prisma.project.create({
       data: { name: 'Numberless selector project', companyId: company.id },
@@ -1233,6 +1241,7 @@ describe('REST with PostgreSQL', () => {
           companyId: company.id,
           projectId: project.id,
           reportTypeId: type.id,
+          number: 'QA-1234',
           title: 'Numberless ' + type.code,
           reportDate: '2026-10-13',
         });
@@ -1243,7 +1252,9 @@ describe('REST with PostgreSQL', () => {
           .patch('/reports/' + current.id + '/status')
           .set(auth(role))
           .send({ status, quick, version });
+      await prisma.report.update({ where: { id: current.id }, data: { number: '' } });
       expect((await change('IN_REVIEW', false)).status).toBe(400);
+      await prisma.report.update({ where: { id: current.id }, data: { number: current.number } });
       expect((await change('APPROVED', true, 'VIEWER')).status).toBe(403);
       expect((await change('APPROVED', true, 'ADMIN', current.version + 1)).status).toBe(409);
       for (const status of ['IN_REVIEW', 'APPROVED', 'DRAFT']) {
@@ -1251,9 +1262,31 @@ describe('REST with PostgreSQL', () => {
         expect(response.status, JSON.stringify(response.body)).toBe(200);
         current = response.body.data;
         expect(current.status).toBe(status);
-        expect(current.number).toBe('');
+        expect(current.number).toBe(created.body.data.number);
       }
       expect(current.version).toBe(created.body.data.version + 3);
+      await prisma.report.update({ where: { id: current.id }, data: { number: '' } });
+      const missingNumber = await request(app)
+        .patch('/reports/' + current.id + '/status')
+        .set(auth())
+        .send({
+          status: 'APPROVED',
+          quick: true,
+          version: current.version,
+          acknowledgeIncomplete: true,
+        });
+      expect(missingNumber.status).toBe(400);
+      expect(missingNumber.body.error.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ['number'] })]),
+      );
+      expect(
+        (
+          await request(app)
+            .get('/reports/' + current.id + '/pdf/preview')
+            .set(auth())
+        ).status,
+      ).toBe(400);
+      await prisma.report.update({ where: { id: current.id }, data: { number: current.number } });
       await prisma.report.update({ where: { id: current.id }, data: { reportDate: null } });
       const missingDate = await change('APPROVED', true);
       expect(missingDate.status).toBe(400);
@@ -1285,6 +1318,7 @@ describe('REST with PostgreSQL', () => {
           companyId: company.id,
           projectId: project.id,
           reportTypeId: typeId,
+          number: 'QA-1286',
           title: '',
           reportDate: null,
           points: [
@@ -1407,6 +1441,7 @@ describe('REST with PostgreSQL', () => {
           companyId: company.id,
           projectId: project.id,
           reportTypeId: typeId,
+          number: 'QA-1408',
           createdById: sessions.ADMIN!.user.id,
           status: 'FINISHED',
         },

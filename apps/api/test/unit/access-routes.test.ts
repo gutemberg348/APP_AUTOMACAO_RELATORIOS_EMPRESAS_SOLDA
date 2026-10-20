@@ -42,10 +42,12 @@ describe('Access enforcement before reading or writing report data', () => {
         .get('/companies/' + deniedId + '/projects')
         .set(auth),
       request(app).post('/projects').set(auth).send({ name: 'Denied', companyId: deniedId }),
-      request(app)
-        .post('/reports')
-        .set(auth)
-        .send({ companyId: deniedId, projectId: randomUUID(), reportTypeId: randomUUID() }),
+      request(app).post('/reports').set(auth).send({
+        companyId: deniedId,
+        projectId: randomUUID(),
+        reportTypeId: randomUUID(),
+        number: 'QA-ACCESS',
+      }),
     ]);
     for (const response of responses) {
       expect(response.status).toBe(403);

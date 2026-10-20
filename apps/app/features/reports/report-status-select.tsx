@@ -115,6 +115,10 @@ export function ReportStatusSelect({
       if (
         error instanceof ApiError &&
         error.code === 'VALIDATION_ERROR' &&
+        !(
+          Array.isArray(error.details) &&
+          error.details.some((issue: { path?: string[] }) => issue.path?.[0] === 'number')
+        ) &&
         !variables.acknowledgeIncomplete
       ) {
         setOpen(false);
