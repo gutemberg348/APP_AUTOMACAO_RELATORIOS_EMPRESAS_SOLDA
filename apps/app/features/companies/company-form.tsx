@@ -1,6 +1,6 @@
 import { useTheme } from '../../utils/theme';
 import { useState, useEffect, useRef } from 'react';
-import { Text, View } from 'react-native';
+import { Text, View, type ViewInstance } from 'react-native';
 import { Controller, useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -37,7 +37,7 @@ export function CompanyForm({ company, onSaved }: { company?: Company; onSaved?(
   const { tokens: t, styles } = useTheme();
   const [error, setError] = useState<unknown>(),
     client = useQueryClient();
-  const nodes = useRef<Record<string, View | null>>({});
+  const nodes = useRef<Record<string, ViewInstance | null>>({});
   const reveal = usePageScroll();
   const [feedback, setFeedback] = useState({ field: '', attempt: 0 });
   useEffect(() => {

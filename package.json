@@ -36,11 +36,14 @@
     "db:seed": "npm run db:seed --workspace @weldcosta/api"
   },
   "overrides": {
-    "react-native-worklets": "0.10.1",
-    "react-native-reanimated": "4.5.1",
-    "react-native-gesture-handler": "2.32.0",
+    "react-native-worklets": "0.13.0",
+    "react-native-reanimated": "4.7.1",
+    "react-native-gesture-handler": "~3.3.0",
     "deepmerge-ts": "^8.0.2",
-    "mysql2": "^3.24.5"
+    "mysql2": "^3.24.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

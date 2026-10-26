@@ -5,7 +5,8 @@ import {
   ScrollView,
   StyleSheet,
   type ScrollViewProps,
-  type View,
+  type ViewInstance,
+  type ScrollViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { InputVisibilityContext } from './input-visibility';
@@ -19,10 +20,10 @@ export function KeyboardScrollView({
   onScroll,
   onContentSizeChange,
   ...props
-}: ScrollViewProps & { scrollRef?: RefObject<ScrollView | null> }) {
-  const local = useRef<ScrollView>(null);
+}: ScrollViewProps & { scrollRef?: RefObject<ScrollViewInstance | null> }) {
+  const local = useRef<ScrollViewInstance>(null);
   const scroll = scrollRef ?? local;
-  const focused = useRef<View | null>(null);
+  const focused = useRef<ViewInstance | null>(null);
   const offset = useRef(0);
   const keyboardTop = useRef<number | undefined>(undefined);
   const { top: topInset } = useSafeAreaInsets();
@@ -68,7 +69,7 @@ export function KeyboardScrollView({
     timer.current = setTimeout(reveal, 80);
   }, [reveal]);
   const focus = useCallback(
-    (target: View | null) => {
+    (target: ViewInstance | null) => {
       focused.current = target;
       if (target) schedule();
     },

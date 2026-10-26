@@ -15,6 +15,33 @@ const lines: DrawingElement[] = [
   { id: 'outside', type: 'line', x1: 100, y1: 200, x2: 100, y2: 400 },
 ];
 describe('Lasso selection and rigid block transforms', () => {
+  it('enlarges rotated portrait images beyond their old unrotated height limit', () => {
+    const image: DrawingElement = {
+      id: 'photo',
+      type: 'image',
+      mediaKey: 'photo',
+      x: 500,
+      y: 400,
+      width: 350,
+      height: 800,
+      rotation: 89,
+    };
+    const enlarged = transformDrawingSelection([image], 0, 0, 0, 1.05);
+    expect(enlarged[0]).toMatchObject({ width: 367.5, height: 840 });
+    expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: enlarged }).success).toBe(
+      true,
+    );
+    const fitted = transformDrawingSelection(enlarged, 0, 0, 0, 2);
+    const bounds = drawingSelectionBounds(fitted);
+    expect(bounds.width).toBeCloseTo(1000);
+    expect(bounds.height).toBeLessThanOrEqual(800);
+    expect(bounds.center.x).toBeCloseTo(500);
+    expect(bounds.center.y).toBeCloseTo(400);
+    expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: fitted }).success).toBe(
+      true,
+    );
+  });
+
   it('resizes an entire mixed drawing together and restores it without losing weld links or appearance', () => {
     const elements: DrawingElement[] = [
       {

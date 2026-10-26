@@ -37,8 +37,10 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       locked: z.boolean().optional(),
       mediaKey: id,
       ...xy,
-      width: z.number().finite().min(10).max(1000),
-      height: z.number().finite().min(10).max(800),
+      // Local axes can exceed a page axis after rotation; the transformed
+      // footprint determines whether the image fits on the page.
+      width: z.number().finite().min(10).max(1281),
+      height: z.number().finite().min(10).max(1281),
       rotation: z.number().finite().min(-360).max(360).default(0),
     })
     .strict(),
@@ -617,6 +619,9 @@ export function drawingSvg(
     lasso?: DrawingPosition[];
     rotationControl?: { center: DrawingPosition; handle: DrawingPosition; radius: number };
     endpointRadius?: number;
+    resizeHandleRadius?: number;
+    anchor?: DrawingPosition;
+    anchorRadius?: number;
     snapGuide?: { x?: number; y?: number; anchor?: DrawingPosition };
   } = {},
 ) {
@@ -813,6 +818,18 @@ export function drawingSvg(
       right = num(b.x + b.width + 8),
       bottom = num(b.y + b.height + 8);
     selectionOverlay = `<path data-selection-frame="true" d="M${x} ${y}L${right} ${y}L${right} ${bottom}L${x} ${bottom}Z" fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+    if (options.resizeHandleRadius)
+      selectionOverlay += [
+        [x, y],
+        [right, y],
+        [right, bottom],
+        [x, bottom],
+      ]
+        .map(
+          ([cx, cy]) =>
+            `<circle data-resize-handle="true" cx="${cx}" cy="${cy}" r="${num(options.resizeHandleRadius!)}" fill="white" stroke="#1764C0" stroke-width="2" vector-effect="non-scaling-stroke" pointer-events="none"/>`,
+        )
+        .join('');
   }
   const lasso = options.lasso?.length
     ? `<path data-lasso="true" d="${options.lasso.map((p, i) => `${i ? 'L' : 'M'}${num(p.x)} ${num(p.y)}`).join(' ')}Z" fill="#1764C0" fill-opacity="0.08" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`
@@ -841,5 +858,8 @@ export function drawingSvg(
           'H1000" stroke="#D97706" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>'
         : '')
     : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}</svg>`;
+  const anchor = options.anchor
+    ? `<circle cx="${num(options.anchor.x)}" cy="${num(options.anchor.y)}" r="${num(options.anchorRadius ?? 3)}" fill="#1764C0" pointer-events="none"/>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}${anchor}</svg>`;
 }

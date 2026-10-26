@@ -1,7 +1,7 @@
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Keyboard } from 'react-native';
+import { View, Text, Pressable, Keyboard, type ViewInstance } from 'react-native';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
@@ -184,11 +184,11 @@ export function ReportForm({
   const [acting, setActing] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(!report?.number.trim());
   const reveal = usePageScroll();
-  const formTop = useRef<View>(null);
-  const conclusionActions = useRef<View>(null);
+  const formTop = useRef<ViewInstance>(null);
+  const conclusionActions = useRef<ViewInstance>(null);
   const [sectionNavigation, setSectionNavigation] = useState(0);
   const previousReveal = useRef({ step, error, sectionNavigation });
-  const sectionViews = useRef<Record<string, View | null>>({});
+  const sectionViews = useRef<Record<string, ViewInstance | null>>({});
   const errorSection = useRef<string | undefined>(undefined);
   const [openSectionTitle, setOpenSectionTitle] = useState<string | null>();
   const editingBusy = pickingPhoto || saving || acting;

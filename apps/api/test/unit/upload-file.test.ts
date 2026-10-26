@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { convertFormDataAsync } from '../../../../node_modules/expo/src/winter/fetch/convertFormData';
+import { convertFormDataAsync } from 'expo/src/winter/fetch/convertFormData';
 import { appendUploadFile } from '../../../app/services/upload-file';
 
 const state = vi.hoisted(() => ({
@@ -59,7 +59,7 @@ beforeEach(() => {
   state.size = 4;
 });
 
-describe('Uploads with the installed Expo SDK 57 serializer', () => {
+describe('Uploads with the installed Expo serializer', () => {
   it('reproduces the old URI-only upload failure before any HTTP request', async () => {
     const form = new NativeFormData();
     form.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType });

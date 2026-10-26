@@ -151,9 +151,16 @@ export function transformDrawingSelection(
   );
   const maxScale = Math.min(
     100,
+    // Use the rotated footprint rather than the image's unrotated height.
+    ...(angle === 0 && scale > 1
+      ? [
+          bounds.width > 0 ? 1000 / bounds.width : 100,
+          bounds.height > 0 ? 800 / bounds.height : 100,
+        ]
+      : []),
     ...elements.map((e) =>
       e.type === 'image'
-        ? Math.min(1000 / e.width, 800 / e.height)
+        ? Math.min(1281 / e.width, 1281 / e.height)
         : e.type === 'symbol'
           ? 3 / (e.scale ?? 1)
           : e.type === 'text'
@@ -216,7 +223,7 @@ export function transformDrawingSelection(
     return { ...e, ...p, ...(label ? { labelX: label.x, labelY: label.y } : {}) };
   });
   const nextBounds = drawingSelectionBounds(next);
-  if (nextBounds.width > 1000 || nextBounds.height > 800) return elements;
+  if (nextBounds.width > 1000 + 1e-6 || nextBounds.height > 800 + 1e-6) return elements;
   // Rotation in place must not silently translate the selection away from its pivot.
   if (
     angle !== 0 &&

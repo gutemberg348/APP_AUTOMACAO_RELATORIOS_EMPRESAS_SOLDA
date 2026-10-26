@@ -8,6 +8,8 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type ViewInstance,
+  type ScrollViewInstance,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -25,6 +27,9 @@ interface WorkspaceProps {
   toolsOpen: boolean;
   onToolsChange(open: boolean): void;
   selection: ReactNode;
+  hasSelectionControls: boolean;
+  selectionOptionsOpen: boolean;
+  onSelectionOptionsChange(open: boolean): void;
   actions: ReactNode;
   canvas: ReactNode;
   inspector: ReactNode;
@@ -45,9 +50,9 @@ function InspectorScroll({
   onEditing(): void;
   editing: boolean;
 }) {
-  const viewport = useRef<View>(null),
-    scroll = useRef<ScrollView>(null),
-    focused = useRef<View | null>(null),
+  const viewport = useRef<ViewInstance>(null),
+    scroll = useRef<ScrollViewInstance>(null),
+    focused = useRef<ViewInstance | null>(null),
     offset = useRef(0);
   const scheduled = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reveal = useCallback(() => {
@@ -79,7 +84,7 @@ function InspectorScroll({
     };
   }, [editing, scheduleReveal]);
   const onFocus = useCallback(
-    (target: View | null) => {
+    (target: ViewInstance | null) => {
       focused.current = target;
       onEditing();
       scheduleReveal();
@@ -212,6 +217,16 @@ function WorkspaceContent(props: WorkspaceProps) {
                 {props.toolName}
               </Text>
               {props.imageAction}
+              {props.hasSelectionControls && (
+                <IconButton
+                  label="Opções da seleção e ferramenta"
+                  icon="tool"
+                  onPress={() => {
+                    props.onToolsChange(false);
+                    props.onSelectionOptionsChange(!props.selectionOptionsOpen);
+                  }}
+                />
+              )}
               <Button
                 title={props.toolsOpen ? 'Recolher ferramentas' : 'Ferramentas'}
                 icon={props.toolsOpen ? 'chevron-up' : 'chevron-down'}
@@ -231,14 +246,6 @@ function WorkspaceContent(props: WorkspaceProps) {
                 {props.footer}
               </ScrollView>
             )}
-            {!props.toolsOpen && (
-              <ScrollView
-                style={{ maxHeight: window.height * 0.28, flexGrow: 0 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                {props.selection}
-              </ScrollView>
-            )}
           </>
         )}
         <View
@@ -249,6 +256,41 @@ function WorkspaceContent(props: WorkspaceProps) {
           {(!inputMode || sideBySide) && (
             <View style={{ flex: 1, minHeight: 0, padding: 8, backgroundColor: t.colors.soft }}>
               {props.canvas}
+              {props.selectionOptionsOpen && !props.toolsOpen && !props.showInspector && (
+                <View
+                  testID="drawing-selection-options"
+                  style={{
+                    position: 'absolute',
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                    maxHeight: '50%',
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: t.colors.line,
+                    backgroundColor: t.colors.surface,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }}
+                  >
+                    <Text style={[styles.label, { flex: 1 }]}>{props.toolName} · opções</Text>
+                    <IconButton
+                      label="Recolher opções"
+                      icon="chevron-down"
+                      onPress={() => props.onSelectionOptionsChange(false)}
+                    />
+                  </View>
+                  <ScrollView
+                    style={{ flexShrink: 1 }}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 12, gap: 8 }}
+                  >
+                    {props.selection}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           )}
           {props.showInspector && (

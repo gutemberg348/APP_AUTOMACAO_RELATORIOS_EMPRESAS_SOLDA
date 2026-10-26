@@ -1,6 +1,7 @@
 import { access, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import {
   root,
@@ -18,6 +19,7 @@ import {
 } from './lib/android-build-path.mjs';
 
 const signingRoot = path.join(root, '.android-signing');
+const require = createRequire(import.meta.url);
 let buildPath;
 const exists = (file) =>
   access(file).then(
@@ -163,7 +165,7 @@ try {
     await run(
       process.execPath,
       [
-        path.join(buildPath.root, 'node_modules/expo/bin/cli'),
+        require.resolve('expo/bin/cli', { paths: [appRoot] }),
         'prebuild',
         '--platform',
         'android',

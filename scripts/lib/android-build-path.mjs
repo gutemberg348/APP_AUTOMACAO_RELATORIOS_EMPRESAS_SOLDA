@@ -1,6 +1,8 @@
 import { access, readFile, writeFile, readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { run } from './deployment.mjs';
+const require = createRequire(import.meta.url);
 
 const exists = (file) =>
   access(file).then(
@@ -103,10 +105,9 @@ export function remapAutolinkingPaths(value, workspace, buildRoot) {
 export async function prepareWindowsAutolinking(workspace, buildRoot) {
   if (process.platform !== 'win32') return;
   const appRoot = path.join(buildRoot, 'apps/app');
-  const cli = path.join(
-    buildRoot,
-    'node_modules/expo-modules-autolinking/bin/expo-modules-autolinking.js',
-  );
+  const cli = require.resolve('expo-modules-autolinking/bin/expo-modules-autolinking.js', {
+    paths: [appRoot],
+  });
   const output = await run(
     process.execPath,
     [cli, 'react-native-config', '--platform', 'android', '--json'],

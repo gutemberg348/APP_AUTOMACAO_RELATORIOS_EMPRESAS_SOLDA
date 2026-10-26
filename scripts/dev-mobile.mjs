@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { deployment, publicApiUrl, root } from './lib/deployment.mjs';
 
 const args = process.argv.slice(2);
+const require = createRequire(import.meta.url);
 const apiUrl = publicApiUrl(deployment.apiUrl);
 console.log(`Expo Go — API online: ${apiUrl}`);
 console.log('Os cadastros e alterações feitos no app serão gravados no servidor online.');
@@ -17,7 +19,7 @@ try {
     const child = spawn(
       process.execPath,
       [
-        path.join(root, 'node_modules/expo/bin/cli'),
+        require.resolve('expo/bin/cli', { paths: [path.join(root, 'apps/app')] }),
         'start',
         '--go',
         '--lan',

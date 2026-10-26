@@ -1,7 +1,7 @@
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, Switch, Keyboard } from 'react-native';
+import { View, Text, Pressable, Switch, Keyboard, type ViewInstance } from 'react-native';
 import {
   Controller,
   useFieldArray,
@@ -132,7 +132,7 @@ export function ReportPoints({
   const [error, setError] = useState<unknown>();
   const [removingKey, setRemovingKey] = useState<string>();
   const [finishing, setFinishing] = useState<{ key: string; add: boolean }>();
-  const headers = useRef<Record<string, View | null>>({});
+  const headers = useRef<Record<string, ViewInstance | null>>({});
   const revealPending = useRef(false);
   const reveal = usePageScroll();
   const values = useWatch({ control, name: 'points' });
@@ -713,9 +713,9 @@ export function ReportSigners({
   const [selecting, setSelecting] = useState<number | null>(null);
   const [registering, setRegistering] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
-  const signerViews = useRef<Record<number, View | null>>({});
+  const signerViews = useRef<Record<number, ViewInstance | null>>({});
   const [revealIndex, setRevealIndex] = useState<number | null>(null);
-  const registrationView = useRef<View>(null);
+  const registrationView = useRef<ViewInstance>(null);
   const revealSigner = usePageScroll();
   useEffect(() => {
     if (registering === null) return;

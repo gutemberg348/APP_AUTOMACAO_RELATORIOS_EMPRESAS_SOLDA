@@ -1,6 +1,6 @@
 import { useTheme } from '../../utils/theme';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, type ViewInstance } from 'react-native';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -61,9 +61,9 @@ export function ProjectForm({
     attempt: number;
     errors: Record<string, string>;
   }>({ target: '', attempt: 0, errors: {} });
-  const fieldNodes = useRef<Record<string, View | null>>({});
+  const fieldNodes = useRef<Record<string, ViewInstance | null>>({});
   const reveal = usePageScroll();
-  const registerField = useCallback((key: string, node: View | null) => {
+  const registerField = useCallback((key: string, node: ViewInstance | null) => {
     fieldNodes.current[key] = node;
   }, []);
   const revealError = useCallback(

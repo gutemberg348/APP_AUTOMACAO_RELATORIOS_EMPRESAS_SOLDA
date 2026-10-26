@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   View,
@@ -20,6 +19,8 @@ import {
   type TextInputProps,
   type StyleProp,
   type ViewStyle,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from 'react-native';
 
 import { Icon, type IconName } from './icon';
@@ -50,10 +51,10 @@ export function Page({
   const { tokens: t, styles } = useTheme();
   const { width } = useWindowDimensions();
   const mobile = width < 640;
-  const scroll = useRef<ScrollView>(null);
-  const viewport = useRef<View>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
+  const viewport = useRef<ViewInstance>(null);
   const offset = useRef(0);
-  const reveal = useCallback((target?: View | null) => {
+  const reveal = useCallback((target?: ViewInstance | null) => {
     if (!target) {
       scroll.current?.scrollTo({ y: 0, animated: true });
       return;
@@ -356,7 +357,7 @@ export function Field({
 }) {
   const { tokens: t, styles } = useTheme();
   const [focus, setFocus] = useState(false);
-  const container = useRef<View>(null);
+  const container = useRef<ViewInstance>(null);
   const revealInput = useContext(InputVisibilityContext);
   const { width, height } = useWindowDimensions();
   const mobile = width < 640;

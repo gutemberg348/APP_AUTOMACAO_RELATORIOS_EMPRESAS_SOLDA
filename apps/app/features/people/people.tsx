@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, View, Switch } from 'react-native';
+import { ScrollView, Text, View, Switch, type ViewInstance } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -86,7 +86,7 @@ export function PersonForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState<Record<string, string>>({});
-  const nodes = useRef<Record<string, View | null>>({}),
+  const nodes = useRef<Record<string, ViewInstance | null>>({}),
     reveal = usePageScroll();
   const [feedback, setFeedback] = useState({ field: '', attempt: 0 });
   useEffect(() => {
@@ -94,7 +94,7 @@ export function PersonForm({
     const frame = requestAnimationFrame(() => reveal(nodes.current[feedback.field]));
     return () => cancelAnimationFrame(frame);
   }, [feedback, reveal]);
-  const node = (key: string) => (value: View | null) => {
+  const node = (key: string) => (value: ViewInstance | null) => {
     nodes.current[key] = value;
   };
   const problem = (issues: { path: readonly PropertyKey[]; message: string }[]) => {

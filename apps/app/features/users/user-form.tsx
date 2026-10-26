@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, View, type ViewInstance } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   userProfileSchema,
@@ -68,7 +68,7 @@ export function UserForm({
         JSON.stringify((user?.companyAccess?.map((access) => access.companyId) ?? []).sort()),
   );
   const reveal = usePageScroll(),
-    nodes = useRef<Record<string, View | null>>({});
+    nodes = useRef<Record<string, ViewInstance | null>>({});
   const [feedback, setFeedback] = useState({ field: '', attempt: 0 });
   useEffect(() => {
     if (feedback.attempt) {

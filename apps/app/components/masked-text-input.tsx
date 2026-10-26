@@ -1,5 +1,5 @@
 import { useLayoutEffect, useReducer, useRef, useState } from 'react';
-import { Platform, TextInput, type TextInputProps } from 'react-native';
+import { Platform, TextInput, type TextInputProps, type TextInputInstance } from 'react-native';
 import {
   formatInputMask,
   maskedEdit,
@@ -28,7 +28,7 @@ export function MaskedTextInput({
     setLastValue(formatted);
     setDisplay(formatted);
   }
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const previous = useRef(formatted);
   const previousSelection = useRef<MaskSelection>({
     start: formatted.length,

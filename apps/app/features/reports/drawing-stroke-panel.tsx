@@ -12,7 +12,7 @@ export type StrokeAppearance = {
   strokeStyle: 'solid' | 'dotted' | 'dashed';
 };
 export const strokeStyleLabels = { solid: 'Contínua', dotted: 'Pontilhada', dashed: 'Tracejada' };
-const colors = [
+export const drawingStrokeColors = [
   ['Preto', '#263D52'],
   ['Azul', '#1764C0'],
   ['Vermelho', '#DC2626'],
@@ -116,7 +116,7 @@ export function DrawingStrokePanel({
         </View>
         <Text style={styles.label}>Cor da linha</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          {colors.map(([name, color]) => (
+          {drawingStrokeColors.map(([name, color]) => (
             <Pressable
               key={color}
               accessibilityRole="button"

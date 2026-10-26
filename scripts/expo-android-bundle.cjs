@@ -15,6 +15,6 @@ if (mappedRoot) {
   });
 }
 process.chdir(fs.realpathSync.native(process.cwd()));
-const cli = path.join(workspace, 'node_modules/expo/bin/cli');
+const cli = require.resolve('expo/bin/cli', { paths: [path.join(workspace, 'apps/app')] });
 process.argv[1] = cli;
 require(cli);

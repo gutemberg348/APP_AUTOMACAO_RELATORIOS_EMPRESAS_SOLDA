@@ -12,10 +12,12 @@ import {
   useWindowDimensions,
   type ViewStyle,
   type PanResponderCallbacks,
+  type ViewInstance,
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
+import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
 import {
   drawingGroupMembers,
   drawingUnlocked,
@@ -87,6 +89,29 @@ import { SelectField } from '../../components/select-field';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 
 import { Icon, type IconName } from '../../components/icon';
+
+// Rotation/translation do not change this measure, unlike an axis-aligned box.
+function selectionSize(elements: DrawingElement[]) {
+  const size = elements.reduce((total, e) => {
+    if (e.type === 'line' || e.type === 'dimension')
+      return total + Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+    if (e.type === 'polyline')
+      return (
+        total +
+        e.points
+          .slice(1)
+          .reduce((sum, p, i) => sum + Math.hypot(p.x - e.points[i]!.x, p.y - e.points[i]!.y), 0)
+      );
+    if (e.type === 'image') return total + Math.hypot(e.width, e.height);
+    if (e.type === 'symbol') return total + (e.scale ?? 1);
+    if (e.type === 'text') return total + (e.size ?? 20);
+    return total;
+  }, 0);
+  if (size > 0) return size;
+  const dots = elements.filter((e) => e.type === 'point' || e.type === 'marker');
+  const origin = dots[0];
+  return origin ? dots.reduce((sum, p) => sum + Math.hypot(p.x - origin.x, p.y - origin.y), 0) : 0;
+}
 
 type Tool =
   | 'lasso'
@@ -323,10 +348,14 @@ export function DrawingEditor({
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const drawingImages = useDrawingImages(reportId, media, photoDraftKey);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all'>();
+  const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all' | 'selection'>();
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [selectionOptionsOpen, setSelectionOptionsOpen] = useState(false);
+  const [contextOptionsOpen, setContextOptionsOpen] = useState(false);
+  const [canvasGestureActive, setCanvasGestureActive] = useState(false);
   const [entry, setEntry] = useState<'point' | 'text'>();
   const [textPosition, setTextPosition] = useState<DrawingPosition>();
-  const surface = useRef<View>(null);
+  const surface = useRef<ViewInstance>(null);
   const wheelHandler = useRef<(event: WheelEvent) => void>(() => {});
   const multiTouch = useRef(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -377,7 +406,7 @@ export function DrawingEditor({
   const [blockAngle, setBlockAngle] = useState(0);
   const blockGesture = useRef<
     | {
-        mode: 'lasso' | 'move' | 'rotate';
+        mode: 'lasso' | 'move' | 'rotate' | 'resize';
         view: { x: number; y: number; w: number; h: number };
         start: DrawingPosition;
         samples: DrawingPosition[];
@@ -415,10 +444,10 @@ export function DrawingEditor({
   const [strokePanelOpen, setStrokePanelOpen] = useState(false);
   const [selectionOpacity, setSelectionOpacity] = useState(0.5);
   const [moveStep, setMoveStep] = useState(5);
-  const propertiesView = useRef<View>(null);
+  const propertiesView = useRef<ViewInstance>(null);
   const [hatchCorners, setHatchCorners] = useState<DrawingPosition[]>([]);
   const [hatchDefaults, setHatchDefaults] = useState({ spacing: 8, angle: 90, strokeWidth: 1.2 });
-  const annotationField = useRef<View>(null);
+  const annotationField = useRef<ViewInstance>(null);
   const [textRotation, setTextRotation] = useState(0);
   const [symbolScale, setSymbolScale] = useState(1);
   const [symbol, setSymbol] = useState('valve'),
@@ -482,6 +511,23 @@ export function DrawingEditor({
       : [];
   const visibleTransformElements =
     blockDraft ?? (draftElement && editingSelection ? [draftElement] : transformElements);
+  const sizeSelectionKey = transformElements
+    .map((e) => e.id)
+    .sort()
+    .join('|');
+  const currentSelectionSize = selectionSize(visibleTransformElements);
+  const [sizeReference, setSizeReference] = useState({ key: '', size: 0 });
+  useEffect(() => {
+    setSizeReference((previous) =>
+      previous.key === sizeSelectionKey
+        ? previous
+        : { key: sizeSelectionKey, size: currentSelectionSize },
+    );
+  }, [sizeSelectionKey, currentSelectionSize]);
+  const selectionPercent =
+    sizeReference.key === sizeSelectionKey && sizeReference.size > 0
+      ? (currentSelectionSize / sizeReference.size) * 100
+      : 100;
   const transformBounds = visibleTransformElements.length
     ? drawingSelectionBounds(visibleTransformElements)
     : undefined;
@@ -588,6 +634,19 @@ export function DrawingEditor({
       return;
     }
     updateData({ ...data, elements: data.elements.filter((e) => e.id !== selected) });
+    finishSelection();
+  };
+  const deleteSelectionOrClean = () => {
+    if (!editable || !data) return;
+    resetGesture();
+    const ids = editingBlock ? blockIds : editingSelection ? [selectedElement.id] : [];
+    if (!ids.length) {
+      setCleanupOpen(true);
+      return;
+    }
+    // This shortcut removes drawing objects/markers only. Inspection records
+    // and attached photos remain available in the report, and undo restores it.
+    updateData({ ...data, elements: data.elements.filter((e) => !ids.includes(e.id)) });
     finishSelection();
   };
   const commit = (drawings: ReportDrawing[], nextPoints = points) => {
@@ -739,7 +798,19 @@ export function DrawingEditor({
     const result = transformDrawingSelection(blockElements, 0, 0, 0, factor);
     if (JSON.stringify(result) === JSON.stringify(blockElements)) {
       setMessage(
-        'Limite de tamanho do bloco. Para aumentar, afaste-o das bordas ou selecione menos elementos.',
+        '⚠️ O bloco atingiu o limite da folha ou de um dos objetos. Para ampliar só a visualização, use o zoom com dois dedos.',
+      );
+      return;
+    }
+    setMessage('');
+    updateBlock(result);
+  };
+  const resizeSelectionPrecisely = (factor: number) => {
+    if (!transformElements.length) return;
+    const result = transformDrawingSelection(transformElements, 0, 0, 0, factor);
+    if (JSON.stringify(result) === JSON.stringify(transformElements)) {
+      setMessage(
+        '⚠️ A seleção atingiu o limite da folha ou do objeto. Para ampliar só a visualização, use o zoom com dois dedos sem seleção.',
       );
       return;
     }
@@ -760,6 +831,8 @@ export function DrawingEditor({
     setMessage('');
   };
   const selectTool = (next: Tool) => {
+    setContextOptionsOpen(false);
+    setSelectionOptionsOpen(false);
     setSelectionPanelOpen(false);
     setNearbyIds([]);
     setSelectionPickerOpen(false);
@@ -790,6 +863,8 @@ export function DrawingEditor({
     setMessage('');
   };
   const finishSelection = () => {
+    setContextOptionsOpen(false);
+    setSelectionOptionsOpen(false);
     setSelectionPanelOpen(false);
     setNearbyIds([]);
     setSelectionPickerOpen(false);
@@ -1051,7 +1126,7 @@ export function DrawingEditor({
     );
   };
   const onWheel = useRef((event: WheelEvent) => wheelHandler.current(event));
-  const setSurface = useCallback((node: View | null) => {
+  const setSurface = useCallback((node: ViewInstance | null) => {
     if (Platform.OS === 'web') {
       const previous = surface.current as unknown as HTMLElement | null;
       previous?.removeEventListener?.('wheel', onWheel.current);
@@ -1070,6 +1145,9 @@ export function DrawingEditor({
     onMoveShouldSetPanResponder: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (event) => {
+      setCanvasGestureActive(true);
+      setContextOptionsOpen(false);
+      setSelectionOptionsOpen(false);
       cancelHold();
       resetGesture();
       multiTouch.current = false;
@@ -1082,6 +1160,29 @@ export function DrawingEditor({
         x: viewport.x + (event.nativeEvent.locationX / width) * viewport.w,
         y: viewport.y + (event.nativeEvent.locationY / width) * viewport.w,
       };
+      if (editable && editingBlock) {
+        const bounds = drawingSelectionBounds(blockElements);
+        const corners = [
+          { x: bounds.x - 8, y: bounds.y - 8 },
+          { x: bounds.x + bounds.width + 8, y: bounds.y - 8 },
+          { x: bounds.x + bounds.width + 8, y: bounds.y + bounds.height + 8 },
+          { x: bounds.x - 8, y: bounds.y + bounds.height + 8 },
+        ];
+        if (corners.some((c) => Math.hypot(c.x - p.x, c.y - p.y) <= (18 * viewport.w) / width)) {
+          blockGesture.current = {
+            mode: 'resize',
+            view,
+            start: p,
+            samples: [],
+            elements: blockElements,
+            pivot: bounds.center,
+            angle: 0,
+            delta: 0,
+            ratio: viewport.w / width,
+          };
+          return;
+        }
+      }
       if (
         editable &&
         editingSelection &&
@@ -1172,7 +1273,18 @@ export function DrawingEditor({
         (p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 800)
       )
         return;
-      const found = data ? hitElement(data.elements, p, (14 / width) * view.w, points) : undefined;
+      // Keep drawing objects reachable over photos. Selecting an image requires
+      // a deliberate hold; an already selected image can be dragged normally.
+      const found = data
+        ? (hitElement(
+            data.elements.filter((e) => e.type !== 'image'),
+            p,
+            (14 / width) * view.w,
+            points,
+          ) ?? hitElement(data.elements, p, (14 / width) * view.w, points))
+        : undefined;
+      const imageNeedsHold =
+        found?.type === 'image' && !(editingSelection && selectedElement.id === found.id);
       const candidates =
         data?.elements
           .filter((e) => hitElement([e], p, (14 / width) * view.w, points))
@@ -1180,14 +1292,13 @@ export function DrawingEditor({
       // Selection owns the entire gesture, including its release. A tap outside
       // must never fall through to the previous insertion/drawing tool.
       const selectionOnly = editable && (editingSelection || tool === 'select');
-      if (selectionOnly && found?.groupId) {
+      if (selectionOnly && found?.groupId && !imageNeedsHold) {
         const members = drawingGroupMembers(data!.elements, [found.id]);
         if (members.length > 1) {
           setSelected('');
           setDirectSelection(false);
           setBlockIds(members.map((e) => e.id));
           setBlockAngle(0);
-          setToolsOpen(false);
           blockGesture.current = {
             mode: 'move',
             view,
@@ -1202,11 +1313,10 @@ export function DrawingEditor({
           return;
         }
       }
-      if (selectionOnly && found) {
+      if (selectionOnly && found && !imageNeedsHold) {
         setNearbyIds(candidates);
         setSelected(found.id);
         setDirectSelection(true);
-        setShowProperties(false);
       }
       const corner =
         editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
@@ -1216,19 +1326,27 @@ export function DrawingEditor({
           : -1;
       const current = {
         start: p,
-        original: corner >= 0 ? selectedElement : selectionOnly ? found : undefined,
+        original:
+          corner >= 0 ? selectedElement : selectionOnly && !imageNeedsHold ? found : undefined,
         corner: corner >= 0 ? corner : undefined,
         view,
         width,
         samples: [p],
         dx: 0,
         dy: 0,
-        held: selectionOnly && !!found,
+        held: selectionOnly && !!found && !imageNeedsHold,
         selectionOnly,
         drawingStarted: false,
       };
       gesture.current = current;
-      if (editable && found && tool !== 'select' && tool !== 'pan' && corner < 0 && !current.held) {
+      if (
+        editable &&
+        found &&
+        (tool !== 'select' || imageNeedsHold) &&
+        tool !== 'pan' &&
+        corner < 0 &&
+        !current.held
+      ) {
         holdTimer.current = setTimeout(() => {
           if (
             gesture.current !== current ||
@@ -1259,7 +1377,6 @@ export function DrawingEditor({
             setStroke([]);
             setTraceStart(undefined);
             setTraceEnd(undefined);
-            setToolsOpen(false);
             setStart(undefined);
             Vibration.vibrate(20);
             return;
@@ -1273,8 +1390,6 @@ export function DrawingEditor({
           setTraceStart(undefined);
           setTraceEnd(undefined);
           setDraftElement(found);
-          setShowProperties(false);
-          setToolsOpen(false);
           Vibration.vibrate(20);
           setMessage('');
         }, 350);
@@ -1393,6 +1508,16 @@ export function DrawingEditor({
         if (block.mode === 'lasso') {
           block.samples = appendStrokePoint(block.samples, p);
           setLassoPath(block.samples);
+        } else if (block.mode === 'resize') {
+          if (Math.hypot(state.dx, state.dy) < 6) return;
+          const x = block.start.x - block.pivot.x,
+            y = block.start.y - block.pivot.y;
+          const scale = Math.max(
+            0.01,
+            ((p.x - block.pivot.x) * x + (p.y - block.pivot.y) * y) / Math.max(1, x * x + y * y),
+          );
+          block.result = transformDrawingSelection(block.elements, 0, 0, 0, scale, block.pivot);
+          setBlockDraft(block.result);
         } else if (block.mode === 'rotate') {
           const nextAngle = (Math.atan2(p.y - block.pivot.y, p.x - block.pivot.x) * 180) / Math.PI;
           block.delta += normalizeDrawingAngle(nextAngle - block.angle);
@@ -1489,6 +1614,7 @@ export function DrawingEditor({
         );
     },
     onPanResponderRelease: (_event, state) => {
+      setCanvasGestureActive(false);
       cancelHold();
       if (endpointGesture.current && !multiTouch.current) {
         const endpoint = endpointGesture.current;
@@ -1610,6 +1736,7 @@ export function DrawingEditor({
       setTraceEnd(undefined);
     },
     onPanResponderTerminate: () => {
+      setCanvasGestureActive(false);
       multiTouch.current = false;
       resetGesture();
     },
@@ -1682,17 +1809,10 @@ export function DrawingEditor({
         });
       }
     }
-    if (start)
-      elements.push({
-        id: 'cursor-anchor',
-        type: 'symbol',
-        symbolCode: 'flange',
-        x: start.x,
-        y: start.y,
-        rotation: 0,
-      });
     return drawingSvg({ ...data, elements }, points, {
-      endpointRadius: (7 * viewport.w) / width,
+      anchor: start,
+      anchorRadius: (2.5 * viewport.w) / width,
+      endpointRadius: (3 * viewport.w) / width,
       snapGuide,
       images: drawingImages.images,
       selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
@@ -1700,9 +1820,10 @@ export function DrawingEditor({
       selectionOpacity,
       constructionCorners: hatchCorners,
       selectedIds: editingBlock ? blockIds : undefined,
+      resizeHandleRadius: editingBlock ? (3 * viewport.w) / width : undefined,
       lasso: lassoPath,
       rotationControl: rotationHandle
-        ? { ...rotationHandle, radius: (14 * viewport.w) / width }
+        ? { ...rotationHandle, radius: (11 * viewport.w) / width }
         : undefined,
       viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
     });
@@ -1790,6 +1911,34 @@ export function DrawingEditor({
                     ? 'Hachura'
                     : 'Traço / forma'
                   : 'Linha';
+  const contextWidth = Math.min(248, width - 16);
+  const contextHeight = Math.min(392, height - 80);
+  const selectionRight = transformBounds
+    ? ((transformBounds.x + transformBounds.width - viewport.x) / viewport.w) * width + 18
+    : 8;
+  const selectionLeft = transformBounds
+    ? ((transformBounds.x - viewport.x) / viewport.w) * width - 62
+    : 8;
+  const contextX = Math.max(
+    8,
+    Math.min(width - 52, selectionRight + 44 < width - 8 ? selectionRight : selectionLeft),
+  );
+  const contextY = Math.max(
+    64,
+    Math.min(
+      height - 60,
+      transformBounds ? ((transformBounds.center.y - viewport.y) / viewport.w) * width - 22 : 64,
+    ),
+  );
+  const quickStrokeTarget =
+    strokeTarget ?? (editingBlock ? blockElements.find(hasDrawingStroke) : undefined);
+  const quickStroke = quickStrokeTarget
+    ? {
+        strokeWidth: drawingStrokeWidth(quickStrokeTarget),
+        strokeColor: drawingStrokeColor(quickStrokeTarget),
+        strokeStyle: drawingStrokeStyle(quickStrokeTarget),
+      }
+    : undefined;
   const canvas = (
     <View
       testID="drawing-canvas"
@@ -1847,11 +1996,14 @@ export function DrawingEditor({
       />
       {expanded && !toolsOpen && !showProperties && !message && (
         <View
+          testID="drawing-floating-tools"
           style={{
             position: 'absolute',
             top: 8,
             left: 8,
             flexDirection: 'row',
+            flexWrap: 'wrap',
+            maxWidth: width - 16,
             borderRadius: 12,
             padding: 2,
             backgroundColor: t.colors.surface,
@@ -1896,8 +2048,165 @@ export function DrawingEditor({
             disabled={!editable || (!history.length && !hatchCorners.length)}
             onPress={() => undo()}
           />
+          {editable && (
+            <IconButton
+              label="Excluir objeto ou limpar desenho"
+              icon="trash"
+              onPress={() => {
+                deleteSelectionOrClean();
+              }}
+            />
+          )}
+          {editable &&
+            (['lasso', 'point', 'straighten'] as const).map((mode) => (
+              <Pressable
+                key={mode}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  mode === 'lasso'
+                    ? 'Selecionar com laço'
+                    : mode === 'point'
+                      ? 'Marcar ponto no desenho'
+                      : 'Endireitar traço'
+                }
+                accessibilityState={{
+                  selected: tool === mode && !editingSelection && !editingBlock,
+                }}
+                onPress={() => selectTool(mode)}
+                style={{
+                  width: 44,
+                  height: 44,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 10,
+                  backgroundColor: tool === mode ? t.colors.blueSoft : 'transparent',
+                }}
+              >
+                <Icon
+                  name={tools.find((item) => item.id === mode)!.icon}
+                  size={20}
+                  color={tool === mode ? t.colors.blue : t.colors.text}
+                />
+              </Pressable>
+            ))}
         </View>
       )}
+      {editable &&
+        transformBounds &&
+        !canvasGestureActive &&
+        !toolsOpen &&
+        !showProperties &&
+        !message && (
+          <View
+            testID="drawing-context-options"
+            style={{
+              position: 'absolute',
+              left: contextOptionsOpen
+                ? Math.max(8, Math.min(width - contextWidth - 8, contextX))
+                : contextX,
+              top: contextOptionsOpen
+                ? Math.max(60, Math.min(height - contextHeight - 8, contextY))
+                : contextY,
+              width: contextOptionsOpen ? contextWidth : 44,
+              maxHeight: contextOptionsOpen ? contextHeight : 44,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: t.colors.selectionBorder,
+              backgroundColor: t.colors.surface,
+              overflow: 'hidden',
+              shadowColor: '#000',
+              shadowOpacity: 0.16,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 3 },
+              elevation: 5,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {contextOptionsOpen && (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.label, { flex: 1, paddingLeft: 10, fontSize: 12 }]}
+                >
+                  {editingBlock
+                    ? 'Bloco selecionado'
+                    : selectedElement
+                      ? elementLabel(selectedElement)
+                      : 'Seleção'}
+                </Text>
+              )}
+              <IconButton
+                label={
+                  contextOptionsOpen
+                    ? 'Fechar ajustes junto da seleção'
+                    : 'Ajustes junto da seleção'
+                }
+                icon={contextOptionsOpen ? 'close' : 'tool'}
+                onPress={() => setContextOptionsOpen(!contextOptionsOpen)}
+              />
+            </View>
+            {contextOptionsOpen && (
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                style={{ flexShrink: 1 }}
+                contentContainerStyle={{ padding: 8 }}
+              >
+                <DrawingSelectionQuickOptions
+                  stroke={quickStroke}
+                  onStroke={(patch) =>
+                    editingBlock
+                      ? updateBlock(
+                          blockElements.map((e) => (hasDrawingStroke(e) ? { ...e, ...patch } : e)),
+                        )
+                      : updateStrokeAppearance(patch)
+                  }
+                  onResize={
+                    canRotateSelection
+                      ? (scale) =>
+                          editingBlock
+                            ? resizeBlock(scale)
+                            : updateElement(
+                                transformDrawingElement(selectedElement!, 0, 0, 0, scale),
+                              )
+                      : undefined
+                  }
+                  onFullStyle={() => {
+                    setContextOptionsOpen(false);
+                    setStrokePanelOpen(true);
+                  }}
+                  onMore={() => {
+                    setContextOptionsOpen(false);
+                    if (expanded) setSelectionOptionsOpen(true);
+                    else setSelectionPanelOpen(true);
+                  }}
+                />
+              </ScrollView>
+            )}
+          </View>
+        )}
+      {data?.elements.some((e) => e.type === 'image' && !e.locked) &&
+        !editingSelection &&
+        !editingBlock &&
+        !canvasGestureActive &&
+        !contextOptionsOpen && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              left: 8,
+              right: 8,
+              backgroundColor: t.colors.surface,
+              borderRadius: 10,
+              padding: 10,
+              borderWidth: 1,
+              borderColor: t.colors.line,
+            }}
+          >
+            <Text style={[styles.muted, { fontSize: 12 }]}>
+              ⚠️ Para selecionar a imagem, segure nela. Depois, arraste para mover.
+            </Text>
+          </View>
+        )}
       {!!message && (
         <View
           style={{
@@ -1930,40 +2239,68 @@ export function DrawingEditor({
           />
         </View>
       )}
-      {canRotateSelection && rotationDelta === undefined && (
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 8,
-            alignSelf: 'center',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            padding: 4,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: t.colors.line,
-            backgroundColor: t.colors.surface,
-          }}
-        >
-          <IconButton
-            label="Girar seleção 15 graus à esquerda"
-            icon="undo"
-            onPress={() => rotateSelection(-15)}
-          />
-          <Text
-            testID="selection-angle"
-            style={[styles.label, { minWidth: 60, textAlign: 'center' }]}
+      {canRotateSelection &&
+        rotationDelta === undefined &&
+        !contextOptionsOpen &&
+        !canvasGestureActive && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              alignSelf: 'center',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              padding: 4,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: t.colors.line,
+              backgroundColor: t.colors.surface,
+            }}
           >
-            {Math.round(shownAngle)}°
-          </Text>
-          <IconButton
-            label="Girar seleção 15 graus à direita"
-            icon="redo"
-            onPress={() => rotateSelection(15)}
-          />
-        </View>
-      )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <IconButton
+                label="Diminuir seleção 5 por cento"
+                icon="minus"
+                onPress={() => resizeSelectionPrecisely(0.95)}
+              />
+              <View style={{ minWidth: 82, alignItems: 'center' }}>
+                <Text style={[styles.muted, { fontSize: 10 }]}>Tamanho</Text>
+                <Text
+                  testID="selection-size"
+                  accessibilityLiveRegion="polite"
+                  accessibilityLabel={`Tamanho ${Math.round((selectionPercent + 1e-8) * 10) / 10} por cento do início da seleção`}
+                  style={[styles.label, { textAlign: 'center' }]}
+                >
+                  {Math.round((selectionPercent + 1e-8) * 10) / 10}%
+                </Text>
+              </View>
+              <IconButton
+                label="Aumentar seleção 5 por cento"
+                icon="plus"
+                onPress={() => resizeSelectionPrecisely(1.05)}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <IconButton
+                label="Girar seleção 15 graus à esquerda"
+                icon="undo"
+                onPress={() => rotateSelection(-15)}
+              />
+              <Text
+                testID="selection-angle"
+                style={[styles.label, { minWidth: 82, textAlign: 'center' }]}
+              >
+                {Math.round(shownAngle)}°
+              </Text>
+              <IconButton
+                label="Girar seleção 15 graus à direita"
+                icon="redo"
+                onPress={() => rotateSelection(15)}
+              />
+            </View>
+          </View>
+        )}
       {rotationDelta !== undefined && (
         <View
           pointerEvents="none"
@@ -2560,35 +2897,39 @@ export function DrawingEditor({
     <ConfirmDialog
       visible={!!clearMode}
       title={
-        clearMode === 'points'
-          ? 'Limpar os pontos deste desenho?'
-          : clearMode === 'strokes'
-            ? 'Limpar os traços desta prancha?'
-            : 'Limpar todo o desenho desta prancha?'
+        clearMode === 'selection'
+          ? 'Excluir o bloco selecionado?'
+          : clearMode === 'points'
+            ? 'Limpar os pontos deste desenho?'
+            : clearMode === 'strokes'
+              ? 'Limpar os traços desta prancha?'
+              : 'Limpar todo o desenho desta prancha?'
       }
       description={
-        clearMode === 'points'
-          ? 'Excluir as marcações deste desenho e os pontos correspondentes da lista de soldas? ' +
-            points.filter(
-              (point) =>
-                data?.elements.some(
-                  (e) => e.type === 'point' && e.reportPointId === pointKey(point),
-                ) &&
-                (pointPhotoCount(pointKey(point)) > 0 ||
-                  point.label ||
-                  point.value != null ||
-                  Object.entries(point.data ?? {}).some(([key, value]) =>
-                    key !== 'discontinuity'
-                      ? value !== '' && value != null
-                      : value !== '-' && value !== '',
-                  )),
-            ).length +
-            ' ponto(s) têm dados ou fotos preenchidos. Os dados, resultados, fotos vinculadas e marcações desses pontos nos outros desenhos também serão excluídos ao salvar. Pontos que não estão neste desenho serão mantidos.'
-          : clearMode === 'strokes'
-            ? 'Linhas, formas, textos e símbolos serão removidos. As imagens e marcações de pontos ficam no desenho. Você pode desfazer.'
-            : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
+        clearMode === 'selection'
+          ? 'Os objetos e marcações selecionados serão retirados deste desenho. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
+          : clearMode === 'points'
+            ? 'Excluir as marcações deste desenho e os pontos correspondentes da lista de soldas? ' +
+              points.filter(
+                (point) =>
+                  data?.elements.some(
+                    (e) => e.type === 'point' && e.reportPointId === pointKey(point),
+                  ) &&
+                  (pointPhotoCount(pointKey(point)) > 0 ||
+                    point.label ||
+                    point.value != null ||
+                    Object.entries(point.data ?? {}).some(([key, value]) =>
+                      key !== 'discontinuity'
+                        ? value !== '' && value != null
+                        : value !== '-' && value !== '',
+                    )),
+              ).length +
+              ' ponto(s) têm dados ou fotos preenchidos. Os dados, resultados, fotos vinculadas e marcações desses pontos nos outros desenhos também serão excluídos ao salvar. Pontos que não estão neste desenho serão mantidos.'
+            : clearMode === 'strokes'
+              ? 'Linhas, formas, textos e símbolos serão removidos. As imagens e marcações de pontos ficam no desenho. Você pode desfazer.'
+              : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
       }
-      confirmLabel="Confirmar limpeza"
+      confirmLabel={clearMode === 'selection' ? 'Excluir bloco' : 'Confirmar limpeza'}
       danger
       onClose={() => setClearMode(undefined)}
       onConfirm={() => {
@@ -2618,13 +2959,16 @@ export function DrawingEditor({
           updateData({
             ...data,
             elements:
-              clearMode === 'strokes'
-                ? data.elements.filter(
-                    (e) => e.type === 'point' || e.type === 'marker' || e.type === 'image',
-                  )
-                : [],
+              clearMode === 'selection'
+                ? data.elements.filter((e) => !blockIds.includes(e.id))
+                : clearMode === 'strokes'
+                  ? data.elements.filter(
+                      (e) => e.type === 'point' || e.type === 'marker' || e.type === 'image',
+                    )
+                  : [],
           });
         setClearMode(undefined);
+        finishSelection();
         setSelected('');
         setPointTarget('new');
         setNewNumber(undefined);
@@ -2633,6 +2977,44 @@ export function DrawingEditor({
         resetGesture();
       }}
     />
+  );
+  const cleanupDialog = (
+    <PickerSheet
+      visible={cleanupOpen}
+      title="Excluir ou limpar"
+      subtitle="Escolha o que deseja remover do desenho."
+      icon="trash"
+      onClose={() => setCleanupOpen(false)}
+    >
+      <Button
+        title={editingBlock ? 'Excluir bloco selecionado' : 'Excluir objeto selecionado'}
+        icon="trash"
+        secondary
+        disabled={!editable || (!editingSelection && !editingBlock)}
+        onPress={() => {
+          setCleanupOpen(false);
+          if (editingBlock) setClearMode('selection');
+          else removeSelected();
+        }}
+      />
+      {!editingSelection && !editingBlock && (
+        <Text style={styles.muted}>Selecione um objeto no desenho para excluir só ele.</Text>
+      )}
+      <Button
+        title="Limpar desenho"
+        icon="trash"
+        variant="danger"
+        disabled={!editable || !data?.elements.length}
+        onPress={() => {
+          setCleanupOpen(false);
+          setClearMode('all');
+        }}
+      />
+      <Text style={styles.muted}>
+        Limpar retira todos os objetos desta folha. Os pontos cadastrados, resultados e fotos do
+        relatório são mantidos. A limpeza pede confirmação e pode ser desfeita.
+      </Text>
+    </PickerSheet>
   );
   const deleteDialog = (
     <ConfirmDialog
@@ -3079,8 +3461,8 @@ export function DrawingEditor({
       {editingBlock ? (
         <View style={{ paddingHorizontal: 8, gap: 4 }}>
           <Text style={[styles.muted, { fontSize: 11 }]}>
-            {blockElements.length} elementos no bloco · Arraste para mover. Dois dedos para
-            aumentar, diminuir e girar juntos.
+            {blockElements.length} elementos no bloco · Arraste para mover. Puxe os cantos para
+            aumentar ou diminuir. Dois dedos para girar.
           </Text>
           <View style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
             <Button
@@ -3168,7 +3550,12 @@ export function DrawingEditor({
                 else revealInline(propertiesView.current);
               }}
             />
-            <IconButton label="Excluir selecionado" icon="trash" small onPress={removeSelected} />
+            <IconButton
+              label="Excluir selecionado"
+              icon="trash"
+              small
+              onPress={deleteSelectionOrClean}
+            />
             <IconButton label="Concluir ajuste" icon="check" small onPress={finishSelection} />
           </View>
           {selectedElement.type === 'image' && (
@@ -3240,9 +3627,13 @@ export function DrawingEditor({
   const strokeDialog = (
     <DrawingStrokePanel
       visible={strokePanelOpen}
-      value={currentStrokeAppearance}
-      selected={!!strokeTarget}
-      onChange={updateStrokeAppearance}
+      value={editingBlock && quickStroke ? quickStroke : currentStrokeAppearance}
+      selected={!!strokeTarget || editingBlock}
+      onChange={(patch) =>
+        editingBlock
+          ? updateBlock(blockElements.map((e) => (hasDrawingStroke(e) ? { ...e, ...patch } : e)))
+          : updateStrokeAppearance(patch)
+      }
       onClose={() => setStrokePanelOpen(false)}
     />
   );
@@ -3703,6 +4094,7 @@ export function DrawingEditor({
       {imageDialog}
       {strokeDialog}
       {clearDialog}
+      {cleanupDialog}
       {deleteDialog}
       {pointRemovalDialog}
     </View>
@@ -3730,6 +4122,7 @@ export function DrawingEditor({
       message={message}
       toolsOpen={toolsOpen}
       onToolsChange={(open) => {
+        setSelectionOptionsOpen(false);
         setToolsOpen(open);
         if (open) setShowProperties(false);
       }}
@@ -3743,6 +4136,16 @@ export function DrawingEditor({
       }
       actions={data ? quickActions : null}
       selection={data ? selectionControls : null}
+      hasSelectionControls={
+        !!data &&
+        editable &&
+        (editingSelection ||
+          editingBlock ||
+          ['point', 'text', 'lasso', 'hatch'].includes(tool) ||
+          showStrokeControls)
+      }
+      selectionOptionsOpen={selectionOptionsOpen}
+      onSelectionOptionsChange={setSelectionOptionsOpen}
       canvas={
         data ? (
           canvas
@@ -3769,6 +4172,7 @@ export function DrawingEditor({
           {imageDialog}
           {strokeDialog}
           {data ? clearDialog : null}
+          {cleanupDialog}
           {deleteDialog}
           {pointRemovalDialog}
         </>

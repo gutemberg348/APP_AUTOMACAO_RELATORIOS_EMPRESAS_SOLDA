@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', state.nativeFetch);
 });
 afterEach(() => vi.unstubAllGlobals());
-describe('API transport for SDK 57', () => {
+describe('API transport for the installed Expo SDK', () => {
   it.each(['ios', 'android'])(
     'uses Expo fetch with auth and automatic multipart boundary on %s',
     async (platform) => {

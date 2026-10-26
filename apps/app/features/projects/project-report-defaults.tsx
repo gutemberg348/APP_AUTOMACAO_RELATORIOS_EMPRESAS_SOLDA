@@ -1,6 +1,6 @@
 import { useTheme } from '../../utils/theme';
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, type ViewInstance } from 'react-native';
 import { reportSections, type ReportDefaults } from '@weldcosta/shared';
 import { Field, FormGrid, FormCell, PanelHeader } from '../../components/ui';
 import { DateField } from '../../components/date-field';
@@ -22,7 +22,7 @@ export type ProjectDefaultFeedback = {
   errors?: Record<string, string>;
   validationCode?: string;
   validationAttempt?: number;
-  registerField?(key: string, node: View | null): void;
+  registerField?(key: string, node: ViewInstance | null): void;
   onFieldLayout?(key: string): void;
 };
 export function ProjectReportCommon({

@@ -9,7 +9,8 @@ import {
   Keyboard,
   Platform,
   useWindowDimensions,
-  ScrollView,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton, IconTile } from './ui';
@@ -39,9 +40,9 @@ export function PickerSheet({
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const mobile = width < 640;
-  const scroll = useRef<ScrollView>(null),
+  const scroll = useRef<ScrollViewInstance>(null),
     offset = useRef(0);
-  const reveal = useCallback((target?: View | null) => {
+  const reveal = useCallback((target?: ViewInstance | null) => {
     if (!target) {
       scroll.current?.scrollTo({ y: 0, animated: true });
       return;
