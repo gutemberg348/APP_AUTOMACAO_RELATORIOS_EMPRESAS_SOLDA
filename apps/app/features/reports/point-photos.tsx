@@ -42,9 +42,14 @@ export function PointPhotos({
   const update = (
     change: Parameters<ReturnType<typeof useReportPhotoDrafts.getState>['update']>[1],
   ) => useReportPhotoDrafts.getState().update(draftKey, change);
-  const pending = draft.photos.filter((photo) => photo.pointKey === pointId);
+  const pending = draft.photos.filter(
+    (photo) => photo.pointKey === pointId && photo.sectionKey !== 'drawing',
+  );
   const existing = media.filter(
-    (photo) => photo.reportPointId === pointId && !draft.removedIds.includes(photo.id),
+    (photo) =>
+      photo.reportPointId === pointId &&
+      !photo.clientUploadId?.startsWith('drawing-image-') &&
+      !draft.removedIds.includes(photo.id),
   );
   const closeSource = () => {
     setSourceOpen(false);

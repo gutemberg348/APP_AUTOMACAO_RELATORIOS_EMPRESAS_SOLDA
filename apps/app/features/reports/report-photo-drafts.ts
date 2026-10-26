@@ -7,6 +7,7 @@ import { appendUploadFile } from '../../services/upload-file';
 import type { TransferState } from '../../components/transfer-progress';
 
 export interface ReportPhotoDraft {
+  sectionKey?: 'photos' | 'drawing';
   id: string;
   pointKey: string | null;
   asset: DocumentPickerAsset;
@@ -106,6 +107,18 @@ export async function saveReportPhotos(
       if (media) current = await api<Report>('/reports/' + saved.id);
     }
     for (const photo of draft.photos) {
+      if (
+        photo.sectionKey === 'drawing' &&
+        !current.drawings?.some((d) =>
+          d.data.elements.some((e) => e.type === 'image' && e.mediaKey === photo.id),
+        )
+      ) {
+        store.update(nextKey, (remaining) => ({
+          ...remaining,
+          photos: remaining.photos.filter((item) => item.id !== photo.id),
+        }));
+        continue;
+      }
       if (photo.pointKey && !current.points?.some((p) => p.id === photo.pointKey))
         throw new Error(
           'A foto não pôde ser vinculada ao ponto. Confira o cadastro e tente salvar novamente.',
@@ -117,7 +130,7 @@ export async function saveReportPhotos(
       await appendUploadFile(form, photo.asset, 10 * 1024 * 1024);
       form.append('version', String(current.version));
       form.append('clientUploadId', photo.id);
-      form.append('sectionKey', 'photos');
+      form.append('sectionKey', photo.sectionKey ?? 'photos');
       if (photo.pointKey) form.append('reportPointId', photo.pointKey);
       form.append('caption', photo.caption);
       progress('Enviando foto ' + (completed + 1) + ' de ' + total + '…', detail);

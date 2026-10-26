@@ -17,3 +17,12 @@
 - Captura revisada: `drawing-selection-resize-mobile.png`.
 
 Não houve teste em aparelho físico nem publicação na VPS ou geração de APK.
+
+## Correção do contorno deslocado — 20/10/2026
+
+- O contorno agora é um caminho com quatro cantos calculados nas coordenadas da página, incluindo a rotação. Isso elimina a combinação de posição `x/y` do retângulo com uma transformação SVG separada, que podia deslocar o contorno no renderizador nativo.
+- O mesmo cálculo atende símbolos e textos e acompanha a geometria provisória durante os gestos.
+- 136 testes unitários passaram. Os novos casos conferem centro e dimensões em cinco rotações e três escalas, após translação, além dos cantos do texto girado.
+- TypeScript, ESLint, build compartilhado e exportação web passaram.
+- Teste do editor com toque simulado e API simulada passou, incluindo comparação do centro do contorno com a origem visual do símbolo antes e depois da pinça com rotação. Captura revisada: `drawing-selection-frame-aligned.png`.
+- A confirmação final no aparelho físico continua pendente; não foi gerado APK.

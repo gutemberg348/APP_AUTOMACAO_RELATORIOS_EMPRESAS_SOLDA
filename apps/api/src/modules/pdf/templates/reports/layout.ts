@@ -11,6 +11,18 @@ export type PdfReport = Prisma.ReportGetPayload<{
     drawings: true;
   };
 }> & { signatureImages?: Record<string, string> };
+export function drawingImageSources(report: PdfReport, images: Map<string, string>) {
+  return Object.fromEntries(
+    report.media
+      .filter((m) => m.sectionKey === 'drawing')
+      .flatMap((m) => {
+        const uri = images.get(m.id);
+        return uri ? [[m.clientUploadId ?? m.id, uri]] : [];
+      }),
+  );
+}
+export const isEmbeddedDrawingImage = (media: { clientUploadId?: string | null }) =>
+  media.clientUploadId?.startsWith('drawing-image-') ?? false;
 export function signatureImage(report: PdfReport, signer?: { id: string }) {
   const uri = signer ? report.signatureImages?.[signer.id] : undefined;
   return uri && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(uri)
@@ -88,7 +100,7 @@ export function reportBody(report: PdfReport, images: Map<string, string>, code:
     }));
     html += section(
       'Desenho técnico · ' + String(index + 1).padStart(2, '0'),
-      `<div class="cad-frame"><div class="cad-title"><strong>${escape(cad.title)}</strong><span>${cad.grid === 'isometric' ? 'ISOMÉTRICO' : cad.grid === 'orthogonal' ? 'VISTA ORTOGONAL' : 'CROQUI'} · SEM ESCALA</span></div><div class="cad-canvas">${drawingSvg(cad, points)}</div><div class="cad-stamp"><div>${field('Obra', data.work)}${field('Desenho / projeto', data.project || data.referenceDrawing || data.drawing)}</div><div>${field('Relatório', report.number)}${field('Revisão / prancha', cad.revision + ' / ' + (index + 1) + ' de ' + report.drawings.length)}</div></div></div><p class="cad-legend"><span>● Pendente</span><span>● Aceitável</span><span>● Não aceitável</span> · A numeração corresponde aos pontos e às evidências deste relatório.</p>${cad.notes ? field('Notas do desenho', cad.notes) : ''}`,
+      `<div class="cad-frame"><div class="cad-title"><strong>${escape(cad.title)}</strong><span>${cad.grid === 'isometric' ? 'ISOMÉTRICO' : cad.grid === 'orthogonal' ? 'VISTA ORTOGONAL' : 'CROQUI'} · SEM ESCALA</span></div><div class="cad-canvas">${drawingSvg(cad, points, { images: drawingImageSources(report, images) })}</div><div class="cad-stamp"><div>${field('Obra', data.work)}${field('Desenho / projeto', data.project || data.referenceDrawing || data.drawing)}</div><div>${field('Relatório', report.number)}${field('Revisão / prancha', cad.revision + ' / ' + (index + 1) + ' de ' + report.drawings.length)}</div></div></div><p class="cad-legend"><span>● Pendente</span><span>● Aceitável</span><span>● Não aceitável</span> · A numeração corresponde aos pontos e às evidências deste relatório.</p>${cad.notes ? field('Notas do desenho', cad.notes) : ''}`,
       true,
     );
   }
@@ -115,7 +127,9 @@ export function reportBody(report: PdfReport, images: Map<string, string>, code:
       'Descontinuidades / legenda informada',
       `<table><thead><tr><th>Código</th><th>Descrição</th></tr></thead><tbody>${data.discontinuities.map((row: { code?: string; description?: string }) => `<tr><td>${escape(row.code)}</td><td>${escape(row.description)}</td></tr>`).join('')}</tbody></table>`,
     );
-  for (const drawing of report.media.filter((media) => media.sectionKey === 'drawing'))
+  for (const drawing of report.media.filter(
+    (media) => media.sectionKey === 'drawing' && !isEmbeddedDrawingImage(media),
+  ))
     html += section(
       'Desenho / croqui',
       `<figure class="drawing"><img src="${images.get(drawing.id)}"><figcaption>${escape(drawing.caption || drawing.originalName)}</figcaption></figure>`,

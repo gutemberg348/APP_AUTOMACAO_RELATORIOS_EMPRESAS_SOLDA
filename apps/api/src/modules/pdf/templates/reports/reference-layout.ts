@@ -1,3 +1,4 @@
+import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
 import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, type PdfReport } from './layout';
@@ -86,12 +87,15 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
+        { images: drawingImageSources(report, images) },
       )}</div>` +
         annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala') +
         (cad.notes ? annotations(cad.notes, 'Notas') : ''),
     );
   }
-  for (const media of report.media.filter((m) => m.sectionKey === 'drawing' && !m.reportPointId))
+  for (const media of report.media.filter(
+    (m) => m.sectionKey === 'drawing' && !m.reportPointId && !isEmbeddedDrawingImage(m),
+  ))
     html += sheet(
       report,
       'DESENHO',

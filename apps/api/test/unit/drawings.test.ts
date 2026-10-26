@@ -20,6 +20,102 @@ import {
   removePointFromDrawings,
 } from '@weldcosta/shared';
 describe('Technical drawing geometry and safe rendering', () => {
+  it('renders dense thin hatching with selectable direction and small preview-only corner handles', () => {
+    const corners = [
+      { x: 100, y: 100 },
+      { x: 240, y: 100 },
+      { x: 100, y: 240 },
+    ];
+    const dense = triangleHatchSegments(corners, 8, 90);
+    expect(dense.length).toBeGreaterThan(triangleHatchSegments(corners, 18, 90).length);
+    for (const segment of dense) expect(segment.a.x).toBeCloseTo(segment.b.x);
+    for (const segment of triangleHatchSegments(corners, 8, 0))
+      expect(segment.a.y).toBeCloseTo(segment.b.y);
+    const element: DrawingElement = {
+      id: 'hatch',
+      type: 'polyline',
+      points: [...corners, corners[0]!],
+      strokeWidth: 1.2,
+      hatch: { spacing: 8, angle: 90 },
+    };
+    const data = { ...newDrawingData(), elements: [element] };
+    const plain = drawingSvg(data, []);
+    expect(plain).toContain('stroke-width="0.54"');
+    expect(plain).not.toContain('data-construction-corner');
+    const preview = drawingSvg(data, [], {
+      selectedId: 'hatch',
+      constructionCorners: corners.slice(0, 2),
+    });
+    expect(preview.match(/data-construction-corner/g)).toHaveLength(2);
+    expect(preview).toContain('r="3"');
+    expect(preview).toContain('r="4"');
+    expect(preview).not.toContain('<text');
+    expect(drawingSvg({ ...data, elements: [{ ...element, strokeWidth: 4 }] }, [])).toContain(
+      'stroke-width="1.8"',
+    );
+    expect(drawingDataSchema.parse(data).elements[0]).toEqual(element);
+  });
+  it('anchors selection outlines to rotated symbols in page coordinates, including after moving and resizing', () => {
+    const symbol: DrawingElement = {
+      id: 'valve',
+      type: 'symbol',
+      symbolCode: 'valve',
+      x: 300,
+      y: 250,
+      rotation: 0,
+      scale: 1,
+    };
+    for (const rotation of [0, 30, 90, 180, -90]) {
+      for (const scale of [0.5, 1, 3]) {
+        const element = transformDrawingElement({ ...symbol, rotation, scale }, 0, 140, 210);
+        if (element.type !== 'symbol') throw new Error('Expected symbol');
+        const svg = drawingSvg({ ...newDrawingData(), elements: [element] }, [], {
+          selectedId: element.id,
+          selectionFrame: true,
+        });
+        const outline = svg.match(/<path data-selection-frame="true"[^>]+\/>/)?.[0];
+        expect(outline).toBeDefined();
+        expect(outline).not.toContain('transform=');
+        const coordinates = outline!
+          .match(/ d="([^"]+)"/)![1]!
+          .match(/-?\d+(?:\.\d+)?/g)!
+          .map(Number);
+        expect(coordinates).toHaveLength(8);
+        expect(
+          (coordinates[0]! + coordinates[2]! + coordinates[4]! + coordinates[6]!) / 4,
+        ).toBeCloseTo(element.x, 2);
+        expect(
+          (coordinates[1]! + coordinates[3]! + coordinates[5]! + coordinates[7]!) / 4,
+        ).toBeCloseTo(element.y, 2);
+        const side = 70 * scale + 16;
+        for (let i = 0; i < 8; i += 2) {
+          const next = (i + 2) % 8;
+          expect(
+            Math.hypot(
+              coordinates[i]! - coordinates[next]!,
+              coordinates[i + 1]! - coordinates[next + 1]!,
+            ),
+          ).toBeCloseTo(side, 1);
+        }
+      }
+    }
+  });
+  it('rotates text selection corners around the text anchor without a second SVG transform', () => {
+    const element: DrawingElement = {
+      id: 'label',
+      type: 'text',
+      text: 'AB',
+      x: 300,
+      y: 250,
+      size: 20,
+      rotation: 90,
+    };
+    const svg = drawingSvg({ ...newDrawingData(), elements: [element] }, [], {
+      selectedId: element.id,
+      selectionFrame: true,
+    });
+    expect(svg).toContain('data-selection-frame="true" d="M328 242 L328 284 L288 284 L288 242Z"');
+  });
   it('resizes selections proportionally, enforces size limits and preserves inspection data', () => {
     const symbol: DrawingElement = {
       id: 'valve',

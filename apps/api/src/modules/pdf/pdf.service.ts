@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { reportCreateSchema } from '@weldcosta/shared';
+import { reportCreateSchema, drawingDataSchema } from '@weldcosta/shared';
 import { access } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 import type { Report } from '../../generated/prisma/client';
@@ -77,6 +77,21 @@ export class PdfService implements PdfProvider {
         'Este tipo ainda não possui template de PDF.',
       );
     const images = new Map<string, string>();
+    const availableImages = new Set(
+      report.media.filter((m) => m.sectionKey === 'drawing').map((m) => m.clientUploadId ?? m.id),
+    );
+    if (
+      report.drawings.some((d) =>
+        drawingDataSchema
+          .parse(d.data)
+          .elements.some((e) => e.type === 'image' && !availableImages.has(e.mediaKey)),
+      )
+    )
+      throw new AppError(
+        422,
+        'DRAWING_IMAGE_PENDING',
+        'Há imagens do desenho que ainda não foram enviadas. Salve o relatório e aguarde o envio antes de baixar o PDF.',
+      );
     report.signatureImages = {};
     for (const signer of report.signatures) {
       if (signer.signatureImagePath)

@@ -1,3 +1,4 @@
+import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
 import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import { escape, displayDate, signatureImage, type PdfReport } from '../layout';
 import { referenceLogo } from './reference-logo';
@@ -130,6 +131,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: p.data as { acceptable?: boolean },
         })),
+        { images: drawingImageSources(report, images) },
       )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>` +
         (cad.notes
           ? chunks(cad.notes)
@@ -138,7 +140,9 @@ export function render(report: PdfReport, images: Map<string, string>) {
           : ''),
     );
   }
-  for (const drawing of report.media.filter((m) => m.sectionKey === 'drawing' && !m.reportPointId))
+  for (const drawing of report.media.filter(
+    (m) => m.sectionKey === 'drawing' && !m.reportPointId && !isEmbeddedDrawingImage(m),
+  ))
     html += sheet(
       'DESENHO',
       `<div class="evs-drawing"><img src="${images.get(drawing.id) || ''}"></div>` +

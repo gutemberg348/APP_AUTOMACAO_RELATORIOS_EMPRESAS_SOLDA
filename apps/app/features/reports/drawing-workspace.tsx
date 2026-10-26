@@ -17,6 +17,7 @@ import { useTheme } from '../../utils/theme';
 import { inputScrollOffset } from '../../utils/input-scroll';
 
 interface WorkspaceProps {
+  imageAction?: ReactNode;
   title: string;
   toolName: string;
   hint: string;
@@ -210,6 +211,7 @@ function WorkspaceContent(props: WorkspaceProps) {
               <Text numberOfLines={1} style={[styles.label, { flex: 1 }]}>
                 {props.toolName}
               </Text>
+              {props.imageAction}
               <Button
                 title={props.toolsOpen ? 'Recolher ferramentas' : 'Ferramentas'}
                 icon={props.toolsOpen ? 'chevron-up' : 'chevron-down'}
@@ -219,12 +221,24 @@ function WorkspaceContent(props: WorkspaceProps) {
               />
             </View>
             {props.toolsOpen && (
-              <>
+              <ScrollView
+                style={{ maxHeight: window.height * 0.38, flexGrow: 0 }}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 6 }}
+              >
                 {props.tools}
                 {props.actions}
-              </>
+                {props.footer}
+              </ScrollView>
             )}
-            {props.selection}
+            {!props.toolsOpen && (
+              <ScrollView
+                style={{ maxHeight: window.height * 0.28, flexGrow: 0 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                {props.selection}
+              </ScrollView>
+            )}
           </>
         )}
         <View
@@ -233,7 +247,9 @@ function WorkspaceContent(props: WorkspaceProps) {
           style={{ flex: 1, minHeight: 0, flexDirection: sideBySide ? 'row' : 'column' }}
         >
           {(!inputMode || sideBySide) && (
-            <View style={{ flex: 1, minHeight: 0, padding: 6 }}>{props.canvas}</View>
+            <View style={{ flex: 1, minHeight: 0, padding: 8, backgroundColor: t.colors.soft }}>
+              {props.canvas}
+            </View>
           )}
           {props.showInspector && (
             <View
@@ -283,26 +299,24 @@ function WorkspaceContent(props: WorkspaceProps) {
             {props.message}
           </Text>
         )}
-        <View
-          testID="drawing-workspace-footer"
-          style={{
-            padding: inputMode && window.height < 500 ? 2 : 6,
-            borderTopWidth: 1,
-            borderColor: t.colors.line,
-            flexShrink: 0,
-          }}
-        >
-          {inputMode ? (
+        {inputMode && (
+          <View
+            testID="drawing-workspace-footer"
+            style={{
+              padding: inputMode && window.height < 500 ? 2 : 6,
+              borderTopWidth: 1,
+              borderColor: t.colors.line,
+              flexShrink: 0,
+            }}
+          >
             <Button
               title="Voltar ao desenho"
               icon="check"
               onPress={closeInspector}
               style={{ minHeight: 44 }}
             />
-          ) : (
-            props.footer
-          )}
-        </View>
+          </View>
+        )}
         {props.dialogs}
       </KeyboardAvoidingView>
     </SafeAreaView>

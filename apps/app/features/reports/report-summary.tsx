@@ -6,6 +6,7 @@ import { reportSections } from './report-fields';
 import { formatDate } from '../../utils/format';
 import { ReportMediaPanel } from './report-media';
 import { DrawingPreview } from './drawing-editor';
+import { useDrawingImages } from './drawing-images';
 const results: Record<string, string> = {
   APPROVED: 'Aprovado',
   REJECTED: 'Reprovado',
@@ -23,6 +24,7 @@ function read(data: Record<string, unknown>, path: string): unknown {
     );
 }
 export function ReportSummary({ report }: { report: Report }) {
+  const { images } = useDrawingImages(report.id, report.media);
   const { tokens: t, styles } = useTheme();
   const sections = reportSections[report.reportType.code] ?? [
     {
@@ -153,7 +155,7 @@ export function ReportSummary({ report }: { report: Report }) {
             }
             icon="layers"
           />
-          <DrawingPreview data={drawing.data} points={report.points ?? []} />
+          <DrawingPreview data={drawing.data} points={report.points ?? []} images={images} />
           {!!drawing.data.notes && <Text style={styles.text}>{drawing.data.notes}</Text>}
         </Card>
       ))}

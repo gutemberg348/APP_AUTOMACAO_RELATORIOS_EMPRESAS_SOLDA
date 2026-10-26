@@ -1028,6 +1028,12 @@ export function ReportForm({
                       name="drawings"
                       render={({ field }) => (
                         <DrawingEditor
+                          reportId={report?.id}
+                          media={report?.media}
+                          photoDraftKey={photoDraftKey}
+                          canUploadImages={
+                            !editingBusy && user.permissions.includes('media.upload')
+                          }
                           savedVersion={report?.version}
                           value={field.value}
                           points={watchedPoints}

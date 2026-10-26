@@ -1,0 +1,178 @@
+import { useEffect, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
+import { SvgXml } from 'react-native-svg';
+import { drawingStrokeDash } from '@weldcosta/shared';
+import { PickerSheet } from '../../components/picker-sheet';
+import { Button, Field, IconButton } from '../../components/ui';
+import { useTheme } from '../../utils/theme';
+
+export type StrokeAppearance = {
+  strokeWidth: number;
+  strokeColor: string;
+  strokeStyle: 'solid' | 'dotted' | 'dashed';
+};
+export const strokeStyleLabels = { solid: 'Contínua', dotted: 'Pontilhada', dashed: 'Tracejada' };
+const colors = [
+  ['Preto', '#263D52'],
+  ['Azul', '#1764C0'],
+  ['Vermelho', '#DC2626'],
+  ['Laranja', '#EA580C'],
+  ['Amarelo', '#EAB308'],
+  ['Verde', '#16725B'],
+  ['Roxo', '#7C3AED'],
+  ['Cinza', '#64748B'],
+] as const;
+export function DrawingStrokePanel({
+  visible,
+  value,
+  selected,
+  onChange,
+  onClose,
+}: {
+  visible: boolean;
+  value: StrokeAppearance;
+  selected: boolean;
+  onChange(patch: Partial<StrokeAppearance>): void;
+  onClose(): void;
+}) {
+  const { tokens: t, styles } = useTheme();
+  const [custom, setCustom] = useState(value.strokeColor);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setCustom(value.strokeColor);
+    setError('');
+  }, [value.strokeColor, visible]);
+  const dash = drawingStrokeDash(value.strokeStyle, value.strokeWidth);
+  return (
+    <PickerSheet
+      visible={visible}
+      title="Estilo da linha"
+      icon="line"
+      onClose={onClose}
+      subtitle={
+        selected
+          ? 'Altere a linha selecionada. A prévia atualiza na hora.'
+          : 'Escolha o estilo antes de desenhar. Será usado nos próximos traços.'
+      }
+      footer={<Button title="Concluir estilo" icon="check" onPress={onClose} />}
+    >
+      <View style={{ gap: 16 }}>
+        <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 8 }}>
+          <SvgXml
+            width="100%"
+            height={42}
+            xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 42"><line x1="15" y1="21" x2="285" y2="21" stroke="${value.strokeColor}" stroke-width="${value.strokeWidth}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`}
+          />
+        </View>
+        <View
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <Text style={styles.label}>Espessura · {value.strokeWidth.toFixed(1)}</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <IconButton
+              label="Diminuir espessura da linha"
+              icon="minus"
+              disabled={value.strokeWidth <= 0.5}
+              onPress={() =>
+                onChange({
+                  strokeWidth: Math.max(0.5, Math.round((value.strokeWidth - 0.5) * 10) / 10),
+                })
+              }
+            />
+            <IconButton
+              label="Aumentar espessura da linha"
+              icon="plus"
+              disabled={value.strokeWidth >= 12}
+              onPress={() =>
+                onChange({
+                  strokeWidth: Math.min(12, Math.round((value.strokeWidth + 0.5) * 10) / 10),
+                })
+              }
+            />
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {[0.5, 1, 2, 3, 5, 8, 12].map((w) => (
+            <Button
+              key={w}
+              title={String(w)}
+              small
+              secondary={value.strokeWidth !== w}
+              onPress={() => onChange({ strokeWidth: w })}
+            />
+          ))}
+        </View>
+        <Text style={styles.label}>Tipo do traço</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {(Object.keys(strokeStyleLabels) as StrokeAppearance['strokeStyle'][]).map((style) => (
+            <Button
+              key={style}
+              title={strokeStyleLabels[style]}
+              small
+              secondary={style !== value.strokeStyle}
+              onPress={() => onChange({ strokeStyle: style })}
+            />
+          ))}
+        </View>
+        <Text style={styles.label}>Cor da linha</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {colors.map(([name, color]) => (
+            <Pressable
+              key={color}
+              accessibilityRole="button"
+              accessibilityLabel={'Cor ' + name.toLowerCase()}
+              accessibilityState={{
+                selected: value.strokeColor.toUpperCase() === color.toUpperCase(),
+              }}
+              onPress={() => onChange({ strokeColor: color })}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: color,
+                borderWidth: 3,
+                borderColor:
+                  value.strokeColor.toUpperCase() === color.toUpperCase()
+                    ? t.colors.text
+                    : t.colors.line,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {value.strokeColor.toUpperCase() === color.toUpperCase() && (
+                <Text style={{ color: 'white', fontSize: 22 }}>✓</Text>
+              )}
+            </Pressable>
+          ))}
+        </View>
+        <Field
+          label="Cor personalizada (HEX)"
+          value={custom}
+          onChangeText={(v) => {
+            setCustom(v);
+            setError('');
+          }}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={7}
+          placeholder="#1764C0"
+          error={error || undefined}
+        />
+        <Button
+          title="Aplicar cor personalizada"
+          small
+          secondary
+          onPress={() => {
+            const color = custom.trim();
+            if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
+              setError('Use # seguido de 6 caracteres, por exemplo #1764C0.');
+              return;
+            }
+            onChange({ strokeColor: color.toUpperCase() });
+            setError('');
+          }}
+        />
+      </View>
+    </PickerSheet>
+  );
+}

@@ -6,6 +6,8 @@ export * from './report-defaults';
 export * from './types';
 export * from './drawings';
 export * from './drawing-sketch';
+export * from './drawing-selection';
+export * from './drawing-professional';
 export * from './tutorials';
 export * from './people';
 export * from './signature-geometry';

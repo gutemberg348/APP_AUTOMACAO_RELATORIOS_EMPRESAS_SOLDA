@@ -2,6 +2,7 @@ import { useTheme } from '../utils/theme';
 import Svg, { Circle, Path, Rect, Line } from 'react-native-svg';
 
 export type IconName =
+  | 'lasso'
   | 'dashboard'
   | 'building'
   | 'folder'
@@ -72,6 +73,13 @@ export function Icon({
   const { tokens: t } = useTheme();
   const content = (() => {
     switch (name) {
+      case 'lasso':
+        return (
+          <Path
+            d="M7 18C1 17 1 8 6 5 12 1 22 5 21 11 20 17 12 20 7 18Zm0 0c-4 6 6 6 5 1"
+            strokeDasharray="3 2"
+          />
+        );
       case 'camera':
         return (
           <>

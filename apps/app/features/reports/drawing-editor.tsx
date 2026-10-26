@@ -15,7 +15,24 @@ import {
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
+import { DrawingSelectionPanel } from './drawing-selection-panel';
+import {
+  drawingGroupMembers,
+  drawingUnlocked,
+  drawingLayerChange,
+  drawingLineEndpoint,
+  drawingSnap,
+} from '@weldcosta/shared';
+import { MediaSourcePicker } from '../../components/media-source-picker';
+import { useDrawingImages, drawingImageSize } from './drawing-images';
+import { useReportPhotoDrafts } from './report-photo-drafts';
+import type { ReportMedia } from '@weldcosta/shared';
 import { DrawingToolStrip } from './drawing-tool-strip';
+import {
+  DrawingStrokePanel,
+  strokeStyleLabels,
+  type StrokeAppearance,
+} from './drawing-stroke-panel';
 import { PickerSheet } from '../../components/picker-sheet';
 import { InputVisibilityContext } from '../../components/input-visibility';
 import { usePageScroll } from '../../components/page-scroll';
@@ -25,8 +42,12 @@ import {
   drawingId,
   drawingSvg,
   drawingSymbols,
+  drawingSymbolDefinition,
+  drawingSymbolPreview,
   hasDrawingStroke,
   drawingStrokeWidth,
+  drawingStrokeColor,
+  drawingStrokeStyle,
   hitElement,
   moveElement,
   transformDrawingElement,
@@ -40,6 +61,10 @@ import {
   sketchElement,
   drawingViewport,
   zoomDrawingAt,
+  drawingSelectionBounds,
+  selectDrawingLasso,
+  transformDrawingSelection,
+  normalizeDrawingAngle,
   type SketchTool,
   type DrawingData,
   type DrawingElement,
@@ -64,6 +89,7 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Icon, type IconName } from '../../components/icon';
 
 type Tool =
+  | 'lasso'
   | 'hatch'
   | 'select'
   | 'pipe'
@@ -76,11 +102,14 @@ type Tool =
   | 'pan'
   | SketchTool;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
+// Screen pixels: the same touch tolerance at any zoom level.
+const drawingDragThreshold = 6;
 const primaryTools: Tool[] = [
   'straighten',
   'pipe',
   'pencil',
   'select',
+  'lasso',
   'point',
   'symbol',
   'text',
@@ -93,6 +122,12 @@ const primaryTools: Tool[] = [
   'line',
 ];
 const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
+  {
+    id: 'lasso',
+    name: 'Laço',
+    icon: 'lasso',
+    hint: 'Contorne os elementos para mover e girar juntos. Só entra no bloco o que ficar inteiramente dentro do laço.',
+  },
   {
     id: 'hatch',
     name: 'Hachura triangular',
@@ -180,7 +215,15 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
 ];
 tools.sort((a, b) => primaryTools.indexOf(a.id) - primaryTools.indexOf(b.id));
 type Snapshot = { drawings: ReportDrawing[]; points: ReportPoint[] };
-export function DrawingPreview({ data, points }: { data: DrawingData; points: ReportPoint[] }) {
+export function DrawingPreview({
+  data,
+  points,
+  images,
+}: {
+  data: DrawingData;
+  points: ReportPoint[];
+  images?: Record<string, string>;
+}) {
   const { tokens: t } = useTheme();
   return (
     <View
@@ -193,7 +236,7 @@ export function DrawingPreview({ data, points }: { data: DrawingData; points: Re
         overflow: 'hidden',
       }}
     >
-      <SvgXml xml={drawingSvg(data, points)} width="100%" height="100%" />
+      <SvgXml xml={drawingSvg(data, points, { images })} width="100%" height="100%" />
     </View>
   );
 }
@@ -252,7 +295,15 @@ export function DrawingEditor({
   onRemovePoint,
   onRemovePoints,
   pointPhotoCount,
+  reportId,
+  media,
+  photoDraftKey,
+  canUploadImages = false,
 }: {
+  reportId?: string;
+  media?: ReportMedia[];
+  photoDraftKey?: string;
+  canUploadImages?: boolean;
   value: ReportDrawing[];
   points: ReportPoint[];
   onChange(value: ReportDrawing[]): void;
@@ -269,6 +320,8 @@ export function DrawingEditor({
   const revealInline = usePageScroll();
   const lastCanvasLayout = useRef<{ expanded: boolean; width: number } | undefined>(undefined);
   const [expanded, setExpanded] = useState(false);
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const drawingImages = useDrawingImages(reportId, media, photoDraftKey);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all'>();
   const [entry, setEntry] = useState<'point' | 'text'>();
@@ -294,11 +347,49 @@ export function DrawingEditor({
         angle: number;
         element?: DrawingElement;
         result?: DrawingElement;
+        elements?: DrawingElement[];
+        results?: DrawingElement[];
       }
     | undefined
   >(undefined);
   const [showProperties, setShowProperties] = useState(false);
   const [directSelection, setDirectSelection] = useState(false);
+  const [nearbyIds, setNearbyIds] = useState<string[]>([]);
+  const [selectionPickerOpen, setSelectionPickerOpen] = useState(false);
+  const [selectionPanelOpen, setSelectionPanelOpen] = useState(false);
+  const [lockedImagesOpen, setLockedImagesOpen] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [snapGuide, setSnapGuide] = useState<ReturnType<typeof drawingSnap>>();
+  const endpointGesture = useRef<
+    | {
+        element: DrawingElement;
+        end: 0 | 1;
+        start: DrawingPosition;
+        ratio: number;
+        result?: DrawingElement;
+      }
+    | undefined
+  >(undefined);
+  const [blockIds, setBlockIds] = useState<string[]>([]);
+  const [blockDraft, setBlockDraft] = useState<DrawingElement[]>();
+  const [lassoPath, setLassoPath] = useState<DrawingPosition[]>([]);
+  const [rotationDelta, setRotationDelta] = useState<number>();
+  const [blockAngle, setBlockAngle] = useState(0);
+  const blockGesture = useRef<
+    | {
+        mode: 'lasso' | 'move' | 'rotate';
+        view: { x: number; y: number; w: number; h: number };
+        start: DrawingPosition;
+        samples: DrawingPosition[];
+        elements: DrawingElement[];
+        result?: DrawingElement[];
+        pivot: DrawingPosition;
+        angle: number;
+        delta: number;
+        ratio: number;
+      }
+    | undefined
+  >(undefined);
   const [stroke, setStroke] = useState<DrawingPosition[]>([]);
   const [height, setHeight] = useState(480);
   const [advanced, setAdvanced] = useState(false);
@@ -319,10 +410,14 @@ export function DrawingEditor({
     [dimension, setDimension] = useState('');
   const [textSize, setTextSize] = useState(20);
   const [strokeWidth, setStrokeWidth] = useState(2.6);
+  const [strokeColor, setStrokeColor] = useState<string>();
+  const [strokeStyle, setStrokeStyle] = useState<StrokeAppearance['strokeStyle']>();
+  const [strokePanelOpen, setStrokePanelOpen] = useState(false);
   const [selectionOpacity, setSelectionOpacity] = useState(0.5);
   const [moveStep, setMoveStep] = useState(5);
   const propertiesView = useRef<View>(null);
   const [hatchCorners, setHatchCorners] = useState<DrawingPosition[]>([]);
+  const [hatchDefaults, setHatchDefaults] = useState({ spacing: 8, angle: 90, strokeWidth: 1.2 });
   const annotationField = useRef<View>(null);
   const [textRotation, setTextRotation] = useState(0);
   const [symbolScale, setSymbolScale] = useState(1);
@@ -345,6 +440,7 @@ export function DrawingEditor({
         samples: DrawingPosition[];
         held?: boolean;
         selectionOnly?: boolean;
+        drawingStarted: boolean;
         corner?: number;
         dx: number;
         dy: number;
@@ -364,7 +460,53 @@ export function DrawingEditor({
     drawing = value[activeIndex],
     data = drawing?.data;
   const selectedElement = data?.elements.find((e) => e.id === selected);
-  const editingSelection = !!selectedElement && (tool === 'select' || directSelection);
+  const editingSelection =
+    !!selectedElement && drawingUnlocked(selectedElement) && (tool === 'select' || directSelection);
+  const blockElements =
+    data?.elements.filter((e) => blockIds.includes(e.id) && drawingUnlocked(e)) ?? [];
+  const editingBlock = blockElements.length > 1;
+  useEffect(() => {
+    if (!selectedElement?.groupId || !(tool === 'select' || directSelection) || !data) return;
+    const members = drawingGroupMembers(data.elements, [selectedElement.id]);
+    if (members.length > 1) {
+      setSelected('');
+      setDirectSelection(false);
+      setBlockIds(members.map((e) => e.id));
+      setBlockAngle(0);
+    }
+  }, [selectedElement, data, tool, directSelection]);
+  const transformElements = editingBlock
+    ? blockElements
+    : editingSelection
+      ? [selectedElement!]
+      : [];
+  const visibleTransformElements =
+    blockDraft ?? (draftElement && editingSelection ? [draftElement] : transformElements);
+  const transformBounds = visibleTransformElements.length
+    ? drawingSelectionBounds(visibleTransformElements)
+    : undefined;
+  const canRotateSelection =
+    editingBlock ||
+    (editingSelection && selectedElement?.type !== 'point' && selectedElement?.type !== 'marker');
+  const rotationHandle =
+    transformBounds && editable && canRotateSelection
+      ? {
+          center: transformBounds.center,
+          handle: {
+            x: Math.max(
+              viewport.x + (24 * viewport.w) / width,
+              Math.min(
+                viewport.x + viewport.w - (24 * viewport.w) / width,
+                transformBounds.center.x,
+              ),
+            ),
+            y: Math.max(
+              viewport.y + (28 * viewport.w) / width,
+              transformBounds.y - (32 * viewport.w) / width,
+            ),
+          },
+        }
+      : undefined;
   const insertedSymbol =
     tool === 'symbol' && selectedElement?.type === 'symbol' ? selectedElement : undefined;
   const strokeTarget =
@@ -372,6 +514,19 @@ export function DrawingEditor({
       ? selectedElement
       : undefined;
   const currentStrokeWidth = strokeTarget ? drawingStrokeWidth(strokeTarget) : strokeWidth;
+  const currentStrokeAppearance: StrokeAppearance = {
+    strokeWidth: currentStrokeWidth,
+    strokeColor: strokeTarget ? drawingStrokeColor(strokeTarget) : (strokeColor ?? '#263D52'),
+    strokeStyle: strokeTarget ? drawingStrokeStyle(strokeTarget) : (strokeStyle ?? 'solid'),
+  };
+  const updateStrokeAppearance = (patch: Partial<StrokeAppearance>) => {
+    if (strokeTarget) updateElement({ ...strokeTarget, ...patch });
+    else {
+      if (patch.strokeWidth !== undefined) setStrokeWidth(patch.strokeWidth);
+      if (patch.strokeColor !== undefined) setStrokeColor(patch.strokeColor);
+      if (patch.strokeStyle !== undefined) setStrokeStyle(patch.strokeStyle);
+    }
+  };
   const showStrokeControls =
     !!strokeTarget ||
     (!editingSelection &&
@@ -390,10 +545,18 @@ export function DrawingEditor({
     setHatchCorners([]);
     gesture.current = undefined;
     setDraftElement(undefined);
+    setBlockDraft(undefined);
+    setLassoPath([]);
+    setRotationDelta(undefined);
+    blockGesture.current = undefined;
     setStroke([]);
     setTraceStart(undefined);
     setTraceEnd(undefined);
   }, [activeIndex, expanded, editable, savedVersion, cancelHold]);
+  useEffect(() => {
+    setBlockIds([]);
+    setBlockAngle(0);
+  }, [activeIndex, savedVersion]);
   const linkedPoint =
     selectedElement?.type === 'point'
       ? points.find((p) => pointKey(p) === selectedElement.reportPointId)
@@ -439,17 +602,28 @@ export function DrawingEditor({
       nextPoints,
     );
   const add = (element: DrawingElement, nextPoints = points) => {
+    setBlockIds([]);
     if (!data || data.elements.length >= 600) {
       setMessage('Limite de 600 elementos nesta prancha. Crie outra prancha para continuar.');
       return false;
     }
     const next = hasDrawingStroke(element)
-      ? { ...element, strokeWidth: element.strokeWidth ?? strokeWidth }
+      ? {
+          ...element,
+          strokeWidth: element.strokeWidth ?? strokeWidth,
+          ...(strokeColor && element.strokeColor === undefined ? { strokeColor } : {}),
+          ...(strokeStyle && element.strokeStyle === undefined ? { strokeStyle } : {}),
+        }
       : element;
     updateData({ ...data, elements: [...data.elements, next] }, nextPoints);
-    setSelected(element.id);
-    setDirectSelection(element.type === 'symbol' || element.type === 'text');
-    if (element.type === 'symbol' || element.type === 'text') {
+    const autoSelect =
+      element.type === 'image' ||
+      element.type === 'symbol' ||
+      element.type === 'text' ||
+      (element.type === 'polyline' && ['circle', 'rectangle', 'hatch'].includes(tool));
+    setSelected(autoSelect ? element.id : '');
+    setDirectSelection(autoSelect);
+    if (autoSelect) {
       setShowProperties(false);
       setToolsOpen(false);
     }
@@ -462,7 +636,136 @@ export function DrawingEditor({
       ...data,
       elements: data.elements.map((e) => (e.id === element.id ? element : e)),
     });
+  const updateBlock = (elements: DrawingElement[]) => {
+    if (!data) return;
+    const replacements = new Map(elements.map((e) => [e.id, e]));
+    updateData({ ...data, elements: data.elements.map((e) => replacements.get(e.id) ?? e) });
+  };
+  const selectionAction = (
+    action: 'group' | 'ungroup' | 'duplicate' | 'front' | 'back' | 'lock',
+  ) => {
+    if (!data || !editable || !transformElements.length) return;
+    const ids = transformElements.map((e) => e.id);
+    if (action === 'front' || action === 'back') {
+      updateData({ ...data, elements: drawingLayerChange(data.elements, ids, action === 'front') });
+      return;
+    }
+    if (action === 'group' || action === 'ungroup') {
+      const groupId = action === 'group' ? drawingId() : undefined;
+      updateBlock(transformElements.map((e) => ({ ...e, groupId })));
+      setMessage(
+        action === 'group'
+          ? 'Grupo criado. Toque em qualquer parte para selecionar o conjunto.'
+          : 'Grupo separado. Agora cada elemento pode ser selecionado.',
+      );
+      return;
+    }
+    if (action === 'lock') {
+      const image = transformElements[0];
+      if (image?.type === 'image') {
+        updateElement({ ...image, locked: true, groupId: undefined });
+        finishSelection();
+        setMessage('Imagem bloqueada. Use Imagens bloqueadas para liberar.');
+      }
+      return;
+    }
+    if (data.elements.length + transformElements.length > 600) {
+      setMessage('Não há espaço para essa cópia. Limite de 600 elementos por folha.');
+      return;
+    }
+    if (!canEditPoints && transformElements.some((e) => e.type === 'point')) {
+      setMessage('Você precisa de permissão para criar os pontos da cópia.');
+      return;
+    }
+    const nextPoints = [...points],
+      groupId = transformElements.length > 1 ? drawingId() : undefined;
+    const copies = transformDrawingSelection(transformElements, 0, 24, 24).map((e) => {
+      const clone = { ...e, id: drawingId(), groupId };
+      if (clone.type === 'point') {
+        const point: ReportPoint = {
+          clientId: drawingId(),
+          number: nextPointNumber(nextPoints),
+          type: measurement ? 'MEASUREMENT' : 'WELD',
+          data: { discontinuity: '-' },
+        };
+        nextPoints.push(point);
+        return { ...clone, reportPointId: pointKey(point) };
+      }
+      return clone;
+    });
+    updateData(
+      {
+        ...data,
+        elements: drawingLayerChange(
+          [...data.elements, ...copies],
+          copies.map((e) => e.id),
+          true,
+        ),
+      },
+      nextPoints,
+    );
+    setBlockIds(copies.length > 1 ? copies.map((e) => e.id) : []);
+    setSelected(copies.length === 1 ? copies[0]!.id : '');
+    setDirectSelection(copies.length === 1);
+    setTool('select');
+    setMessage('Cópia criada e selecionada. Arraste para posicionar.');
+  };
+  const selectionAngle = editingBlock
+    ? blockAngle
+    : selectedElement?.type === 'symbol' ||
+        selectedElement?.type === 'text' ||
+        selectedElement?.type === 'image'
+      ? (selectedElement.rotation ?? 0)
+      : selectedElement?.type === 'line' || selectedElement?.type === 'dimension'
+        ? (Math.atan2(
+            selectedElement.y2 - selectedElement.y1,
+            selectedElement.x2 - selectedElement.x1,
+          ) *
+            180) /
+          Math.PI
+        : blockAngle;
+  const shownAngle = normalizeDrawingAngle(selectionAngle + (rotationDelta ?? 0));
+  const rotateSelection = (angle: number) => {
+    if (!transformElements.length) return;
+    const result = transformDrawingSelection(transformElements, angle);
+    if (result === transformElements) {
+      setMessage('Não há espaço para esse giro. Afaste a seleção da borda do desenho.');
+      return;
+    }
+    updateBlock(result);
+    setBlockAngle((old) => normalizeDrawingAngle(old + angle));
+  };
+  const resizeBlock = (factor: number) => {
+    const result = transformDrawingSelection(blockElements, 0, 0, 0, factor);
+    if (JSON.stringify(result) === JSON.stringify(blockElements)) {
+      setMessage(
+        'Limite de tamanho do bloco. Para aumentar, afaste-o das bordas ou selecione menos elementos.',
+      );
+      return;
+    }
+    setMessage('');
+    updateBlock(result);
+  };
+  const selectWholeDrawing = () => {
+    if (!data?.elements.length) return;
+    finishSelection();
+    setTool('select');
+    const unlocked = data.elements.filter(drawingUnlocked);
+    if (unlocked.length === 1) {
+      setSelected(unlocked[0]!.id);
+      setDirectSelection(true);
+    } else setBlockIds(unlocked.map((e) => e.id));
+    setToolsOpen(false);
+    setShowProperties(false);
+    setMessage('');
+  };
   const selectTool = (next: Tool) => {
+    setSelectionPanelOpen(false);
+    setNearbyIds([]);
+    setSelectionPickerOpen(false);
+    setStrokePanelOpen(false);
+    setBlockIds([]);
+    setBlockAngle(0);
     cancelHold();
     setHatchCorners([]);
     setDirectSelection(false);
@@ -487,6 +790,12 @@ export function DrawingEditor({
     setMessage('');
   };
   const finishSelection = () => {
+    setSelectionPanelOpen(false);
+    setNearbyIds([]);
+    setSelectionPickerOpen(false);
+    setStrokePanelOpen(false);
+    setBlockIds([]);
+    setBlockAngle(0);
     cancelHold();
     setSelected('');
     setDirectSelection(false);
@@ -495,6 +804,8 @@ export function DrawingEditor({
     setTool('select');
   };
   const undo = (redo = false) => {
+    setBlockIds([]);
+    setBlockAngle(0);
     cancelHold();
     if (hatchCorners.length && !redo) {
       setHatchCorners(hatchCorners.slice(0, -1));
@@ -528,6 +839,24 @@ export function DrawingEditor({
       points.map((p) => (pointKey(p) === pointKey(linkedPoint) ? { ...p, ...patch } : p)),
     );
   };
+  const smartSnap = (p: DrawingPosition, excluded: string[] = [], show = true) => {
+    if (!snapEnabled) {
+      if (show) setSnapGuide(undefined);
+      return p;
+    }
+    const guide = drawingSnap(
+      p,
+      data?.elements.filter((e) => !excluded.includes(e.id)) ?? [],
+      (10 * view.w) / width,
+    );
+    if (show) setSnapGuide(guide);
+    return guide.position;
+  };
+  const moveSnapped = (element: DrawingElement, dx: number, dy: number, show = true) => {
+    const center = drawingSelectionBounds([element]).center;
+    const target = smartSnap({ x: center.x + dx, y: center.y + dy }, [element.id], show);
+    return moveElement(element, target.x - center.x, target.y - center.y);
+  };
   const place = (raw: DrawingPosition, origin = start) => {
     if (!data) return;
     if (
@@ -544,14 +873,12 @@ export function DrawingEditor({
       setMessage('Limite de 600 elementos nesta prancha. Crie outra prancha para continuar.');
       return;
     }
-    const p = snapPosition(raw, data.grid);
+    const p = smartSnap(snapPosition(raw, data.grid), [], false);
     if (tool === 'hatch') {
       const corners = [...hatchCorners, p];
       if (corners.length < 3) {
         setHatchCorners(corners);
-        setMessage(
-          'Canto ' + corners.length + ' marcado. Toque no canto ' + (corners.length + 1) + '.',
-        );
+        setMessage('');
         return;
       }
       const [a, b, c] = corners as [DrawingPosition, DrawingPosition, DrawingPosition];
@@ -565,11 +892,12 @@ export function DrawingEditor({
         id: drawingId(),
         type: 'polyline',
         points: [a, b, c, a],
-        hatch: { spacing: 18, angle: 90 },
+        hatch: { spacing: hatchDefaults.spacing, angle: hatchDefaults.angle },
+        strokeWidth: hatchDefaults.strokeWidth,
       });
       setHatchCorners([]);
       setDirectSelection(true);
-      if (expanded) setShowProperties(true);
+      setShowProperties(false);
       return;
     }
     if (tool === 'pipe' || tool === 'line' || tool === 'dimension') {
@@ -577,7 +905,12 @@ export function DrawingEditor({
         setStart(p);
         return;
       }
-      const end = tool === 'dimension' ? p : constrainPosition(p, origin, data.grid);
+      origin = smartSnap(origin, [], false);
+      const end = smartSnap(
+        tool === 'dimension' ? p : constrainPosition(p, origin, data.grid),
+        [],
+        false,
+      );
       if (Math.hypot(origin.x - end.x, origin.y - end.y) < 4) return;
       if (tool === 'dimension' && !dimension.trim()) {
         setMessage('Informe o texto da cota, por exemplo: 1.500 mm.');
@@ -687,6 +1020,12 @@ export function DrawingEditor({
       });
   };
   const resetGesture = () => {
+    endpointGesture.current = undefined;
+    setSnapGuide(undefined);
+    blockGesture.current = undefined;
+    setBlockDraft(undefined);
+    setLassoPath([]);
+    setRotationDelta(undefined);
     cancelHold();
     gesture.current = undefined;
     pinch.current = undefined;
@@ -732,6 +1071,7 @@ export function DrawingEditor({
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (event) => {
       cancelHold();
+      resetGesture();
       multiTouch.current = false;
       pinch.current = undefined;
       touchOrigin.current = {
@@ -744,19 +1084,126 @@ export function DrawingEditor({
       };
       if (
         editable &&
+        editingSelection &&
+        (selectedElement.type === 'line' || selectedElement.type === 'dimension')
+      ) {
+        const ends = [
+          { x: selectedElement.x1, y: selectedElement.y1 },
+          { x: selectedElement.x2, y: selectedElement.y2 },
+        ];
+        const end = ends.findIndex(
+          (a) => Math.hypot(p.x - a.x, p.y - a.y) <= (16 * viewport.w) / width,
+        );
+        if (end >= 0) {
+          endpointGesture.current = {
+            element: selectedElement,
+            end: end as 0 | 1,
+            start: p,
+            ratio: viewport.w / width,
+          };
+          return;
+        }
+      }
+      if (
+        editable &&
+        rotationHandle &&
+        Math.hypot(p.x - rotationHandle.handle.x, p.y - rotationHandle.handle.y) <=
+          (22 * viewport.w) / width
+      ) {
+        const pivot = drawingSelectionBounds(transformElements).center;
+        blockGesture.current = {
+          mode: 'rotate',
+          view,
+          start: p,
+          samples: [],
+          elements: transformElements,
+          pivot,
+          angle: (Math.atan2(p.y - pivot.y, p.x - pivot.x) * 180) / Math.PI,
+          delta: 0,
+          ratio: viewport.w / width,
+        };
+        setRotationDelta(0);
+        return;
+      }
+      if (editable && editingBlock) {
+        const bounds = drawingSelectionBounds(blockElements),
+          margin = (12 * viewport.w) / width;
+        const inside =
+          p.x >= bounds.x - margin &&
+          p.x <= bounds.x + bounds.width + margin &&
+          p.y >= bounds.y - margin &&
+          p.y <= bounds.y + bounds.height + margin;
+        blockGesture.current = {
+          mode: 'move',
+          view,
+          start: p,
+          samples: [],
+          elements: inside ? blockElements : [],
+          pivot: bounds.center,
+          angle: 0,
+          delta: 0,
+          ratio: viewport.w / width,
+        };
+        return;
+      }
+      if (editable && tool === 'lasso') {
+        setSelected('');
+        setDirectSelection(false);
+        setMessage('');
+        blockGesture.current = {
+          mode: 'lasso',
+          view,
+          start: p,
+          samples: [p],
+          elements: [],
+          pivot: p,
+          angle: 0,
+          delta: 0,
+          ratio: viewport.w / width,
+        };
+        setLassoPath([p]);
+        return;
+      }
+      if (
+        editable &&
         !editingSelection &&
         tool !== 'pan' &&
         tool !== 'select' &&
         (p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 800)
       )
         return;
-      const found = data
-        ? hitElement(data.elements, p, Math.max(12, (14 / width) * view.w), points)
-        : undefined;
+      const found = data ? hitElement(data.elements, p, (14 / width) * view.w, points) : undefined;
+      const candidates =
+        data?.elements
+          .filter((e) => hitElement([e], p, (14 / width) * view.w, points))
+          .map((e) => e.id) ?? [];
       // Selection owns the entire gesture, including its release. A tap outside
       // must never fall through to the previous insertion/drawing tool.
       const selectionOnly = editable && (editingSelection || tool === 'select');
+      if (selectionOnly && found?.groupId) {
+        const members = drawingGroupMembers(data!.elements, [found.id]);
+        if (members.length > 1) {
+          setSelected('');
+          setDirectSelection(false);
+          setBlockIds(members.map((e) => e.id));
+          setBlockAngle(0);
+          setToolsOpen(false);
+          blockGesture.current = {
+            mode: 'move',
+            view,
+            start: p,
+            samples: [],
+            elements: members,
+            pivot: drawingSelectionBounds(members).center,
+            angle: 0,
+            delta: 0,
+            ratio: viewport.w / width,
+          };
+          return;
+        }
+      }
       if (selectionOnly && found) {
+        setNearbyIds(candidates);
         setSelected(found.id);
         setDirectSelection(true);
         setShowProperties(false);
@@ -765,9 +1212,7 @@ export function DrawingEditor({
         editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
           ? selectedElement.points
               .slice(0, 3)
-              .findIndex(
-                (c) => Math.hypot(c.x - p.x, c.y - p.y) < Math.max(12, (16 / width) * view.w),
-              )
+              .findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < (16 / width) * view.w)
           : -1;
       const current = {
         start: p,
@@ -780,9 +1225,10 @@ export function DrawingEditor({
         dy: 0,
         held: selectionOnly && !!found,
         selectionOnly,
+        drawingStarted: false,
       };
       gesture.current = current;
-      if (editable && found && tool !== 'select' && corner < 0 && !current.held) {
+      if (editable && found && tool !== 'select' && tool !== 'pan' && corner < 0 && !current.held) {
         holdTimer.current = setTimeout(() => {
           if (
             gesture.current !== current ||
@@ -792,8 +1238,35 @@ export function DrawingEditor({
             return;
           current.original = found;
           current.held = true;
+          const members = found.groupId ? drawingGroupMembers(data!.elements, [found.id]) : [];
+          if (members.length > 1) {
+            gesture.current = undefined;
+            setSelected('');
+            setDirectSelection(false);
+            setBlockIds(members.map((e) => e.id));
+            setBlockAngle(0);
+            blockGesture.current = {
+              mode: 'move',
+              view,
+              start: p,
+              samples: [],
+              elements: members,
+              pivot: drawingSelectionBounds(members).center,
+              angle: 0,
+              delta: 0,
+              ratio: viewport.w / width,
+            };
+            setStroke([]);
+            setTraceStart(undefined);
+            setTraceEnd(undefined);
+            setToolsOpen(false);
+            setStart(undefined);
+            Vibration.vibrate(20);
+            return;
+          }
           setHatchCorners([]);
           setSelected(found.id);
+          setNearbyIds(candidates);
           setDirectSelection(true);
           setStart(undefined);
           setStroke([]);
@@ -835,6 +1308,9 @@ export function DrawingEditor({
           const element = editable ? gesture.current?.original : undefined;
           const initialElement =
             element && draftElement?.id === element.id ? draftElement : element;
+          const initialBlock = blockGesture.current?.elements.length
+            ? (blockDraft ?? blockGesture.current.elements)
+            : undefined;
           resetGesture();
           multiTouch.current = true;
           setStart(undefined);
@@ -847,6 +1323,7 @@ export function DrawingEditor({
             height,
             angle,
             element: initialElement,
+            elements: initialBlock,
           };
           if (initialElement) {
             setSelected(initialElement.id);
@@ -856,7 +1333,18 @@ export function DrawingEditor({
           }
         } else {
           const initial = pinch.current;
-          if (initial.element) {
+          if (initial.elements) {
+            const delta = normalizeDrawingAngle(angle - initial.angle);
+            initial.results = transformDrawingSelection(
+              initial.elements,
+              delta,
+              ((center.x - initial.center.x) * initial.view.w) / initial.width,
+              ((center.y - initial.center.y) * initial.view.w) / initial.width,
+              distance / initial.distance,
+            );
+            setBlockDraft(initial.results);
+            setRotationDelta(delta);
+          } else if (initial.element) {
             const delta = ((angle - initial.angle + 540) % 360) - 180;
             initial.result = transformDrawingElement(
               initial.element,
@@ -866,6 +1354,7 @@ export function DrawingEditor({
               distance / initial.distance,
             );
             setDraftElement(initial.result);
+            setRotationDelta(delta);
           } else
             setView(
               zoomDrawingAt(
@@ -881,11 +1370,66 @@ export function DrawingEditor({
         return;
       }
       if (multiTouch.current) return;
+      const endpoint = endpointGesture.current;
+      if (endpoint) {
+        if (Math.hypot(state.dx, state.dy) < 6) return;
+        const p = smartSnap(
+          {
+            x: endpoint.start.x + state.dx * endpoint.ratio,
+            y: endpoint.start.y + state.dy * endpoint.ratio,
+          },
+          [endpoint.element.id],
+        );
+        endpoint.result = drawingLineEndpoint(endpoint.element, endpoint.end, p);
+        setDraftElement(endpoint.result);
+        return;
+      }
+      const block = blockGesture.current;
+      if (block) {
+        const p = {
+          x: block.start.x + state.dx * block.ratio,
+          y: block.start.y + state.dy * block.ratio,
+        };
+        if (block.mode === 'lasso') {
+          block.samples = appendStrokePoint(block.samples, p);
+          setLassoPath(block.samples);
+        } else if (block.mode === 'rotate') {
+          const nextAngle = (Math.atan2(p.y - block.pivot.y, p.x - block.pivot.x) * 180) / Math.PI;
+          block.delta += normalizeDrawingAngle(nextAngle - block.angle);
+          block.angle = nextAngle;
+          const snapped = Math.round(block.delta / 15) * 15;
+          const delta = Math.abs(snapped - block.delta) < 2 ? snapped : block.delta;
+          block.result = transformDrawingSelection(block.elements, delta, 0, 0, 1, block.pivot);
+          setBlockDraft(block.result);
+          setRotationDelta(block.result === block.elements ? 0 : delta);
+        } else if (block.elements.length) {
+          if (Math.hypot(state.dx, state.dy) < 6) return;
+          const center = drawingSelectionBounds(block.elements).center;
+          const snapped = smartSnap(
+            { x: center.x + state.dx * block.ratio, y: center.y + state.dy * block.ratio },
+            block.elements.map((e) => e.id),
+          );
+          block.result = transformDrawingSelection(
+            block.elements,
+            0,
+            snapped.x - center.x,
+            snapped.y - center.y,
+          );
+          setBlockDraft(block.result);
+        } else
+          setView({
+            ...view,
+            x: block.view.x - state.dx * block.ratio,
+            y: block.view.y - state.dy * block.ratio,
+          });
+        return;
+      }
       const g = gesture.current;
       if (!g) return;
       g.dx = state.dx;
       g.dy = state.dy;
       if (g.corner !== undefined && g.original) {
+        if (Math.hypot(state.dx, state.dy) < 6) return;
         setDraftElement(
           moveHatchCorner(
             g.original,
@@ -899,8 +1443,9 @@ export function DrawingEditor({
       if (!g.held && Math.hypot(state.dx, state.dy) > 10) cancelHold();
       if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= 10) return;
       if (g.held && g.original) {
+        if (Math.hypot(state.dx, state.dy) < 6) return;
         setDraftElement(
-          moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
+          moveSnapped(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
         );
         return;
       }
@@ -912,6 +1457,11 @@ export function DrawingEditor({
         });
         return;
       }
+      if (sketchTools.includes(tool) || ['pipe', 'line', 'dimension'].includes(tool)) {
+        if (Math.hypot(state.dx, state.dy) >= drawingDragThreshold) g.drawingStarted = true;
+        if (!g.drawingStarted) return;
+        setTraceStart(sketchTools.includes(tool) ? g.start : snapPosition(g.start, data!.grid));
+      }
       if (sketchTools.includes(tool)) {
         const p = clampPosition({
           x: g.start.x + (state.dx / g.width) * g.view.w,
@@ -919,15 +1469,17 @@ export function DrawingEditor({
         });
         g.samples = appendStrokePoint(g.samples, p);
         setStroke(g.samples);
-        setTraceEnd(p);
+        setTraceEnd(tool === 'straighten' ? smartSnap(p) : p);
         return;
       }
       if (data && ['pipe', 'line', 'dimension'].includes(tool)) {
         setTraceEnd(
-          clampPosition({
-            x: g.start.x + (state.dx / g.width) * g.view.w,
-            y: g.start.y + (state.dy / g.width) * g.view.w,
-          }),
+          smartSnap(
+            clampPosition({
+              x: g.start.x + (state.dx / g.width) * g.view.w,
+              y: g.start.y + (state.dy / g.width) * g.view.w,
+            }),
+          ),
         );
         return;
       }
@@ -938,16 +1490,60 @@ export function DrawingEditor({
     },
     onPanResponderRelease: (_event, state) => {
       cancelHold();
+      if (endpointGesture.current && !multiTouch.current) {
+        const endpoint = endpointGesture.current;
+        if (endpoint.result && Math.hypot(state.dx, state.dy) >= 6) updateElement(endpoint.result);
+        resetGesture();
+        return;
+      }
       if (multiTouch.current || !editable) {
+        if (editable && pinch.current?.results) {
+          updateBlock(pinch.current.results);
+          setBlockAngle((old) => normalizeDrawingAngle(old + (rotationDelta ?? 0)));
+        }
         if (editable && pinch.current?.result) updateElement(pinch.current.result);
         multiTouch.current = false;
+        resetGesture();
+        return;
+      }
+      const block = blockGesture.current;
+      if (block) {
+        if (block.mode === 'lasso') {
+          const ids = drawingGroupMembers(
+            data?.elements ?? [],
+            selectDrawingLasso(data?.elements ?? [], block.samples),
+          ).map((e) => e.id);
+          setBlockIds(ids.length > 1 ? ids : []);
+          setBlockAngle(0);
+          setSelected(ids.length === 1 ? ids[0]! : '');
+          setDirectSelection(ids.length === 1);
+          if (ids.length) {
+            setTool('select');
+            setShowProperties(false);
+            setToolsOpen(false);
+            Vibration.vibrate(20);
+          } else
+            setMessage(
+              'Nenhum elemento inteiro dentro do laço. Contorne os itens que deseja selecionar.',
+            );
+        } else if (
+          block.result === block.elements &&
+          block.mode === 'rotate' &&
+          Math.hypot(state.dx, state.dy) > 3
+        ) {
+          setMessage('Não há espaço para esse giro. Afaste a seleção da borda do desenho.');
+        } else if (block.result && Math.hypot(state.dx, state.dy) >= 6) {
+          updateBlock(block.result);
+          if (block.mode === 'rotate')
+            setBlockAngle((old) => normalizeDrawingAngle(old + (rotationDelta ?? 0)));
+        } else if (!block.elements.length && Math.hypot(state.dx, state.dy) < 10) finishSelection();
         resetGesture();
         return;
       }
       const g = gesture.current;
       if (!g) return;
       if (g.corner !== undefined && g.original) {
-        if (Math.hypot(state.dx, state.dy) > 3)
+        if (Math.hypot(state.dx, state.dy) >= 6)
           updateElement(
             moveHatchCorner(
               g.original,
@@ -957,12 +1553,13 @@ export function DrawingEditor({
             ),
           );
       } else if (g.held && g.original) {
-        if (Math.hypot(state.dx, state.dy) > 3)
+        if (Math.hypot(state.dx, state.dy) >= 6)
           updateElement(
-            moveElement(
+            moveSnapped(
               g.original,
               (state.dx / g.width) * g.view.w,
               (state.dy / g.width) * g.view.w,
+              false,
             ),
           );
       } else if (g.selectionOnly) {
@@ -972,31 +1569,43 @@ export function DrawingEditor({
           x: g.start.x + (state.dx / g.width) * g.view.w,
           y: g.start.y + (state.dy / g.width) * g.view.w,
         });
-        const element = sketchElement(tool as SketchTool, g.start, end, g.samples, drawingId());
-        if (element) add(element);
+        const dragged = g.drawingStarted || Math.hypot(state.dx, state.dy) >= drawingDragThreshold;
+        const element = dragged
+          ? sketchElement(tool as SketchTool, g.start, end, g.samples, drawingId())
+          : undefined;
+        if (element) {
+          if (tool === 'straighten' && element.type === 'line') {
+            const a = smartSnap({ x: element.x1, y: element.y1 }, [], false),
+              b = smartSnap({ x: element.x2, y: element.y2 }, [], false);
+            if (Math.hypot(a.x - b.x, a.y - b.y) >= 2)
+              add({ ...element, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+          } else add(element);
+        }
         setStroke([]);
-      } else if (tool === 'select' && g.original && Math.hypot(state.dx, state.dy) > 3)
+      } else if (tool === 'select' && g.original && Math.hypot(state.dx, state.dy) >= 6)
         updateElement(
           moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
         );
       else if (
         data &&
         ['pipe', 'line', 'dimension'].includes(tool) &&
-        Math.hypot(state.dx, state.dy) >= 4
+        (g.drawingStarted || Math.hypot(state.dx, state.dy) >= drawingDragThreshold)
       ) {
         place(
           clampPosition({
             x: g.start.x + (state.dx / g.width) * g.view.w,
             y: g.start.y + (state.dy / g.width) * g.view.w,
           }),
-          start ?? snapPosition(g.start, data.grid),
+          snapPosition(g.start, data.grid),
         );
         // A drag is a complete segment. A new drag always starts under the finger.
         setStart(undefined);
       } else if (tool !== 'select' && tool !== 'pan' && Math.hypot(state.dx, state.dy) < 12)
         place(clampPosition(g.start));
       gesture.current = undefined;
+      setSnapGuide(undefined);
       setDraftElement(undefined);
+      setStroke([]);
       setTraceStart(undefined);
       setTraceEnd(undefined);
     },
@@ -1030,9 +1639,9 @@ export function DrawingEditor({
     );
   const preview = useMemo(() => {
     if (!data) return '';
-    const elements = data.elements.map((e) => (draftElement?.id === e.id ? draftElement : e));
-    hatchCorners.forEach((p, i) =>
-      elements.push({ id: 'hatch-corner-' + i, type: 'marker', number: String(i + 1), ...p }),
+    const elements = data.elements.map(
+      (e) =>
+        blockDraft?.find((d) => d.id === e.id) ?? (draftElement?.id === e.id ? draftElement : e),
     );
     if (hatchCorners.length === 2)
       elements.push({
@@ -1053,7 +1662,8 @@ export function DrawingEditor({
           stroke,
           'trace-preview',
         );
-        if (element && hasDrawingStroke(element)) elements.push({ ...element, strokeWidth });
+        if (element && hasDrawingStroke(element))
+          elements.push({ ...element, strokeWidth, strokeColor, strokeStyle });
       } else {
         const end =
           tool === 'dimension'
@@ -1063,6 +1673,8 @@ export function DrawingEditor({
           id: 'trace-preview',
           type: 'line',
           strokeWidth,
+          strokeColor,
+          strokeStyle,
           x1: traceStart.x,
           y1: traceStart.y,
           x2: end.x,
@@ -1080,13 +1692,29 @@ export function DrawingEditor({
         rotation: 0,
       });
     return drawingSvg({ ...data, elements }, points, {
+      endpointRadius: (7 * viewport.w) / width,
+      snapGuide,
+      images: drawingImages.images,
       selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
       selectionFrame: editingSelection && !traceEnd,
       selectionOpacity,
+      constructionCorners: hatchCorners,
+      selectedIds: editingBlock ? blockIds : undefined,
+      lasso: lassoPath,
+      rotationControl: rotationHandle
+        ? { ...rotationHandle, radius: (14 * viewport.w) / width }
+        : undefined,
       viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
     });
   }, [
+    snapGuide,
+    drawingImages.images,
     data,
+    blockDraft,
+    blockIds,
+    editingBlock,
+    lassoPath,
+    rotationHandle,
     points,
     draftElement,
     start,
@@ -1101,6 +1729,8 @@ export function DrawingEditor({
     tool,
     stroke,
     strokeWidth,
+    strokeColor,
+    strokeStyle,
     hatchCorners,
     editingSelection,
     selectionOpacity,
@@ -1129,6 +1759,37 @@ export function DrawingEditor({
     gesture.current = undefined;
     setView({ x: 0, y: 0, w: 1000, h: 800 });
   };
+  const focusSelection = () => {
+    if (!transformElements.length) return;
+    const bounds = drawingSelectionBounds(transformElements);
+    const w = Math.max(
+      150,
+      bounds.width * 1.3,
+      (bounds.height * 1.3 * width) / Math.max(1, height - 100),
+    );
+    resetGesture();
+    setView({ x: bounds.center.x - w / 2, y: bounds.center.y - w * 0.4, w, h: w * 0.8 });
+    setToolsOpen(false);
+    setShowProperties(false);
+  };
+  const elementLabel = (e: DrawingElement) =>
+    e.type === 'image'
+      ? 'Imagem'
+      : e.type === 'text'
+        ? 'Texto: ' + e.text
+        : e.type === 'symbol'
+          ? drawingSymbolDefinition(e.symbolCode).name
+          : e.type === 'point'
+            ? 'Ponto ' + (points.find((p) => pointKey(p) === e.reportPointId)?.number ?? '')
+            : e.type === 'marker'
+              ? 'Marcação ' + e.number
+              : e.type === 'dimension'
+                ? 'Cota: ' + e.text
+                : e.type === 'polyline'
+                  ? e.hatch
+                    ? 'Hachura'
+                    : 'Traço / forma'
+                  : 'Linha';
   const canvas = (
     <View
       testID="drawing-canvas"
@@ -1140,7 +1801,7 @@ export function DrawingEditor({
           !previous || previous.expanded !== expanded || previous.width !== screen.width;
         lastCanvasLayout.current = { expanded, width: screen.width };
         if (expanded && needsFit) {
-          const w = Math.min(
+          const w = Math.max(
             1000,
             (800 * e.nativeEvent.layout.width) / Math.max(1, e.nativeEvent.layout.height),
           );
@@ -1184,6 +1845,59 @@ export function DrawingEditor({
           } as ViewStyle
         }
       />
+      {expanded && !toolsOpen && !showProperties && !message && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            flexDirection: 'row',
+            borderRadius: 12,
+            padding: 2,
+            backgroundColor: t.colors.surface,
+            borderWidth: 1,
+            borderColor: t.colors.line,
+          }}
+        >
+          {(['pan', 'select'] as const).map((mode) => (
+            <Pressable
+              key={mode}
+              accessibilityRole="button"
+              accessibilityLabel={mode === 'pan' ? 'Mover folha' : 'Selecionar elementos'}
+              accessibilityState={{ selected: tool === mode && !editingSelection && !editingBlock }}
+              onPress={() => selectTool(mode)}
+              style={{
+                width: 44,
+                height: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 10,
+                backgroundColor: tool === mode ? t.colors.blueSoft : 'transparent',
+              }}
+            >
+              <Icon
+                name={mode === 'pan' ? 'move' : 'cursor'}
+                size={20}
+                color={tool === mode ? t.colors.blue : t.colors.text}
+              />
+            </Pressable>
+          ))}
+          <IconButton
+            label="Enquadrar folha inteira"
+            icon="expand"
+            onPress={() => {
+              resetGesture();
+              fit();
+            }}
+          />
+          <IconButton
+            label="Desfazer última alteração"
+            icon="undo"
+            disabled={!editable || (!history.length && !hatchCorners.length)}
+            onPress={() => undo()}
+          />
+        </View>
+      )}
       {!!message && (
         <View
           style={{
@@ -1214,6 +1928,61 @@ export function DrawingEditor({
             small
             onPress={() => setMessage('')}
           />
+        </View>
+      )}
+      {canRotateSelection && rotationDelta === undefined && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            alignSelf: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            padding: 4,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: t.colors.line,
+            backgroundColor: t.colors.surface,
+          }}
+        >
+          <IconButton
+            label="Girar seleção 15 graus à esquerda"
+            icon="undo"
+            onPress={() => rotateSelection(-15)}
+          />
+          <Text
+            testID="selection-angle"
+            style={[styles.label, { minWidth: 60, textAlign: 'center' }]}
+          >
+            {Math.round(shownAngle)}°
+          </Text>
+          <IconButton
+            label="Girar seleção 15 graus à direita"
+            icon="redo"
+            onPress={() => rotateSelection(15)}
+          />
+        </View>
+      )}
+      {rotationDelta !== undefined && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            alignSelf: 'center',
+            borderRadius: 12,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            backgroundColor: t.colors.primary,
+          }}
+        >
+          <Text
+            accessibilityLiveRegion="polite"
+            style={{ color: t.colors.white, fontFamily: t.fonts.bold, fontSize: 18 }}
+          >
+            {Math.round(shownAngle)}°
+          </Text>
         </View>
       )}
     </View>
@@ -1366,6 +2135,12 @@ export function DrawingEditor({
                   aria-pressed={symbol === item.code}
                   onPress={() => {
                     setSymbol(item.code);
+                    const defaults = drawingSymbolDefinition(item.code);
+                    if (defaults.defaultRotation !== undefined)
+                      setRotation(defaults.defaultRotation);
+                    if (defaults.defaultScale !== undefined) setSymbolScale(defaults.defaultScale);
+                    if (defaults.defaultStrokeWidth !== undefined)
+                      setStrokeWidth(defaults.defaultStrokeWidth);
                     setSelected('');
                     setDirectSelection(false);
                   }}
@@ -1383,13 +2158,7 @@ export function DrawingEditor({
                 >
                   <View pointerEvents="none">
                     <SvgXml
-                      xml={
-                        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-45 -45 90 90"><path d="' +
-                        item.path +
-                        '" fill="none" stroke="' +
-                        t.colors.text +
-                        '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-                      }
+                      xml={drawingSymbolPreview(item.code, t.colors.text)}
                       width={42}
                       height={42}
                     />
@@ -1586,8 +2355,7 @@ export function DrawingEditor({
               <View style={{ gap: 10 }}>
                 <Text style={styles.label}>Hachura triangular</Text>
                 <Text style={styles.muted}>
-                  Arraste as bolinhas dos cantos para ajustar. Segure no meio por 1 segundo para
-                  mover inteira.
+                  Arraste os cantos para ajustar o triângulo ou arraste pelo meio para mover.
                 </Text>
                 <View style={[styles.row, { gap: 6 }]}>
                   <Button
@@ -1817,7 +2585,7 @@ export function DrawingEditor({
             ).length +
             ' ponto(s) têm dados ou fotos preenchidos. Os dados, resultados, fotos vinculadas e marcações desses pontos nos outros desenhos também serão excluídos ao salvar. Pontos que não estão neste desenho serão mantidos.'
           : clearMode === 'strokes'
-            ? 'Linhas, formas, textos e símbolos serão removidos. As marcações de pontos ficam no desenho. Você pode desfazer.'
+            ? 'Linhas, formas, textos e símbolos serão removidos. As imagens e marcações de pontos ficam no desenho. Você pode desfazer.'
             : 'Todas as figuras e marcações desta prancha serão removidas. Os pontos cadastrados, resultados e fotos do relatório serão preservados. Você pode desfazer.'
       }
       confirmLabel="Confirmar limpeza"
@@ -1851,7 +2619,9 @@ export function DrawingEditor({
             ...data,
             elements:
               clearMode === 'strokes'
-                ? data.elements.filter((e) => e.type === 'point' || e.type === 'marker')
+                ? data.elements.filter(
+                    (e) => e.type === 'point' || e.type === 'marker' || e.type === 'image',
+                  )
                 : [],
           });
         setClearMode(undefined);
@@ -2160,61 +2930,468 @@ export function DrawingEditor({
       ))}
     </DrawingToolStrip>
   );
-  const selectionControls = editingSelection ? (
-    <View
-      style={{
-        paddingHorizontal: 8,
-        gap: 2,
-        ...(screen.width >= 600 ? { flexDirection: 'row', alignItems: 'center' } : {}),
-      }}
-    >
-      <Text style={[styles.muted, { fontSize: 11 }, screen.width >= 600 && { flex: 1 }]}>
-        Arraste para mover. Dois dedos giram e ajustam o tamanho.
-      </Text>
-      <View
-        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}
-      >
-        {selectedElement.type !== 'point' && selectedElement.type !== 'marker' && (
-          <>
+  const selectedHatch =
+    editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
+      ? selectedElement
+      : undefined;
+  const hatchSettings = selectedHatch
+    ? { ...selectedHatch.hatch!, strokeWidth: drawingStrokeWidth(selectedHatch) }
+    : hatchDefaults;
+  const updateHatchSettings = (patch: Partial<typeof hatchDefaults>) => {
+    const next = { ...hatchSettings, ...patch };
+    setHatchDefaults(next);
+    if (selectedHatch)
+      updateElement({
+        ...selectedHatch,
+        strokeWidth: next.strokeWidth,
+        hatch: { spacing: next.spacing, angle: next.angle },
+      });
+  };
+  const hatchControls =
+    selectedHatch || (tool === 'hatch' && !editingSelection) ? (
+      <View testID="hatch-quick-controls" style={{ gap: 4, paddingHorizontal: 8 }}>
+        {!selectedHatch && (
+          <Text style={[styles.muted, { fontSize: 11 }]}>
+            Toque no canto {hatchCorners.length + 1} de 3 do triângulo.
+          </Text>
+        )}
+        <DrawingToolStrip label="Direção dos traços da hachura">
+          {[
+            { label: 'Vertical', angle: 90 },
+            { label: 'Horizontal', angle: 0 },
+            { label: 'Diagonal /', angle: -45 },
+            { label: 'Diagonal \\', angle: 45 },
+          ].map((direction) => (
+            <Pressable
+              key={direction.angle}
+              accessibilityRole="button"
+              accessibilityLabel={'Hachura ' + direction.label.toLowerCase()}
+              accessibilityState={{
+                selected:
+                  ((hatchSettings.angle % 180) + 180) % 180 ===
+                  ((direction.angle % 180) + 180) % 180,
+              }}
+              onPress={() => updateHatchSettings({ angle: direction.angle })}
+              style={{
+                minHeight: 36,
+                paddingHorizontal: 12,
+                justifyContent: 'center',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: t.colors.line,
+                backgroundColor:
+                  ((hatchSettings.angle % 180) + 180) % 180 ===
+                  ((direction.angle % 180) + 180) % 180
+                    ? t.colors.blueSoft
+                    : t.colors.surface,
+              }}
+            >
+              <Text style={[styles.text, { fontSize: 12 }]}>{direction.label}</Text>
+            </Pressable>
+          ))}
+        </DrawingToolStrip>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[styles.muted, { fontSize: 11 }]}>
+              Traço {Math.max(0.5, hatchSettings.strokeWidth * 0.45).toFixed(2)}
+            </Text>
             <IconButton
-              label="Diminuir selecionado"
+              label="Afinar traços da hachura"
               icon="minus"
               small
-              disabled={
-                (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) <= 0.5) ||
-                (selectedElement.type === 'text' && (selectedElement.size ?? 20) <= 10)
-              }
+              disabled={hatchSettings.strokeWidth <= 1.2}
               onPress={() =>
-                updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1 / 1.15))
+                updateHatchSettings({ strokeWidth: Math.max(1.2, hatchSettings.strokeWidth - 0.5) })
               }
             />
             <IconButton
-              label="Aumentar selecionado"
+              label="Engrossar traços da hachura"
               icon="plus"
               small
-              disabled={
-                (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) >= 3) ||
-                (selectedElement.type === 'text' && (selectedElement.size ?? 20) >= 40)
+              disabled={hatchSettings.strokeWidth >= 12}
+              onPress={() =>
+                updateHatchSettings({ strokeWidth: Math.min(12, hatchSettings.strokeWidth + 0.5) })
               }
-              onPress={() => updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1.15))}
             />
-          </>
-        )}
-        <IconButton
-          label="Ajustar selecionado"
-          icon="tool"
-          small
-          onPress={() => {
-            if (expanded) setShowProperties(true);
-            else revealInline(propertiesView.current);
-          }}
-        />
-        <IconButton label="Excluir selecionado" icon="trash" small onPress={removeSelected} />
-        <IconButton label="Concluir ajuste" icon="check" small onPress={finishSelection} />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={[styles.muted, { fontSize: 11 }]}>Espaço {hatchSettings.spacing}</Text>
+            <IconButton
+              label="Aproximar traços da hachura"
+              icon="minus"
+              small
+              disabled={hatchSettings.spacing <= 6}
+              onPress={() =>
+                updateHatchSettings({ spacing: Math.max(6, hatchSettings.spacing - 2) })
+              }
+            />
+            <IconButton
+              label="Afastar traços da hachura"
+              icon="plus"
+              small
+              disabled={hatchSettings.spacing >= 80}
+              onPress={() =>
+                updateHatchSettings({ spacing: Math.min(80, hatchSettings.spacing + 2) })
+              }
+            />
+          </View>
+        </View>
       </View>
+    ) : null;
+  const selectionControls = (
+    <>
+      {(editingSelection || editingBlock) && (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            paddingHorizontal: 8,
+            gap: 8,
+          }}
+        >
+          <Button
+            title="Editar seleção"
+            small
+            secondary
+            icon="tool"
+            onPress={() => setSelectionPanelOpen(true)}
+          />
+          <Button
+            title="Enquadrar seleção"
+            small
+            secondary
+            icon="expand"
+            onPress={focusSelection}
+          />
+          {editingSelection &&
+            nearbyIds.filter((id) => data?.elements.some((e) => e.id === id)).length > 1 && (
+              <Button
+                title="Sobrepostos"
+                small
+                secondary
+                icon="layers"
+                onPress={() => setSelectionPickerOpen(true)}
+              />
+            )}
+        </View>
+      )}
+      {editingBlock ? (
+        <View style={{ paddingHorizontal: 8, gap: 4 }}>
+          <Text style={[styles.muted, { fontSize: 11 }]}>
+            {blockElements.length} elementos no bloco · Arraste para mover. Dois dedos para
+            aumentar, diminuir e girar juntos.
+          </Text>
+          <View style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
+            <Button
+              title="Diminuir bloco"
+              small
+              secondary
+              icon="minus"
+              onPress={() => resizeBlock(1 / 1.15)}
+            />
+            <Button
+              title="Aumentar bloco"
+              small
+              secondary
+              icon="plus"
+              onPress={() => resizeBlock(1.15)}
+            />
+          </View>
+          <View style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
+            <Button
+              title="Selecionar tudo"
+              small
+              secondary
+              icon="cursor"
+              onPress={selectWholeDrawing}
+            />
+            <IconButton label="Novo laço" small icon="lasso" onPress={() => selectTool('lasso')} />
+            <Button title="Soltar bloco" small secondary icon="check" onPress={finishSelection} />
+          </View>
+        </View>
+      ) : editingSelection ? (
+        <View
+          style={{
+            paddingHorizontal: 8,
+            gap: 2,
+            ...(screen.width >= 600 ? { flexDirection: 'row', alignItems: 'center' } : {}),
+          }}
+        >
+          <Text style={[styles.muted, { fontSize: 11 }, screen.width >= 600 && { flex: 1 }]}>
+            {selectedElement.type === 'point' || selectedElement.type === 'marker'
+              ? 'Arraste a marcação para mudar de lugar. O vínculo com o ponto é mantido.'
+              : 'Arraste para mover. Alça ↻: girar no lugar. Dois dedos: tamanho e rotação.'}
+          </Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 8,
+            }}
+          >
+            {selectedElement.type !== 'point' && selectedElement.type !== 'marker' && (
+              <>
+                <IconButton
+                  label="Diminuir selecionado"
+                  icon="minus"
+                  small
+                  disabled={
+                    (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) <= 0.5) ||
+                    (selectedElement.type === 'text' && (selectedElement.size ?? 20) <= 10)
+                  }
+                  onPress={() =>
+                    updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1 / 1.15))
+                  }
+                />
+                <IconButton
+                  label="Aumentar selecionado"
+                  icon="plus"
+                  small
+                  disabled={
+                    (selectedElement.type === 'symbol' && (selectedElement.scale ?? 1) >= 3) ||
+                    (selectedElement.type === 'text' && (selectedElement.size ?? 20) >= 40)
+                  }
+                  onPress={() =>
+                    updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1.15))
+                  }
+                />
+              </>
+            )}
+            <IconButton
+              label="Ajustar selecionado"
+              icon="tool"
+              small
+              onPress={() => {
+                if (expanded) setShowProperties(true);
+                else revealInline(propertiesView.current);
+              }}
+            />
+            <IconButton label="Excluir selecionado" icon="trash" small onPress={removeSelected} />
+            <IconButton label="Concluir ajuste" icon="check" small onPress={finishSelection} />
+          </View>
+          {selectedElement.type === 'image' && (
+            <Button
+              title="Selecionar imagem e marcações"
+              small
+              secondary
+              icon="lasso"
+              onPress={selectWholeDrawing}
+            />
+          )}
+        </View>
+      ) : (
+        entryControls
+      )}
+      {editable && tool === 'lasso' && !editingBlock && (
+        <View style={{ paddingHorizontal: 8 }}>
+          <Button
+            title="Selecionar tudo"
+            small
+            secondary
+            icon="cursor"
+            disabled={!data?.elements.length}
+            onPress={selectWholeDrawing}
+          />
+        </View>
+      )}
+      {hatchControls}
+      {editable &&
+        showStrokeControls &&
+        !editingBlock &&
+        (!expanded || toolsOpen || editingSelection) && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Estilo da linha"
+            onPress={() => setStrokePanelOpen(true)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginHorizontal: 8,
+              borderWidth: 1,
+              borderColor: t.colors.line,
+              borderRadius: 10,
+            }}
+          >
+            <View
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                backgroundColor: currentStrokeAppearance.strokeColor,
+                borderWidth: 1,
+                borderColor: t.colors.line,
+              }}
+            />
+            <Text style={[styles.text, { flex: 1, fontSize: 12 }]}>
+              {strokeTarget ? 'Linha selecionada' : 'Próximos traços'} ·{' '}
+              {strokeStyleLabels[currentStrokeAppearance.strokeStyle]} ·{' '}
+              {currentStrokeWidth.toFixed(1)}
+            </Text>
+            <Icon name="tool" size={18} />
+          </Pressable>
+        )}
+    </>
+  );
+  const strokeDialog = (
+    <DrawingStrokePanel
+      visible={strokePanelOpen}
+      value={currentStrokeAppearance}
+      selected={!!strokeTarget}
+      onChange={updateStrokeAppearance}
+      onClose={() => setStrokePanelOpen(false)}
+    />
+  );
+  const imageAction =
+    editable && canUploadImages && photoDraftKey && data ? (
+      <IconButton
+        label="Inserir imagem no desenho"
+        icon="image"
+        onPress={() => setImageSourceOpen(true)}
+      />
+    ) : null;
+  const selectionDialog = (
+    <PickerSheet
+      visible={selectionPickerOpen}
+      title="Selecionar elemento"
+      subtitle="Escolha qual item deste local você quer ajustar."
+      icon="layers"
+      onClose={() => setSelectionPickerOpen(false)}
+    >
+      <View style={{ padding: 16, gap: 8 }}>
+        {data?.elements
+          .filter((e) => nearbyIds.includes(e.id))
+          .reverse()
+          .map((e) => (
+            <Button
+              key={e.id}
+              title={elementLabel(e)}
+              secondary={e.id !== selected}
+              icon={e.id === selected ? 'check' : 'cursor'}
+              onPress={() => {
+                resetGesture();
+                const members = drawingGroupMembers(data!.elements, [e.id]);
+                setBlockIds(members.length > 1 ? members.map((e) => e.id) : []);
+                setSelected(members.length > 1 ? '' : e.id);
+                setDirectSelection(members.length === 1);
+                setTool('select');
+                setShowProperties(false);
+                setToolsOpen(false);
+                setSelectionPickerOpen(false);
+              }}
+            />
+          ))}
+      </View>
+    </PickerSheet>
+  );
+  const professionalToolbar = (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, padding: 8 }}>
+      <Button
+        title={snapEnabled ? 'Encaixe: ligado' : 'Encaixe: desligado'}
+        small
+        secondary
+        icon="pin"
+        onPress={() => {
+          setSnapEnabled(!snapEnabled);
+          setSnapGuide(undefined);
+        }}
+      />
+      {data?.elements.some((e) => e.type === 'image' && e.locked) && (
+        <Button
+          title="Imagens bloqueadas"
+          small
+          secondary
+          icon="lock"
+          onPress={() => setLockedImagesOpen(true)}
+        />
+      )}
     </View>
-  ) : (
-    entryControls
+  );
+  const professionalDialog = (
+    <>
+      <DrawingSelectionPanel
+        visible={selectionPanelOpen}
+        elements={transformElements}
+        onClose={() => setSelectionPanelOpen(false)}
+        onApply={updateBlock}
+        onAction={selectionAction}
+      />
+      <PickerSheet
+        visible={lockedImagesOpen}
+        title="Imagens bloqueadas"
+        icon="lock"
+        onClose={() => setLockedImagesOpen(false)}
+      >
+        <View style={{ padding: 16, gap: 8 }}>
+          {data?.elements
+            .filter((e) => e.type === 'image' && e.locked)
+            .map((e, i) => (
+              <Button
+                key={e.id}
+                title={'Desbloquear imagem ' + (i + 1)}
+                secondary
+                icon="lock"
+                onPress={() => {
+                  if (e.type !== 'image') return;
+                  updateElement({ ...e, locked: false });
+                  setLockedImagesOpen(false);
+                  setSelected(e.id);
+                  setDirectSelection(true);
+                  setTool('select');
+                  setToolsOpen(false);
+                  setMessage('');
+                }}
+              />
+            ))}
+        </View>
+      </PickerSheet>
+    </>
+  );
+  const imageDialog = (
+    <>
+      {!!drawingImages.error && (
+        <View style={{ padding: 6 }}>
+          <Text style={styles.muted}>Não foi possível carregar uma imagem do desenho.</Text>
+          <Button title="Recarregar imagens" small secondary onPress={drawingImages.retry} />
+        </View>
+      )}
+      <MediaSourcePicker
+        visible={imageSourceOpen}
+        contextLabel="Inserir imagem no desenho"
+        onClose={() => setImageSourceOpen(false)}
+        onSelect={async (asset, progress) => {
+          if (!data || !photoDraftKey || !canUploadImages) return;
+          if (data.elements.length >= 600)
+            throw new Error('Limite de 600 elementos. Crie outra folha.');
+          progress('Preparando imagem para o desenho…');
+          const size = await drawingImageSize(asset);
+          const mediaKey = 'drawing-image-' + drawingId();
+          const element: DrawingElement = {
+            id: drawingId(),
+            type: 'image',
+            mediaKey,
+            x: 500,
+            y: 400,
+            ...size,
+            rotation: 0,
+          };
+          if (!add(element)) throw new Error('Não foi possível inserir a imagem. Tente novamente.');
+          useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
+            ...draft,
+            photos: [
+              ...draft.photos,
+              { id: mediaKey, pointKey: null, sectionKey: 'drawing', asset, caption: '' },
+            ],
+          }));
+          setTool('select');
+          setToolsOpen(false);
+        }}
+      />
+    </>
   );
   const content = (
     <View style={{ gap: 18 }}>
@@ -2295,6 +3472,7 @@ export function DrawingEditor({
         </Card>
       ) : (
         <>
+          {imageAction}
           <Button
             title={
               sheetDetails
@@ -2330,6 +3508,7 @@ export function DrawingEditor({
           {editable && (
             <>
               {toolPalette}
+              {professionalToolbar}
               {quickActions}
               <View style={styles.row}>
                 <Button
@@ -2519,6 +3698,10 @@ export function DrawingEditor({
         </>
       )}
       {entryDialog}
+      {selectionDialog}
+      {professionalDialog}
+      {imageDialog}
+      {strokeDialog}
       {clearDialog}
       {deleteDialog}
       {pointRemovalDialog}
@@ -2526,15 +3709,20 @@ export function DrawingEditor({
   );
   return expanded ? (
     <DrawingWorkspace
+      imageAction={imageAction}
       title={data?.title ?? 'Desenho técnico'}
       toolName={
-        editingSelection && selectedElement
-          ? selectedElement.type === 'symbol'
-            ? 'Símbolo selecionado'
-            : selectedElement.type === 'text'
-              ? 'Texto selecionado'
-              : 'Elemento selecionado'
-          : (tools.find((item) => item.id === tool)?.name ?? 'Desenho')
+        editingBlock
+          ? 'Bloco selecionado'
+          : editingSelection && selectedElement
+            ? selectedElement.type === 'image'
+              ? 'Imagem selecionada'
+              : selectedElement.type === 'symbol'
+                ? 'Símbolo selecionado'
+                : selectedElement.type === 'text'
+                  ? 'Texto selecionado'
+                  : 'Elemento selecionado'
+            : (tools.find((item) => item.id === tool)?.name ?? 'Desenho')
       }
       hint={
         (tools.find((item) => item.id === tool)?.hint ?? '') + ' Segure brevemente para selecionar.'
@@ -2545,7 +3733,14 @@ export function DrawingEditor({
         setToolsOpen(open);
         if (open) setShowProperties(false);
       }}
-      tools={data && editable ? toolPalette : null}
+      tools={
+        data && editable ? (
+          <>
+            {professionalToolbar}
+            {toolPalette}
+          </>
+        ) : null
+      }
       actions={data ? quickActions : null}
       selection={data ? selectionControls : null}
       canvas={
@@ -2569,6 +3764,10 @@ export function DrawingEditor({
       dialogs={
         <>
           {entryDialog}
+          {selectionDialog}
+          {professionalDialog}
+          {imageDialog}
+          {strokeDialog}
           {data ? clearDialog : null}
           {deleteDialog}
           {pointRemovalDialog}

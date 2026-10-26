@@ -68,23 +68,25 @@ export function ReportMediaPanel({ report }: { report: Report }) {
         icon="image"
       />
       <FormGrid>
-        {(report.media ?? []).map((item) => (
-          <FormCell key={item.id}>
-            <View style={{ gap: 8 }}>
-              <MediaImage reportId={report.id} item={item} />
-              <Text style={styles.label}>
-                {item.sectionKey === 'drawing'
-                  ? 'Croqui anexado'
-                  : item.reportPointId
-                    ? 'Ponto / solda ' +
-                      (report.points?.find((point) => point.id === item.reportPointId)?.number ??
-                        '')
-                    : 'Foto adicional'}
-              </Text>
-              <Text style={styles.muted}>{item.caption || item.originalName}</Text>
-            </View>
-          </FormCell>
-        ))}
+        {(report.media ?? [])
+          .filter((item) => !item.clientUploadId?.startsWith('drawing-image-'))
+          .map((item) => (
+            <FormCell key={item.id}>
+              <View style={{ gap: 8 }}>
+                <MediaImage reportId={report.id} item={item} />
+                <Text style={styles.label}>
+                  {item.sectionKey === 'drawing'
+                    ? 'Croqui anexado'
+                    : item.reportPointId
+                      ? 'Ponto / solda ' +
+                        (report.points?.find((point) => point.id === item.reportPointId)?.number ??
+                          '')
+                      : 'Foto adicional'}
+                </Text>
+                <Text style={styles.muted}>{item.caption || item.originalName}</Text>
+              </View>
+            </FormCell>
+          ))}
       </FormGrid>
       {!report.media?.length && <Text style={styles.muted}>Nenhuma imagem anexada.</Text>}
     </View>

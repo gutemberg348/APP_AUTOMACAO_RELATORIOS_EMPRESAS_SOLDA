@@ -1,3 +1,4 @@
+import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
 import { signatureImage } from '../layout';
 import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import {
@@ -47,10 +48,13 @@ export function render(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
+        { images: drawingImageSources(report, images) },
       )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision);
     if (cad.notes) content += annotations(cad.notes);
   }
-  for (const m of report.media.filter((m) => m.sectionKey === 'drawing' && !m.reportPointId))
+  for (const m of report.media.filter(
+    (m) => m.sectionKey === 'drawing' && !m.reportPointId && !isEmbeddedDrawingImage(m),
+  ))
     content +=
       `<div class="rdo-drawing"><img src="${images.get(m.id) || ''}"></div>` +
       (m.caption ? annotations(m.caption) : '');

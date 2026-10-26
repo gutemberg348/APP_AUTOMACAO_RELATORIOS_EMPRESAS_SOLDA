@@ -1,53 +1,64 @@
 import { z } from 'zod';
+import { drawingSymbols, drawingSymbolDefinition } from './drawing-symbols';
+export { drawingSymbols, drawingSymbolDefinition, drawingSymbolPreview } from './drawing-symbols';
+import { drawingOrderedElements } from './drawing-professional';
+import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
 const coord = z.number().finite().min(0).max(1000);
 const xy = { x: coord, y: z.number().finite().min(0).max(drawingHeight) };
 const id = z.string().min(1).max(100);
-export const drawingSymbols = [
-  { code: 'valve', name: 'Válvula', path: 'M-22-13 22 13V-13L-22 13Z M0 0V-28 M-10-28H10' },
-  { code: 'flange', name: 'Flange', path: 'M-6-20V20 M6-20V20 M-24 0H-6 M6 0H24' },
-  { code: 'reducer', name: 'Redução', path: 'M-24-15 24-7V7L-24 15Z' },
-  {
-    code: 'support',
-    name: 'Suporte',
-    path: 'M0-18V12 M-20 12H20 M-15 12-23 22 M0 12-8 22 M15 12 7 22',
-  },
-  {
-    code: 'pump',
-    name: 'Bomba',
-    path: 'M0-22A22 22 0 1 0 0 22A22 22 0 1 0 0-22 M-12-12 15 0-12 12Z M-30 0H-22 M22 0H35',
-  },
-  {
-    code: 'tank',
-    name: 'Tanque',
-    path: 'M-30-30Q0-45 30-30V30Q0 45-30 30Z M-30-30Q0-15 30-30 M-30 30Q0 15 30 30',
-  },
-  { code: 'flow', name: 'Sentido de fluxo', path: 'M-25 0H25 M12-12 25 0 12 12' },
-  {
-    code: 'ball-valve',
-    name: 'Válvula de esfera',
-    path: 'M-22-14 22 14V-14L-22 14Z M-27-18V18 M27-18V18 M-7 0A7 7 0 1 0 7 0A7 7 0 1 0-7 0 M0-14V-32H20',
-  },
-  { code: 'tee', name: 'Conexão em T', path: 'M-30 0H30 M0 0V-30 M-30-7V7 M30-7V7 M-7-30H7' },
-  { code: 'elbow', name: 'Curva / cotovelo', path: 'M-30 0H-10Q0 0 0-10V-30 M-30-7V7 M-7-30H7' },
-  { code: 'cap', name: 'Tampão', path: 'M-30 0H0 M0-20V20 M7-15Q25 0 7 15' },
-  {
-    code: 'union',
-    name: 'União',
-    path: 'M-30 0H-13 M13 0H30 M-13-14H13V14H-13Z M-6-14V14 M6-14V14',
-  },
-] as const;
+const xml = (value: string) =>
+  value.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+
+const elementMeta = {
+  groupId: id.optional(),
+  layer: z.number().int().min(-10000).max(10000).optional(),
+};
 const line = { x1: coord, y1: xy.y, x2: coord, y2: xy.y };
 const strokeWidth = z.number().finite().min(0.5).max(12).optional();
+const strokeAppearance = {
+  strokeColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+  strokeStyle: z.enum(['solid', 'dotted', 'dashed']).optional(),
+};
 export const drawingElementSchema = z.discriminatedUnion('type', [
-  z.object({ id, type: z.literal('line'), ...line, strokeWidth }).strict(),
   z
     .object({
       id,
+      ...elementMeta,
+      type: z.literal('image'),
+      locked: z.boolean().optional(),
+      mediaKey: id,
+      ...xy,
+      width: z.number().finite().min(10).max(1000),
+      height: z.number().finite().min(10).max(800),
+      rotation: z.number().finite().min(-360).max(360).default(0),
+    })
+    .strict(),
+  z
+    .object({
+      id,
+      ...elementMeta,
+      type: z.literal('line'),
+      ...line,
+      strokeWidth,
+      ...strokeAppearance,
+    })
+    .strict(),
+  z
+    .object({
+      id,
+      ...elementMeta,
       type: z.literal('polyline'),
       strokeWidth,
+      ...strokeAppearance,
       points: z.array(z.object(xy).strict()).min(2).max(300),
       hatch: z
         .object({
@@ -61,6 +72,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
   z
     .object({
       id,
+      ...elementMeta,
       type: z.literal('point'),
       reportPointId: id,
       ...xy,
@@ -71,6 +83,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
   z
     .object({
       id,
+      ...elementMeta,
       type: z.literal('marker'),
       number: z.string().trim().min(1).max(100),
       ...xy,
@@ -82,6 +95,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
   z
     .object({
       id,
+      ...elementMeta,
       type: z.literal('text'),
       text: z.string().min(1).max(300),
       ...xy,
@@ -92,8 +106,10 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
   z
     .object({
       id,
+      ...elementMeta,
       type: z.literal('symbol'),
       strokeWidth,
+      ...strokeAppearance,
       symbolCode: z.enum(drawingSymbols.map((symbol) => symbol.code)),
       ...xy,
       rotation: z.number().finite().min(-360).max(360),
@@ -103,8 +119,10 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
   z
     .object({
       id,
+      ...elementMeta,
       type: z.literal('dimension'),
       strokeWidth,
+      ...strokeAppearance,
       ...line,
       text: z.string().min(1).max(100),
       offset: z.number().min(-150).max(150).default(35),
@@ -163,6 +181,30 @@ export const drawingStrokeWidth = (element: DrawingElement) =>
   hasDrawingStroke(element)
     ? (element.strokeWidth ?? (element.type === 'dimension' ? 1.2 : 2.6))
     : 2.6;
+export function drawingStrokeColor(element: DrawingElement) {
+  return hasDrawingStroke(element)
+    ? (element.strokeColor ??
+        (element.type === 'symbol'
+          ? drawingSymbolDefinition(element.symbolCode).color
+          : undefined) ??
+        '#263D52')
+    : '#263D52';
+}
+export function drawingStrokeStyle(element: DrawingElement): 'solid' | 'dotted' | 'dashed' {
+  return hasDrawingStroke(element)
+    ? (element.strokeStyle ??
+        (element.type === 'symbol' && drawingSymbolDefinition(element.symbolCode).dash
+          ? 'dotted'
+          : 'solid'))
+    : 'solid';
+}
+export function drawingStrokeDash(style: 'solid' | 'dotted' | 'dashed', width: number) {
+  return style === 'dotted'
+    ? `0.1 ${Math.max(3, width * 2.5)}`
+    : style === 'dashed'
+      ? `${Math.max(8, width * 4)} ${Math.max(4, width * 2)}`
+      : '';
+}
 
 // Old label coordinates remain readable, but all point numbers now sit next to their dot.
 export function drawingPointLabel(position: DrawingPosition, number = '000') {
@@ -299,67 +341,87 @@ export function hitElement(
   tolerance = 18,
   points: DrawingPoint[] = [],
 ) {
-  return [...elements].reverse().find((e) => {
-    if (e.type === 'dimension') {
-      const length = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1;
-      const dx = (-(e.y2 - e.y1) / length) * e.offset,
-        dy = ((e.x2 - e.x1) / length) * e.offset;
-      return (
-        distance(p, { x: e.x1 + dx, y: e.y1 + dy }, { x: e.x2 + dx, y: e.y2 + dy }) < tolerance
-      );
-    }
-    if (e.type === 'line')
-      return distance(p, { x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 }) < tolerance;
-    if (e.type === 'polyline') {
-      if (e.points.slice(1).some((b, i) => distance(p, e.points[i]!, b) < tolerance)) return true;
-      const first = e.points[0]!,
-        last = e.points.at(-1)!;
-      if (e.points.length < 4 || first.x !== last.x || first.y !== last.y) return false;
-      let inside = false;
-      for (let i = 0, j = e.points.length - 1; i < e.points.length; j = i++) {
-        const a = e.points[i]!,
-          b = e.points[j]!;
-        if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
-          inside = !inside;
+  return drawingOrderedElements(elements)
+    .filter((e) => e.type !== 'image' || !e.locked)
+    .reverse()
+    .find((e) => {
+      if (e.type === 'dimension') {
+        const length = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1;
+        const dx = (-(e.y2 - e.y1) / length) * e.offset,
+          dy = ((e.x2 - e.x1) / length) * e.offset;
+        return (
+          distance(p, { x: e.x1 + dx, y: e.y1 + dy }, { x: e.x2 + dx, y: e.y2 + dy }) < tolerance
+        );
       }
-      return inside;
-    }
-    if (e.type === 'point' || e.type === 'marker') {
-      const number =
-        e.type === 'marker'
-          ? e.number
-          : points.find((point) => pointKey(point) === e.reportPointId)?.number;
-      const label = drawingPointLabel(e, number);
-      const left = label.anchor === 'end' ? label.x - label.width : label.x;
-      if (
-        p.x >= left - tolerance &&
-        p.x <= left + label.width + tolerance &&
-        p.y >= label.y - 18 - tolerance &&
-        p.y <= label.y + tolerance
-      )
-        return true;
-    }
-    if (e.type === 'text') {
-      const angle = ((e.rotation ?? 0) * Math.PI) / 180;
-      const dx = p.x - e.x,
-        dy = p.y - e.y;
-      const x = dx * Math.cos(angle) + dy * Math.sin(angle),
-        y = -dx * Math.sin(angle) + dy * Math.cos(angle);
-      const lines = e.text.split(/\r?\n/),
-        size = e.size ?? 20;
-      return (
-        x >= -tolerance &&
-        x <= Math.max(...lines.map((line) => line.length)) * size * 0.55 + tolerance &&
-        y >= -size - tolerance &&
-        y <= (lines.length - 1) * size * 1.25 + tolerance
-      );
-    }
-    if (e.type === 'symbol')
-      return Math.hypot(e.x - p.x, e.y - p.y) < 35 * (e.scale ?? 1) + tolerance;
-    return Math.hypot(e.x - p.x, e.y - p.y) < tolerance + 10;
-  });
+      if (e.type === 'line')
+        return distance(p, { x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 }) < tolerance;
+      if (e.type === 'polyline') {
+        if (e.points.slice(1).some((b, i) => distance(p, e.points[i]!, b) < tolerance)) return true;
+        const first = e.points[0]!,
+          last = e.points.at(-1)!;
+        if (e.points.length < 4 || first.x !== last.x || first.y !== last.y) return false;
+        let inside = false;
+        for (let i = 0, j = e.points.length - 1; i < e.points.length; j = i++) {
+          const a = e.points[i]!,
+            b = e.points[j]!;
+          if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
+            inside = !inside;
+        }
+        return inside;
+      }
+      if (e.type === 'point' || e.type === 'marker') {
+        const number =
+          e.type === 'marker'
+            ? e.number
+            : points.find((point) => pointKey(point) === e.reportPointId)?.number;
+        const label = drawingPointLabel(e, number);
+        const left = label.anchor === 'end' ? label.x - label.width : label.x;
+        if (
+          p.x >= left - tolerance &&
+          p.x <= left + label.width + tolerance &&
+          p.y >= label.y - 18 - tolerance &&
+          p.y <= label.y + tolerance
+        )
+          return true;
+      }
+      if (e.type === 'text') {
+        const angle = ((e.rotation ?? 0) * Math.PI) / 180;
+        const dx = p.x - e.x,
+          dy = p.y - e.y;
+        const x = dx * Math.cos(angle) + dy * Math.sin(angle),
+          y = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        const lines = e.text.split(/\r?\n/),
+          size = e.size ?? 20;
+        return (
+          x >= -tolerance &&
+          x <= Math.max(...lines.map((line) => line.length)) * size * 0.55 + tolerance &&
+          y >= -size - tolerance &&
+          y <= (lines.length - 1) * size * 1.25 + tolerance
+        );
+      }
+      if (e.type === 'symbol' || e.type === 'image') {
+        const bounds =
+            e.type === 'image'
+              ? { x: -e.width / 2, y: -e.height / 2, width: e.width, height: e.height }
+              : drawingSymbolDefinition(e.symbolCode).bounds,
+          scale = e.type === 'image' ? 1 : (e.scale ?? 1);
+        const angle = (e.rotation * Math.PI) / 180,
+          dx = p.x - e.x,
+          dy = p.y - e.y;
+        const x = dx * Math.cos(angle) + dy * Math.sin(angle),
+          y = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        return (
+          x >= bounds.x * scale - tolerance &&
+          x <= (bounds.x + bounds.width) * scale + tolerance &&
+          y >= bounds.y * scale - tolerance &&
+          y <= (bounds.y + bounds.height) * scale + tolerance
+        );
+      }
+      return Math.hypot(e.x - p.x, e.y - p.y) < tolerance + 10;
+    });
 }
 export function moveElement(e: DrawingElement, dx: number, dy: number): DrawingElement {
+  if (e.type === 'image') return transformDrawingSelection([e], 0, dx, dy)[0]!;
   const coords =
     e.type === 'line' || e.type === 'dimension'
       ? [
@@ -404,6 +466,7 @@ export function transformDrawingElement(
   scale = 1,
 ): DrawingElement {
   if (![angle, dx, dy, scale].every(Number.isFinite) || scale <= 0) return e;
+  if (e.type === 'image') return transformDrawingSelection([e], angle, dx, dy, scale)[0]!;
   const normalize = (value: number) => ((((value + 180) % 360) + 360) % 360) - 180;
   if (e.type === 'symbol' || e.type === 'text')
     return moveElement(
@@ -543,11 +606,18 @@ export function drawingSvg(
   data: DrawingData,
   points: DrawingPoint[],
   options: {
+    images?: Record<string, string>;
     selectedId?: string;
     viewBox?: string;
     showGrid?: boolean;
     selectionOpacity?: number;
     selectionFrame?: boolean;
+    constructionCorners?: DrawingPosition[];
+    selectedIds?: string[];
+    lasso?: DrawingPosition[];
+    rotationControl?: { center: DrawingPosition; handle: DrawingPosition; radius: number };
+    endpointRadius?: number;
+    snapGuide?: { x?: number; y?: number; anchor?: DrawingPosition };
   } = {},
 ) {
   const grid = data.grid ?? 'isometric';
@@ -566,16 +636,18 @@ export function drawingSvg(
     body += `<path d="${d}" stroke="#E4EAF2" stroke-width=".7" fill="none"/>`;
   }
   let selectionOverlay = '';
-  for (const e of data.elements) {
-    const selected = options.selectedId === e.id,
-      color = selected ? '#1764C0' : '#263D52';
-    if (selected && options.selectionFrame) {
+  for (const e of drawingOrderedElements(data.elements)) {
+    const selected = options.selectedId === e.id || options.selectedIds?.includes(e.id),
+      color =
+        hasDrawingStroke(e) && e.strokeColor ? e.strokeColor : selected ? '#1764C0' : '#263D52';
+    if (selected && options.selectionFrame && !options.selectedIds?.length) {
       const opacity = Number.isFinite(options.selectionOpacity)
         ? Math.max(0.2, Math.min(1, options.selectionOpacity!))
         : 0.5;
       body += `<g opacity="${opacity}">`;
       let positions: DrawingPosition[];
-      let transform = '';
+      let rotation = 0;
+      let origin: DrawingPosition = { x: 0, y: 0 };
       if (e.type === 'polyline') positions = e.points;
       else if (e.type === 'line' || e.type === 'dimension') {
         positions = [
@@ -603,14 +675,20 @@ export function drawingSvg(
             y: e.y + (lines.length - 1) * size * 1.25 + size * 0.2,
           },
         ];
-        transform = ` transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})"`;
-      } else if (e.type === 'symbol') {
-        const radius = 35 * (e.scale ?? 1);
+        rotation = e.rotation ?? 0;
+        origin = e;
+      } else if (e.type === 'symbol' || e.type === 'image') {
+        const b =
+            e.type === 'image'
+              ? { x: -e.width / 2, y: -e.height / 2, width: e.width, height: e.height }
+              : drawingSymbolDefinition(e.symbolCode).bounds,
+          scale = e.type === 'image' ? 1 : (e.scale ?? 1);
         positions = [
-          { x: e.x - radius, y: e.y - radius },
-          { x: e.x + radius, y: e.y + radius },
+          { x: e.x + b.x * scale, y: e.y + b.y * scale },
+          { x: e.x + (b.x + b.width) * scale, y: e.y + (b.y + b.height) * scale },
         ];
-        transform = ` transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
+        rotation = e.rotation;
+        origin = e;
       } else {
         const number =
           e.type === 'marker'
@@ -628,9 +706,36 @@ export function drawingSvg(
         y = Math.min(...positions.map((p) => p.y)) - 8;
       const width = Math.max(...positions.map((p) => p.x)) - x + 8,
         height = Math.max(...positions.map((p) => p.y)) - y + 8;
-      selectionOverlay = `<rect data-selection-frame="true" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" rx="4"${transform} fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+      // Use page coordinates for every corner, like the drawing geometry.
+      // Avoid combining Rect x/y and a pivot transform: native SVG renderers
+      // can position that outline differently from the symbol's path.
+      const radians = (rotation * Math.PI) / 180;
+      const corners = [
+        { x, y },
+        { x: x + width, y },
+        { x: x + width, y: y + height },
+        { x, y: y + height },
+      ].map((p) => ({
+        x: origin.x + (p.x - origin.x) * Math.cos(radians) - (p.y - origin.y) * Math.sin(radians),
+        y: origin.y + (p.x - origin.x) * Math.sin(radians) + (p.y - origin.y) * Math.cos(radians),
+      }));
+      const outline =
+        corners.map((p, i) => `${i ? 'L' : 'M'}${num(p.x)} ${num(p.y)}`).join(' ') + 'Z';
+      selectionOverlay = `<path data-selection-frame="true" d="${outline}" fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
     }
-    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+    const dash =
+      hasDrawingStroke(e) && e.strokeStyle
+        ? drawingStrokeDash(e.strokeStyle, drawingStrokeWidth(e))
+        : '';
+    const dashAttribute = dash ? ` stroke-dasharray="${dash}"` : '';
+    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}`;
+    if (e.type === 'image') {
+      const uri = options.images?.[e.mediaKey];
+      const transform = `transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
+      body += uri
+        ? `<image x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} preserveAspectRatio="xMidYMid meet" href="${xml(uri)}"/>`
+        : `<rect x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
+    }
     if (e.type === 'line')
       body += `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${stroke}/>`;
     if (e.type === 'polyline')
@@ -647,11 +752,17 @@ export function drawingSvg(
         .slice(0, 3)
         .map(
           (p) =>
-            `<circle cx="${p.x}" cy="${p.y}" r="8" fill="white" stroke="#1764C0" stroke-width="2"/>`,
+            `<circle cx="${p.x}" cy="${p.y}" r="4" fill="white" stroke="#1764C0" stroke-width="1.5"/>`,
         )
         .join('');
-    if (e.type === 'symbol')
-      body += `<path d="${drawingSymbols.find((s) => s.code === e.symbolCode)?.path ?? ''}" transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})" ${stroke}/>`;
+    if (e.type === 'symbol') {
+      const definition = drawingSymbolDefinition(e.symbolCode);
+      const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})"`;
+      const symbolStroke = `stroke="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+      body += `<path d="${definition.path}" ${transform} ${symbolStroke}${e.strokeStyle ? dashAttribute : definition.dash ? ` stroke-dasharray="${definition.dash}"` : ''}/>`;
+      if (definition.accentPath)
+        body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
+    }
     if (e.type === 'text')
       body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${selected ? '#1764C0' : '#285580'}">${e.text
         .split(/\r?\n/)
@@ -686,13 +797,49 @@ export function drawingSvg(
             : '#1764C0';
       body += `<circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}"/><text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
     }
-    if (selected && options.selectionFrame) body += '</g>';
-    if (selected && (e.type === 'line' || e.type === 'dimension'))
+    if (selected && options.selectionFrame && !options.selectedIds?.length) body += '</g>';
+    if (selected && !options.selectedIds?.length && (e.type === 'line' || e.type === 'dimension'))
       for (const p of [
         { x: e.x1, y: e.y1 },
         { x: e.x2, y: e.y2 },
       ])
-        body += `<circle cx="${p.x}" cy="${p.y}" r="5" fill="white" stroke="#1764C0" stroke-width="2"/>`;
+        body += `<circle cx="${p.x}" cy="${p.y}" r="${options.endpointRadius ?? 5}" fill="white" stroke="#1764C0" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}</svg>`;
+  const grouped = data.elements.filter((e) => options.selectedIds?.includes(e.id));
+  if (grouped.length) {
+    const b = drawingSelectionBounds(grouped),
+      x = num(b.x - 8),
+      y = num(b.y - 8),
+      right = num(b.x + b.width + 8),
+      bottom = num(b.y + b.height + 8);
+    selectionOverlay = `<path data-selection-frame="true" d="M${x} ${y}L${right} ${y}L${right} ${bottom}L${x} ${bottom}Z" fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+  }
+  const lasso = options.lasso?.length
+    ? `<path data-lasso="true" d="${options.lasso.map((p, i) => `${i ? 'L' : 'M'}${num(p.x)} ${num(p.y)}`).join(' ')}Z" fill="#1764C0" fill-opacity="0.08" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`
+    : '';
+  const control = options.rotationControl;
+  const rotationControl = control
+    ? `<g pointer-events="none"><path d="M${num(control.center.x)} ${num(control.center.y)}L${num(control.handle.x)} ${num(control.handle.y)}" fill="none" stroke="#1764C0" stroke-opacity="0.45" stroke-dasharray="3 4" vector-effect="non-scaling-stroke"/><circle data-rotation-handle="true" cx="${num(control.handle.x)}" cy="${num(control.handle.y)}" r="${num(control.radius)}" fill="white" stroke="#1764C0" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M${num(control.handle.x - control.radius * 0.45)} ${num(control.handle.y)}A${num(control.radius * 0.45)} ${num(control.radius * 0.45)} 0 1 1 ${num(control.handle.x)} ${num(control.handle.y + control.radius * 0.45)}M${num(control.handle.x - control.radius * 0.45)} ${num(control.handle.y)}l${num(-control.radius * 0.2)} ${num(-control.radius * 0.3)}M${num(control.handle.x - control.radius * 0.45)} ${num(control.handle.y)}l${num(control.radius * 0.3)} ${num(-control.radius * 0.1)}" fill="none" stroke="#1764C0" stroke-width="1.5" vector-effect="non-scaling-stroke"/><circle cx="${num(control.center.x)}" cy="${num(control.center.y)}" r="${num(control.radius * 0.15)}" fill="#1764C0"/></g>`
+    : '';
+  const construction = (options.constructionCorners ?? [])
+    .slice(0, 3)
+    .map(
+      (p) =>
+        `<circle data-construction-corner="true" cx="${num(p.x)}" cy="${num(p.y)}" r="3" fill="#1764C0" stroke="white" stroke-width="1" pointer-events="none"/>`,
+    )
+    .join('');
+  const guide = options.snapGuide;
+  const guideSvg = guide
+    ? (guide.x !== undefined
+        ? '<path d="M' +
+          num(guide.x) +
+          ' 0V800" stroke="#D97706" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>'
+        : '') +
+      (guide.y !== undefined
+        ? '<path d="M0 ' +
+          num(guide.y) +
+          'H1000" stroke="#D97706" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>'
+        : '')
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}</svg>`;
 }
