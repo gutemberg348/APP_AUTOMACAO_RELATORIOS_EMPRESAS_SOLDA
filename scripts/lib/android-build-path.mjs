@@ -41,7 +41,7 @@ export async function androidBuildPath(workspace) {
 }
 
 export async function resetAndroidPathCaches(workspace, buildRoot, stateFile) {
-  const state = JSON.stringify({ buildRoot: path.resolve(buildRoot), revision: 2 }) + '\n';
+  const state = JSON.stringify({ buildRoot: path.resolve(buildRoot), revision: 3 }) + '\n';
   if ((await readFile(stateFile, 'utf8').catch(() => '')) === state) return;
   const nativeRoots = [path.join(workspace, 'apps/app/android')];
   // npm hoists some native libraries and installs others inside the app workspace.
@@ -59,6 +59,7 @@ export async function resetAndroidPathCaches(workspace, buildRoot, stateFile) {
     }
   }
   const targets = [
+    '.android-native',
     'apps/app/android/.gradle',
     'apps/app/android/build/generated/autolinking',
     'apps/app/android/app/build/generated/autolinking',
@@ -136,18 +137,30 @@ export function androidWindowsPathsGradle(contents) {
       throw new Error('Configuração de caminhos incompleta em android/build.gradle.');
     contents = contents.slice(0, start) + contents.slice(finish + end.length);
   }
-  return (
-    contents.trimEnd() +
-    `\n\n${begin}
+  const block = `${begin}
 if (System.getProperty('os.name').toLowerCase().contains('windows')) {
     subprojects { nativeProject ->
         ['com.android.application', 'com.android.library'].each { androidPlugin ->
             nativeProject.plugins.withId(androidPlugin) {
                 nativeProject.extensions.getByName('android').defaultConfig.externalNativeBuild.cmake.arguments '-DCMAKE_OBJECT_PATH_MAX=240'
+                // Expo resolves library projectDir to its long physical node_modules
+                // path. Keep CMake intermediates short for every native module.
+                nativeProject.extensions.getByName('android').externalNativeBuild.cmake.buildStagingDirectory = new File(rootProject.rootDir, '../../../.android-native/' + nativeProject.path.replace(':', '_'))
             }
         }
     }
 }
-${end}\n`
+${end}`;
+  // expo-root-project evaluates native libraries immediately. Register the
+  // plugin hooks first, while their Android DSL is still configurable.
+  const before = contents.indexOf('apply plugin: "expo-root-project"');
+  if (before === -1) throw new Error('Plugin raiz Expo não encontrado em android/build.gradle.');
+  return (
+    contents.slice(0, before).trimEnd() +
+    '\n\n' +
+    block +
+    '\n\n' +
+    contents.slice(before).trim() +
+    '\n'
   );
 }

@@ -446,7 +446,7 @@ export function DrawingEditor({
   const [moveStep, setMoveStep] = useState(5);
   const propertiesView = useRef<ViewInstance>(null);
   const [hatchCorners, setHatchCorners] = useState<DrawingPosition[]>([]);
-  const [hatchDefaults, setHatchDefaults] = useState({ spacing: 8, angle: 90, strokeWidth: 1.2 });
+  const [hatchDefaults, setHatchDefaults] = useState({ spacing: 4, angle: 90, strokeWidth: 1.2 });
   const annotationField = useRef<ViewInstance>(null);
   const [textRotation, setTextRotation] = useState(0);
   const [symbolScale, setSymbolScale] = useState(1);
@@ -3402,9 +3402,9 @@ export function DrawingEditor({
               label="Aproximar traços da hachura"
               icon="minus"
               small
-              disabled={hatchSettings.spacing <= 6}
+              disabled={hatchSettings.spacing <= 2}
               onPress={() =>
-                updateHatchSettings({ spacing: Math.max(6, hatchSettings.spacing - 2) })
+                updateHatchSettings({ spacing: Math.max(2, hatchSettings.spacing - 1) })
               }
             />
             <IconButton
@@ -3413,7 +3413,7 @@ export function DrawingEditor({
               small
               disabled={hatchSettings.spacing >= 80}
               onPress={() =>
-                updateHatchSettings({ spacing: Math.min(80, hatchSettings.spacing + 2) })
+                updateHatchSettings({ spacing: Math.min(80, hatchSettings.spacing + 1) })
               }
             />
           </View>

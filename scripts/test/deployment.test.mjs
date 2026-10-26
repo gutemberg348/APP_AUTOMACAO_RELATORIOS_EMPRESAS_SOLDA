@@ -204,6 +204,7 @@ test('Android path migration removes generated native caches, preserves source a
       'apps/app/android/build/generated/autolinking/autolinking.json',
       'node_modules/native-library/android/.cxx/old/build.ninja',
       'apps/app/node_modules/@scope/native-library/android/build/intermediates/cxx/old/file',
+      '.android-native/_expo-modules-core/old/build.ninja',
       'apps/app/android/app/src/main/AndroidManifest.xml',
       '.android-signing/weldcosta-release.jks',
     ];
@@ -213,9 +214,9 @@ test('Android path migration removes generated native caches, preserves source a
     }
     const state = path.join(sandbox, '.android-signing/build-path.json');
     await resetAndroidPathCaches(sandbox, sandbox, state);
-    for (const file of files.slice(0, 4))
+    for (const file of files.slice(0, 5))
       await assert.rejects(readFile(path.join(sandbox, file)), { code: 'ENOENT' });
-    for (const file of files.slice(4))
+    for (const file of files.slice(5))
       assert.equal(await readFile(path.join(sandbox, file), 'utf8'), 'preserve');
     const regenerated = path.join(sandbox, files[0]);
     await mkdir(path.dirname(regenerated), { recursive: true });
@@ -225,6 +226,15 @@ test('Android path migration removes generated native caches, preserves source a
     const gradle = androidWindowsPathsGradle('apply plugin: "expo-root-project"\n');
     assert.equal(androidWindowsPathsGradle(gradle), gradle);
     assert.ok(gradle.includes('-DCMAKE_OBJECT_PATH_MAX=240'));
+    assert.ok(
+      gradle.includes(
+        "cmake.buildStagingDirectory = new File(rootProject.rootDir, '../../../.android-native/'",
+      ),
+    );
+    assert.ok(
+      gradle.indexOf('// WELDCOSTA WINDOWS PATHS BEGIN') <
+        gradle.indexOf('apply plugin: "expo-root-project"'),
+    );
   } finally {
     assert.equal(path.dirname(path.resolve(sandbox)), path.resolve(tmpdir()));
     assert.ok(path.basename(sandbox).startsWith('weldcosta-android-path-test-'));

@@ -14,6 +14,7 @@ apps/api/src/generated/
 apps/app/android/
 apps/app/ios/
 .android-signing/
+.android-native/
 artifacts/
 *.jks
 *.keystore

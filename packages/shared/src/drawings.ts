@@ -64,7 +64,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       points: z.array(z.object(xy).strict()).min(2).max(300),
       hatch: z
         .object({
-          spacing: z.number().finite().min(6).max(80),
+          spacing: z.number().finite().min(2).max(80),
           angle: z.number().finite().min(-180).max(180),
         })
         .strict()
@@ -578,6 +578,7 @@ const esc = (v: unknown) =>
 const num = (v: number) => Number(v.toFixed(3));
 // Explicit clipped segments work identically in native SVG and PDF rendering.
 export function triangleHatchSegments(points: DrawingPosition[], spacing: number, angle: number) {
+  spacing = Number.isFinite(spacing) ? Math.max(2, spacing) : 4;
   const radians = (angle * Math.PI) / 180,
     ux = Math.cos(radians),
     uy = Math.sin(radians);
@@ -588,7 +589,7 @@ export function triangleHatchSegments(points: DrawingPosition[], spacing: number
   for (
     let level = Math.ceil(Math.min(...levels) / spacing) * spacing;
     level < Math.max(...levels);
-    level += Math.max(6, spacing)
+    level += spacing
   ) {
     const hits: DrawingPosition[] = [];
     for (let i = 0; i < 3; i++) {

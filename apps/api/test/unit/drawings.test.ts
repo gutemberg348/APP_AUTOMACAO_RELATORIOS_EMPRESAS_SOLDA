@@ -26,7 +26,9 @@ describe('Technical drawing geometry and safe rendering', () => {
       { x: 240, y: 100 },
       { x: 100, y: 240 },
     ];
-    const dense = triangleHatchSegments(corners, 8, 90);
+    const dense = triangleHatchSegments(corners, 4, 90);
+    expect(dense.length).toBeGreaterThan(triangleHatchSegments(corners, 8, 90).length * 1.8);
+    expect(triangleHatchSegments(corners, 2, 90).length).toBeGreaterThan(dense.length);
     expect(dense.length).toBeGreaterThan(triangleHatchSegments(corners, 18, 90).length);
     for (const segment of dense) expect(segment.a.x).toBeCloseTo(segment.b.x);
     for (const segment of triangleHatchSegments(corners, 8, 0))
@@ -36,9 +38,10 @@ describe('Technical drawing geometry and safe rendering', () => {
       type: 'polyline',
       points: [...corners, corners[0]!],
       strokeWidth: 1.2,
-      hatch: { spacing: 8, angle: 90 },
+      hatch: { spacing: 4, angle: 90 },
     };
     const data = { ...newDrawingData(), elements: [element] };
+    expect(drawingDataSchema.safeParse(data).success).toBe(true);
     const plain = drawingSvg(data, []);
     expect(plain).toContain('stroke-width="0.54"');
     expect(plain).not.toContain('data-construction-corner');
