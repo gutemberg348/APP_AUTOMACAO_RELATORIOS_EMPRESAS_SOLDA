@@ -1,4 +1,5 @@
 import { ReportPhotoSaveError } from './report-photo-error';
+import { cleanReportDraft } from './report-draft-clean';
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -60,6 +61,7 @@ import {
 import {
   reportCorrections,
   reportBusinessCorrection,
+  reportFormIssues,
   type ReportCorrection,
   type CorrectionRequest,
 } from './report-save-feedback';
@@ -104,17 +106,6 @@ function withFieldDefaults(data: Record<string, unknown>, sections: ReportSectio
     if (target[key] === undefined) target[key] = '';
   }
   return result;
-}
-function clean(value: unknown): unknown {
-  if (value === '') return undefined;
-  if (Array.isArray(value)) return value.map(clean);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value)
-        .map(([key, child]) => [key, clean(child)])
-        .filter(([, child]) => child !== undefined),
-    );
-  return value;
 }
 export function ReportForm({
   type,
@@ -533,6 +524,7 @@ export function ReportForm({
     setIssuesOpen(true);
   };
   const showSaveError = (cause: unknown) => {
+    if (cause instanceof ZodError) return showIssues(cause.issues);
     const issues = apiValidationIssues(cause);
     if (issues.length) return showIssues(issues);
     const known =
@@ -648,9 +640,11 @@ export function ReportForm({
         jsonBody(report ? 'PUT' : 'POST', {
           ...data,
           reportDate: data.reportDate || null,
-          specificData: clean(data.specificData),
-          points: canEditPath('points') ? clean(data.points) : undefined,
-          signatures: canEditPath('signatures') ? clean(data.signatures) : undefined,
+          specificData: cleanReportDraft(data.specificData, ['specificData']),
+          points: canEditPath('points') ? cleanReportDraft(data.points, ['points']) : undefined,
+          signatures: canEditPath('signatures')
+            ? cleanReportDraft(data.signatures, ['signatures'])
+            : undefined,
           drawings: user.permissions.includes('drawing.edit') ? data.drawings : undefined,
           ...(report
             ? {
@@ -708,9 +702,9 @@ export function ReportForm({
         const body = {
           ...data,
           reportDate: data.reportDate || null,
-          specificData: clean(data.specificData),
-          points: clean(data.points),
-          signatures: clean(data.signatures),
+          specificData: cleanReportDraft(data.specificData, ['specificData']),
+          points: cleanReportDraft(data.points, ['points']),
+          signatures: cleanReportDraft(data.signatures, ['signatures']),
         };
         const common = report
           ? reportUpdateSchema.safeParse({ ...body, version: report.version })
@@ -734,12 +728,15 @@ export function ReportForm({
         }
         saved = await mutation.mutateAsync(data).catch(() => undefined);
       },
-      () =>
+      (fieldErrors) => {
+        const issues = reportFormIssues(fieldErrors);
+        if (issues.length) return showIssues(issues);
         showSaveError(
           new Error(
             'Não foi possível validar o preenchimento. Confira os campos destacados e tente salvar novamente.',
           ),
-        ),
+        );
+      },
     )();
     return saved;
   };
@@ -1123,6 +1120,7 @@ export function ReportForm({
                       name="specificData.discontinuities"
                       render={({ field }) => (
                         <Discontinuities
+                          correction={correction}
                           value={(field.value ?? []) as { code: string; description?: string }[]}
                           onChange={field.onChange}
                           editable={canEdit('specificData.discontinuities')}

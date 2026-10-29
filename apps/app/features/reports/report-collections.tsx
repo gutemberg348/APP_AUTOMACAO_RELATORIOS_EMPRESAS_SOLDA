@@ -1070,11 +1070,21 @@ export function Discontinuities({
   value,
   onChange,
   editable,
+  correction,
 }: {
   value: { code: string; description?: string }[];
   onChange(value: { code: string; description?: string }[]): void;
   editable: boolean;
+  correction?: CorrectionRequest;
 }) {
+  const reveal = usePageScroll();
+  const rows = useRef<Record<number, ViewInstance | null>>({});
+  const target = correction?.path[1] === 'discontinuities' ? Number(correction.path[2]) : -1;
+  useEffect(() => {
+    if (target < 0 || !Number.isInteger(target)) return;
+    const timer = setTimeout(() => reveal(rows.current[target]), 200);
+    return () => clearTimeout(timer);
+  }, [correction?.request, target, reveal]);
   return (
     <View style={{ gap: 16 }}>
       <PanelHeader
@@ -1093,12 +1103,23 @@ export function Discontinuities({
         }
       />
       {value.map((item, index) => (
-        <View key={index} style={{ gap: 12 }}>
+        <View
+          key={index}
+          ref={(node) => {
+            rows.current[index] = node;
+          }}
+          style={{ gap: 12 }}
+        >
           <FormGrid>
             <FormCell>
               <Field
                 label="Código da descontinuidade"
                 value={item.code}
+                error={
+                  target === index && correction?.path[3] === 'code'
+                    ? correction.message
+                    : undefined
+                }
                 editable={editable}
                 onChangeText={(code) =>
                   onChange(value.map((row, i) => (i === index ? { ...row, code } : row)))
@@ -1109,6 +1130,11 @@ export function Discontinuities({
               <Field
                 label="Descrição da descontinuidade"
                 value={item.description ?? ''}
+                error={
+                  target === index && correction?.path[3] === 'description'
+                    ? correction.message
+                    : undefined
+                }
                 editable={editable}
                 onChangeText={(description) =>
                   onChange(value.map((row, i) => (i === index ? { ...row, description } : row)))

@@ -69,7 +69,7 @@ export class PdfService implements PdfProvider {
     );
   }
   private async render(report: PdfReport, final: boolean) {
-    reportCreateSchema.pick({ number: true }).parse(report);
+    reportCreateSchema.pick({ number: true }).parse({ number: report.number });
     const template = renderers[report.reportType.code];
     if (!template)
       throw new AppError(
@@ -81,34 +81,82 @@ export class PdfService implements PdfProvider {
     const availableImages = new Set(
       report.media.filter((m) => m.sectionKey === 'drawing').map((m) => m.clientUploadId ?? m.id),
     );
-    if (
-      report.drawings.some((d) =>
-        drawingDataSchema
-          .parse(d.data)
-          .elements.some((e) => e.type === 'image' && !availableImages.has(e.mediaKey)),
-      )
-    )
-      throw new AppError(
-        422,
-        'DRAWING_IMAGE_PENDING',
-        'Há imagens do desenho que ainda não foram enviadas. Salve o relatório e aguarde o envio antes de baixar o PDF.',
-      );
+    const invalid = (path: (string | number)[], message: string): never => {
+      throw new AppError(422, 'VALIDATION_ERROR', message, [{ code: 'custom', path, message }]);
+    };
+    for (const [index, drawing] of report.drawings.entries()) {
+      const parsed = drawingDataSchema.safeParse(drawing.data);
+      if (!parsed.success)
+        throw new AppError(
+          422,
+          'VALIDATION_ERROR',
+          'Confira o desenho indicado antes de gerar o PDF.',
+          parsed.error.issues.map((issue) => ({
+            ...issue,
+            path: ['drawings', index, 'data', ...issue.path],
+          })),
+        );
+      for (const [elementIndex, element] of parsed.data.elements.entries())
+        if (element.type === 'image' && !availableImages.has(element.mediaKey))
+          invalid(
+            ['drawings', index, 'data', 'elements', elementIndex, 'mediaKey'],
+            'Esta imagem do desenho ainda não foi enviada. Salve e aguarde o envio; se ela continuar indisponível, selecione a imagem novamente.',
+          );
+    }
     report.signatureImages = {};
-    for (const signer of report.signatures) {
-      if (signer.signatureImagePath)
+    for (const [index, signer] of report.signatures.entries()) {
+      if (signer.signatureImagePath) {
+        if (!(await this.storage.exists(signer.signatureImagePath)))
+          invalid(
+            ['signatures', index, 'signatureAssetId'],
+            'O arquivo desta assinatura não está disponível. Selecione ou envie a assinatura novamente.',
+          );
         report.signatureImages[signer.id] =
           'data:image/png;base64,' +
           (await this.storage.get(signer.signatureImagePath)).toString('base64');
+      }
     }
-    for (const media of report.media)
-      images.set(
-        media.id,
-        await photoWithAnnotations(
-          await this.storage.get(media.filePath),
-          media.mimeType,
-          media.annotations,
-        ),
+    for (const media of report.media) {
+      const drawingIndex = report.drawings.findIndex((drawing) =>
+        drawingDataSchema
+          .parse(drawing.data)
+          .elements.some(
+            (e) => e.type === 'image' && e.mediaKey === (media.clientUploadId ?? media.id),
+          ),
       );
+      const pointIndex = report.points.findIndex((point) => point.id === media.reportPointId);
+      const path =
+        drawingIndex >= 0
+          ? ['drawings', drawingIndex]
+          : pointIndex >= 0
+            ? ['points', pointIndex, 'photos']
+            : ['points'];
+      if (!(await this.storage.exists(media.filePath)))
+        invalid(
+          path,
+          `A foto “${media.originalName || media.caption || 'sem nome'}” não está disponível no servidor. Envie esta foto novamente e salve antes de gerar o PDF.`,
+        );
+      try {
+        images.set(
+          media.id,
+          await photoWithAnnotations(
+            await this.storage.get(media.filePath),
+            media.mimeType,
+            media.annotations,
+          ),
+        );
+      } catch (cause) {
+        if (
+          (cause as NodeJS.ErrnoException).code === 'EACCES' ||
+          (cause as NodeJS.ErrnoException).code === 'EPERM'
+        )
+          throw cause;
+        invalid(
+          path,
+          `Não foi possível preparar a foto “${media.originalName || media.caption || 'sem nome'}”. Confira suas marcações ou substitua o arquivo por uma imagem válida e salve novamente.`,
+        );
+      }
+    }
     const browser = await puppeteer.launch({
       executablePath: await this.executable(),
       headless: true,

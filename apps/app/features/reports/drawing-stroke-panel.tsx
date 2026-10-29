@@ -1,16 +1,49 @@
-import { useEffect, useState } from 'react';
+import { DrawingCustomColor } from './drawing-color-picker';
 import { Pressable, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import {
   drawingStrokeDash,
   drawingBrushes,
-  drawingBrush,
+  drawingBrushLayers,
   type DrawingBrush,
 } from '@weldcosta/shared';
 import { PickerSheet } from '../../components/picker-sheet';
-import { Button, Field, IconButton } from '../../components/ui';
+import { Button, IconButton } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 
+function brushPreview(
+  brush: DrawingBrush | undefined,
+  width: number,
+  color: string,
+  path: string,
+  viewBox: string,
+  dash = '',
+) {
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' +
+    viewBox +
+    '">' +
+    drawingBrushLayers(brush, width)
+      .map(
+        (layer) =>
+          '<path d="' +
+          path +
+          '" fill="none" stroke="' +
+          color +
+          '" stroke-width="' +
+          layer.width +
+          '" stroke-opacity="' +
+          layer.opacity +
+          '" stroke-linecap="' +
+          layer.cap +
+          '"' +
+          (dash ? ' stroke-dasharray="' + dash + '"' : '') +
+          '/>',
+      )
+      .join('') +
+    '</svg>'
+  );
+}
 export type StrokeAppearance = {
   brush?: DrawingBrush;
   strokeWidth: number;
@@ -37,32 +70,35 @@ export function DrawingColorChoices({
 }) {
   const { tokens: t } = useTheme();
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
-      {drawingStrokeColors.map(([name, color]) => (
-        <Pressable
-          key={color}
-          accessibilityRole="button"
-          accessibilityLabel={'Cor do texto ' + name.toLowerCase()}
-          accessibilityState={{ selected: value === color }}
-          onPress={() => onChange(color)}
-          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <View
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 14,
-              backgroundColor: color,
-              borderWidth: 2,
-              borderColor: value === color ? t.colors.text : t.colors.line,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+        {drawingStrokeColors.map(([name, color]) => (
+          <Pressable
+            key={color}
+            accessibilityRole="button"
+            accessibilityLabel={'Cor do texto ' + name.toLowerCase()}
+            accessibilityState={{ selected: value === color }}
+            onPress={() => onChange(color)}
+            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
           >
-            {value === color && <Text style={{ color: 'white' }}>✓</Text>}
-          </View>
-        </Pressable>
-      ))}
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: color,
+                borderWidth: 2,
+                borderColor: value === color ? t.colors.text : t.colors.line,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {value === color && <Text style={{ color: 'white' }}>✓</Text>}
+            </View>
+          </Pressable>
+        ))}
+      </View>
+      <DrawingCustomColor value={value} onChange={onChange} />
     </View>
   );
 }
@@ -84,12 +120,6 @@ export function DrawingStrokePanel({
   onClose(): void;
 }) {
   const { tokens: t, styles } = useTheme();
-  const [custom, setCustom] = useState(value.strokeColor);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    setCustom(value.strokeColor);
-    setError('');
-  }, [value.strokeColor, visible]);
   const dash = drawingStrokeDash(value.strokeStyle, value.strokeWidth);
   return (
     <PickerSheet
@@ -132,7 +162,13 @@ export function DrawingStrokePanel({
                   <SvgXml
                     width={64}
                     height={28}
-                    xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 28"><path d="M6 20Q20 1 32 14T58 10" fill="none" stroke="${value.strokeColor}" stroke-width="${Math.min(14, brush.width)}" stroke-opacity="${brush.opacity}" stroke-linecap="${brush.cap}"/></svg>`}
+                    xml={brushPreview(
+                      brush.id,
+                      Math.min(14, brush.width),
+                      value.strokeColor,
+                      'M6 20Q20 1 32 14T58 10',
+                      '0 0 64 28',
+                    )}
                   />
                   <Text style={[styles.label, { fontSize: 11 }]}>{brush.name}</Text>
                 </Pressable>
@@ -145,7 +181,14 @@ export function DrawingStrokePanel({
           <SvgXml
             width="100%"
             height={42}
-            xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 42"><line x1="15" y1="21" x2="285" y2="21" stroke="${value.strokeColor}" stroke-width="${value.strokeWidth}" stroke-opacity="${drawingBrush(value.brush).opacity}" stroke-linecap="${drawingBrush(value.brush).cap}"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`}
+            xml={brushPreview(
+              value.brush,
+              value.strokeWidth,
+              value.strokeColor,
+              'M15 21L285 21',
+              '0 0 300 42',
+              dash,
+            )}
           />
         </View>
         <View
@@ -229,32 +272,9 @@ export function DrawingStrokePanel({
             </Pressable>
           ))}
         </View>
-        <Field
-          label="Cor personalizada (HEX)"
-          value={custom}
-          onChangeText={(v) => {
-            setCustom(v);
-            setError('');
-          }}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={7}
-          placeholder="#1764C0"
-          error={error || undefined}
-        />
-        <Button
-          title="Aplicar cor personalizada"
-          small
-          secondary
-          onPress={() => {
-            const color = custom.trim();
-            if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
-              setError('Use # seguido de 6 caracteres, por exemplo #1764C0.');
-              return;
-            }
-            onChange({ strokeColor: color.toUpperCase() });
-            setError('');
-          }}
+        <DrawingCustomColor
+          value={value.strokeColor}
+          onChange={(strokeColor) => onChange({ strokeColor })}
         />
       </View>
     </PickerSheet>

@@ -38,7 +38,11 @@ describe('Non-destructive photo annotation and brushes', () => {
         elements: [element],
       });
       expect(svg).toContain('stroke-linecap="' + brush.cap + '"');
-      if (brush.opacity < 1) expect(svg).toContain('stroke-opacity="' + brush.opacity + '"');
+      if (brush.id === 'airbrush') {
+        expect(svg.match(/<path /g)).toHaveLength(6);
+        expect(svg).toContain('stroke-opacity="0.025"');
+        expect(svg).toContain('stroke-opacity="0.12"');
+      } else if (brush.opacity < 1) expect(svg).toContain('stroke-opacity="' + brush.opacity + '"');
     }
   });
   it('paints PDF evidence while preserving the original bytes and photo aspect ratio', async () => {

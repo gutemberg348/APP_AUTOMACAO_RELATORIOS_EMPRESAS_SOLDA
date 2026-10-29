@@ -59,6 +59,10 @@ function specific(code: string, data: unknown, mode: 'draft' | 'submission', con
   try {
     return json(validateSpecificData(code, data, mode, config));
   } catch (error) {
+    if (error instanceof z.ZodError)
+      throw new z.ZodError(
+        error.issues.map((issue) => ({ ...issue, path: ['specificData', ...issue.path] })),
+      );
     if (error instanceof Error && error.message.startsWith('REPORT_TYPE_SCHEMA_MISSING:'))
       throw new AppError(
         422,
@@ -531,7 +535,7 @@ export class ReportsService {
           'Você não possui permissão para alterar para este status.',
         );
       if (input.status === 'IN_REVIEW' || input.status === 'APPROVED') {
-        reportNumberRequired.parse(report);
+        reportNumberRequired.parse({ number: report.number });
         if (!input.acknowledgeIncomplete) reportSubmissionSchema.parse(report);
         specific(
           report.reportType.code,

@@ -2,6 +2,7 @@ import { useTheme } from '../utils/theme';
 import Svg, { Circle, Path, Rect, Line } from 'react-native-svg';
 
 export type IconName =
+  | 'eyedropper'
   | 'eraser'
   | 'lasso'
   | 'dashboard'
@@ -86,6 +87,12 @@ export function Icon({
           <>
             <Path d="M3 7h4l2-3h6l2 3h4v14H3Z" />
             <Circle cx={12} cy={14} r={4} />
+          </>
+        );
+      case 'eyedropper':
+        return (
+          <>
+            <Path d="m14 5 5 5M16 3a3 3 0 0 1 4 4l-3 3-3-3 2-4ZM14 8 4 18v3h3L17 11" />
           </>
         );
       case 'pencil':

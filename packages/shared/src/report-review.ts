@@ -73,11 +73,19 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
   }
   if (report.drawings?.length) {
     const marked = new Set(
-      report.drawings.flatMap((drawing) =>
-        drawingDataSchema
-          .parse(drawing.data)
-          .elements.flatMap((element) => (element.type === 'point' ? [element.reportPointId] : [])),
-      ),
+      report.drawings.flatMap((drawing, index) => {
+        const parsed = drawingDataSchema.safeParse(drawing.data);
+        if (!parsed.success)
+          throw new ZodError(
+            parsed.error.issues.map((issue) => ({
+              ...issue,
+              path: ['drawings', index, 'data', ...issue.path],
+            })),
+          );
+        return parsed.data.elements.flatMap((element) =>
+          element.type === 'point' ? [element.reportPointId] : [],
+        );
+      }),
     );
     const missing = points.filter((point) => !marked.has(point.id!));
     if (missing.length) warnings.push('Pontos sem marcação no desenho: ' + numbered(missing) + '.');

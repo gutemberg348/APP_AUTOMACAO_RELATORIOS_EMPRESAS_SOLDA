@@ -6,6 +6,7 @@ export * from './report-defaults';
 export * from './types';
 export * from './drawings';
 export * from './drawing-sketch';
+export * from './drawing-eraser';
 export * from './drawing-brushes';
 export * from './photo-annotations';
 export * from './drawing-selection';

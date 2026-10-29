@@ -3,9 +3,23 @@ import { reportSections, reportCreateSchema, validateSpecificData } from '@weldc
 import {
   reportCorrections,
   reportBusinessCorrection,
+  reportFormIssues,
 } from '../../../app/features/reports/report-save-feedback';
 
 describe('Report save corrections', () => {
+  it('extracts nested form errors without following native input references', () => {
+    const ref: { current?: unknown } = {};
+    ref.current = ref;
+    expect(
+      reportFormIssues({
+        specificData: { calibrationDate: { message: 'Data inválida', type: 'validate', ref } },
+        points: [undefined, { number: { message: 'Número repetido', ref } }],
+      }),
+    ).toEqual([
+      { path: ['specificData', 'calibrationDate'], code: 'custom', message: 'Data inválida' },
+      { path: ['points', '1', 'number'], code: 'custom', message: 'Número repetido' },
+    ]);
+  });
   it.each(Object.keys(reportSections))(
     'names every configured field of %s and keeps its navigation path',
     (code) => {

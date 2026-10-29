@@ -1,4 +1,5 @@
 import type { CorrectionRequest } from './report-save-feedback';
+import { DrawingColorSource } from './drawing-eyedropper';
 import { useTheme } from '../../utils/theme';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -63,6 +64,7 @@ import {
   pointKey,
   snapPosition,
   appendStrokePoint,
+  eraseDrawingStrokes,
   sketchElement,
   drawingViewport,
   zoomDrawingAt,
@@ -179,7 +181,7 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     id: 'eraser',
     name: 'Borracha',
     icon: 'eraser',
-    hint: 'Passe sobre um traço, forma ou texto para apagar. A foto de fundo é preservada.',
+    hint: 'Apague só o trecho do traço. Ajuste o tamanho na chave ao lado da borracha; use a lixeira para objetos inteiros.',
   },
   {
     id: 'straighten',
@@ -492,6 +494,10 @@ export function DrawingEditor({
   const [brush, setBrush] = useState<DrawingBrush>('pen');
   const [strokeColor, setStrokeColor] = useState<string>();
   const [strokeStyle, setStrokeStyle] = useState<StrokeAppearance['strokeStyle']>();
+  const [eraserSize, setEraserSize] = useState(24);
+  const [eraserSettingsOpen, setEraserSettingsOpen] = useState(false);
+  const [erasedPreview, setErasedPreview] = useState<DrawingElement[]>();
+  const [eraserCursor, setEraserCursor] = useState<DrawingPosition>();
   const [strokePanelOpen, setStrokePanelOpen] = useState(false);
   const [selectionOpacity, setSelectionOpacity] = useState(0.5);
   const [moveStep, setMoveStep] = useState(5);
@@ -898,6 +904,7 @@ export function DrawingEditor({
       setShowProperties(false);
       return;
     }
+    setEraserSettingsOpen(false);
     setContextOptionsOpen(false);
     setSelectionOptionsOpen(false);
     setSelectionPanelOpen(false);
@@ -1164,6 +1171,8 @@ export function DrawingEditor({
   };
   const resetGesture = () => {
     eraseGesture.current = undefined;
+    setErasedPreview(undefined);
+    setEraserCursor(undefined);
     liveInk.current?.clear();
     endpointGesture.current = undefined;
     setSnapGuide(undefined);
@@ -1206,26 +1215,26 @@ export function DrawingEditor({
     surface.current = node;
   }, []);
   const gestureCallbacks = useRef<PanResponderCallbacks>({});
-  const eraseGesture = useRef<Set<string> | undefined>(undefined);
+  const eraseGesture = useRef<
+    | { elements: DrawingElement[]; last: DrawingPosition; changed: boolean; radius: number }
+    | undefined
+  >(undefined);
   const eraseAt = (p: DrawingPosition) => {
-    if (!data || !eraseGesture.current) return;
-    const hit = hitElement(
-      data.elements.filter(
-        (e) => !['image', 'point', 'marker'].includes(e.type) && !eraseGesture.current!.has(e.id),
-      ),
-      p,
-      (12 * viewport.w) / width,
-    );
-    if (hit) {
-      eraseGesture.current.add(hit.id);
-      setBlockDraft(
-        data.elements.map((e) =>
-          eraseGesture.current!.has(e.id) && hasDrawingStroke(e)
-            ? { ...e, strokeWidth: 0.5, strokeColor: '#CBD5E1' }
-            : e,
-        ),
+    const gesture = eraseGesture.current;
+    if (!gesture) return;
+    setEraserCursor(p);
+    const next = eraseDrawingStrokes(gesture.elements, gesture.last, p, gesture.radius, drawingId);
+    gesture.last = p;
+    if (next === gesture.elements) return;
+    if (next.length > 600) {
+      setMessage(
+        'O desenho atingiu o limite de trechos. Desfaça a passada ou remova objetos pela lixeira antes de continuar.',
       );
+      return;
     }
+    gesture.elements = next;
+    gesture.changed = true;
+    setErasedPreview(next);
   };
   gestureCallbacks.current = {
     onPanResponderStart: (event, state) => {
@@ -1252,7 +1261,12 @@ export function DrawingEditor({
         y: viewport.y + (event.nativeEvent.locationY / width) * viewport.w,
       };
       if (editable && tool === 'eraser') {
-        eraseGesture.current = new Set();
+        eraseGesture.current = {
+          elements: data?.elements ?? [],
+          last: p,
+          changed: false,
+          radius: (eraserSize * viewport.w) / width / 2,
+        };
         eraseAt(p);
         return;
       }
@@ -1746,10 +1760,13 @@ export function DrawingEditor({
     },
     onPanResponderRelease: (_event, state) => {
       if (eraseGesture.current) {
+        eraseAt({
+          x: viewport.x + ((_event.nativeEvent.pageX - touchOrigin.current.x) / width) * viewport.w,
+          y: viewport.y + ((_event.nativeEvent.pageY - touchOrigin.current.y) / width) * viewport.w,
+        });
         const erased = eraseGesture.current;
         eraseGesture.current = undefined;
-        if (data && erased.size)
-          updateData({ ...data, elements: data.elements.filter((e) => !erased.has(e.id)) });
+        if (data && erased.changed) updateData({ ...data, elements: erased.elements });
         resetGesture();
         setCanvasGestureActive(false);
         return;
@@ -1909,9 +1926,13 @@ export function DrawingEditor({
     setView((old) =>
       zoomDrawingAt(old, width, height, { x: width / 2, y: height / 2 }, 1 / factor),
     );
+  const colorSource = useMemo(
+    () => (data ? drawingSvg(data, points, { images: resolvedImages }) : ''),
+    [data, points, resolvedImages],
+  );
   const preview = useMemo(() => {
     if (!data) return '';
-    const elements = data.elements.map(
+    const elements = (erasedPreview ?? data.elements).map(
       (e) =>
         blockDraft?.find((d) => d.id === e.id) ?? (draftElement?.id === e.id ? draftElement : e),
     );
@@ -1973,6 +1994,7 @@ export function DrawingEditor({
       viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
     });
   }, [
+    erasedPreview,
     snapGuide,
     resolvedImages,
     data,
@@ -2142,6 +2164,22 @@ export function DrawingEditor({
           } as ViewStyle
         }
       />
+      {eraserCursor && tool === 'eraser' && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: ((eraserCursor.x - viewport.x) * width) / viewport.w - eraserSize / 2,
+            top: ((eraserCursor.y - viewport.y) * width) / viewport.w - eraserSize / 2,
+            width: eraserSize,
+            height: eraserSize,
+            borderRadius: eraserSize / 2,
+            borderWidth: 1.5,
+            borderColor: '#1764C0',
+            backgroundColor: 'rgba(23,100,192,0.10)',
+          }}
+        />
+      )}
       <DrawingLiveInk
         ref={liveInk}
         viewBox={`${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`}
@@ -2194,12 +2232,30 @@ export function DrawingEditor({
               fit();
             }}
           />
-          <IconButton
-            label="Desfazer última alteração"
-            icon="undo"
-            disabled={!editable || (!history.length && !hatchCorners.length)}
-            onPress={() => undo()}
-          />
+          {editable && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Lápis livre"
+              accessibilityState={{
+                selected: tool === 'pencil' && !editingSelection && !editingBlock,
+              }}
+              onPress={() => selectTool('pencil')}
+              style={{
+                width: 44,
+                height: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 10,
+                backgroundColor: tool === 'pencil' ? t.colors.blueSoft : 'transparent',
+              }}
+            >
+              <Icon
+                name="pencil"
+                size={20}
+                color={tool === 'pencil' ? t.colors.blue : t.colors.text}
+              />
+            </Pressable>
+          )}
           {editable && (
             <IconButton
               label="Excluir objeto ou limpar desenho"
@@ -2211,22 +2267,20 @@ export function DrawingEditor({
           )}
           {editable &&
             (annotationMode
-              ? (['lasso', 'pencil', 'text'] as const)
+              ? (['lasso', 'text'] as const)
               : (['lasso', 'point', 'straighten'] as const)
             ).map((mode) => (
               <Pressable
                 key={mode}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  mode === 'pencil'
-                    ? 'Escrever à mão'
-                    : mode === 'text'
-                      ? 'Texto nas observações'
-                      : mode === 'lasso'
-                        ? 'Selecionar com laço'
-                        : mode === 'point'
-                          ? 'Marcar ponto no desenho'
-                          : 'Endireitar traço'
+                  mode === 'text'
+                    ? 'Texto nas observações'
+                    : mode === 'lasso'
+                      ? 'Selecionar com laço'
+                      : mode === 'point'
+                        ? 'Marcar ponto no desenho'
+                        : 'Endireitar traço'
                 }
                 accessibilityState={{
                   selected: tool === mode && !editingSelection && !editingBlock,
@@ -2471,6 +2525,13 @@ export function DrawingEditor({
                 color={tool === 'eraser' ? t.colors.blue : t.colors.text}
               />
             </Pressable>
+            {tool === 'eraser' && (
+              <IconButton
+                label="Tamanho da borracha"
+                icon="tool"
+                onPress={() => setEraserSettingsOpen(true)}
+              />
+            )}
             <IconButton
               label="Pincéis e cores"
               icon="pencil"
@@ -3890,28 +3951,96 @@ export function DrawingEditor({
     </>
   );
   const strokeDialog = (
-    <DrawingStrokePanel
-      onBrush={(nextBrush, nextWidth) => {
-        if (editingBlock)
-          updateBlock(
-            blockElements.map((e) =>
-              hasDrawingStroke(e) ? { ...e, brush: nextBrush, strokeWidth: nextWidth } : e,
-            ),
-          );
-        else updateStrokeAppearance({ brush: nextBrush, strokeWidth: nextWidth });
-        if (!editingSelection && !editingBlock) setTool('pencil');
-      }}
-      onEraser={() => selectTool('eraser')}
-      visible={strokePanelOpen}
-      value={editingBlock && quickStroke ? quickStroke : currentStrokeAppearance}
-      selected={!!strokeTarget || editingBlock}
-      onChange={(patch) =>
-        editingBlock
-          ? updateBlock(blockElements.map((e) => (hasDrawingStroke(e) ? { ...e, ...patch } : e)))
-          : updateStrokeAppearance(patch)
-      }
-      onClose={() => setStrokePanelOpen(false)}
-    />
+    <>
+      <DrawingStrokePanel
+        onBrush={(nextBrush, nextWidth) => {
+          if (editingBlock)
+            updateBlock(
+              blockElements.map((e) =>
+                hasDrawingStroke(e) ? { ...e, brush: nextBrush, strokeWidth: nextWidth } : e,
+              ),
+            );
+          else updateStrokeAppearance({ brush: nextBrush, strokeWidth: nextWidth });
+          if (!editingSelection && !editingBlock) setTool('pencil');
+        }}
+        onEraser={() => {
+          selectTool('eraser');
+          setEraserSettingsOpen(true);
+        }}
+        visible={strokePanelOpen}
+        value={editingBlock && quickStroke ? quickStroke : currentStrokeAppearance}
+        selected={!!strokeTarget || editingBlock}
+        onChange={(patch) =>
+          editingBlock
+            ? updateBlock(blockElements.map((e) => (hasDrawingStroke(e) ? { ...e, ...patch } : e)))
+            : updateStrokeAppearance(patch)
+        }
+        onClose={() => setStrokePanelOpen(false)}
+      />
+      <PickerSheet
+        visible={eraserSettingsOpen}
+        title="Tamanho da borracha"
+        icon="eraser"
+        onClose={() => setEraserSettingsOpen(false)}
+        footer={
+          <Button title="Usar borracha" icon="check" onPress={() => setEraserSettingsOpen(false)} />
+        }
+      >
+        <Text style={styles.muted}>
+          Apaga somente os trechos de linhas e traços por onde passar. Fotos, pontos, textos,
+          símbolos e hachuras são preservados. Para excluir um objeto inteiro, selecione e use a
+          lixeira.
+        </Text>
+        <View
+          style={{
+            height: 90,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'white',
+            borderRadius: 12,
+          }}
+        >
+          <View
+            style={{
+              width: eraserSize,
+              height: eraserSize,
+              borderRadius: eraserSize / 2,
+              borderWidth: 2,
+              borderColor: '#1764C0',
+              backgroundColor: '#DBEAFE',
+            }}
+          />
+        </View>
+        <View
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <IconButton
+            label="Diminuir borracha"
+            icon="minus"
+            disabled={eraserSize <= 4}
+            onPress={() => setEraserSize((n) => Math.max(4, n - 4))}
+          />
+          <Text style={styles.label}>Tamanho · {eraserSize}</Text>
+          <IconButton
+            label="Aumentar borracha"
+            icon="plus"
+            disabled={eraserSize >= 80}
+            onPress={() => setEraserSize((n) => Math.min(80, n + 4))}
+          />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {[8, 16, 24, 40, 64].map((size) => (
+            <Button
+              key={size}
+              title={String(size)}
+              secondary={eraserSize !== size}
+              small
+              onPress={() => setEraserSize(size)}
+            />
+          ))}
+        </View>
+      </PickerSheet>
+    </>
   );
   const imageAction =
     annotationMode && onCancelAnnotation ? (
@@ -4406,147 +4535,166 @@ export function DrawingEditor({
       {pointRemovalDialog}
     </View>
   );
-  return expanded ? (
-    <DrawingWorkspace
-      closeLabel={annotationMode ? (annotationCloseLabel ?? 'Concluir observações') : undefined}
-      imageAction={imageAction}
-      title={data?.title ?? 'Desenho técnico'}
-      toolName={
-        editingBlock
-          ? 'Bloco selecionado'
-          : editingSelection && selectedElement
-            ? selectedElement.type === 'image'
-              ? 'Imagem selecionada'
-              : selectedElement.type === 'symbol'
-                ? 'Símbolo selecionado'
-                : selectedElement.type === 'text'
-                  ? 'Texto selecionado'
-                  : 'Elemento selecionado'
-            : (tools.find((item) => item.id === tool)?.name ?? 'Desenho')
-      }
-      hint={
-        (tools.find((item) => item.id === tool)?.hint ?? '') + ' Segure brevemente para selecionar.'
-      }
-      message={message}
-      toolsOpen={toolsOpen}
-      onToolsChange={(open) => {
-        setSelectionOptionsOpen(false);
-        setToolsOpen(open);
-        if (open) setShowProperties(false);
-      }}
-      tools={
-        data && editable ? (
-          <>
-            {professionalToolbar}
-            {toolPalette}
-          </>
-        ) : null
-      }
-      actions={data ? quickActions : null}
-      selection={data ? selectionControls : null}
-      hasSelectionControls={
-        !!data &&
-        editable &&
-        (editingSelection ||
-          editingBlock ||
-          ['point', 'text', 'lasso', 'hatch'].includes(tool) ||
-          showStrokeControls)
-      }
-      selectionOptionsOpen={selectionOptionsOpen}
-      onSelectionOptionsChange={setSelectionOptionsOpen}
-      canvas={
-        data ? (
-          canvas
-        ) : (
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20 }}>
-            {content}
-          </ScrollView>
-        )
-      }
-      inspector={properties}
-      showInspector={showProperties && editable && !!data}
-      onInspectorChange={setShowProperties}
-      onClose={() => {
-        if (annotationMode) {
-          onCloseAnnotation?.();
-          return;
-        }
-        setExpanded(false);
-        selectTool(tool);
-        setEntry(undefined);
-        setShowProperties(false);
-      }}
-      dialogs={
-        <>
-          {entryDialog}
-          {notesDialog}
-          {selectionDialog}
-          {professionalDialog}
-          {imageDialog}
-          {strokeDialog}
-          {data ? clearDialog : null}
-          {cleanupDialog}
-          {deleteDialog}
-          {pointRemovalDialog}
-        </>
-      }
-      footer={
-        <View style={{ gap: 4 }}>
-          <ScrollView
-            horizontal
-            style={{ flexGrow: 0, flexShrink: 0, minHeight: 44 }}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ gap: 4, alignItems: 'center' }}
-            showsHorizontalScrollIndicator={false}
-          >
-            <IconButton
-              label="Desfazer"
-              icon="undo"
-              disabled={!editable || (!history.length && !hatchCorners.length)}
-              onPress={() => undo()}
-            />
-            <IconButton
-              label="Refazer"
-              icon="redo"
-              disabled={!editable || !future.length}
-              onPress={() => undo(true)}
-            />
-            <IconButton label="Diminuir zoom" icon="minus" onPress={() => zoom(1.25)} />
-            <IconButton label="Ampliar zoom" icon="plus" onPress={() => zoom(0.8)} />
-            {screen.width >= 360 ? (
-              <Button title="Ajustar" small secondary onPress={fit} style={{ minHeight: 44 }} />
+  return (
+    <DrawingColorSource.Provider value={colorSource}>
+      {expanded ? (
+        <DrawingWorkspace
+          closeLabel={annotationMode ? (annotationCloseLabel ?? 'Concluir observações') : undefined}
+          imageAction={imageAction}
+          title={data?.title ?? 'Desenho técnico'}
+          toolName={
+            editingBlock
+              ? 'Bloco selecionado'
+              : editingSelection && selectedElement
+                ? selectedElement.type === 'image'
+                  ? 'Imagem selecionada'
+                  : selectedElement.type === 'symbol'
+                    ? 'Símbolo selecionado'
+                    : selectedElement.type === 'text'
+                      ? 'Texto selecionado'
+                      : 'Elemento selecionado'
+                : (tools.find((item) => item.id === tool)?.name ?? 'Desenho')
+          }
+          hint={
+            (tools.find((item) => item.id === tool)?.hint ?? '') +
+            ' Segure brevemente para selecionar.'
+          }
+          message={message}
+          toolsOpen={toolsOpen}
+          onToolsChange={(open) => {
+            setSelectionOptionsOpen(false);
+            setToolsOpen(open);
+            if (open) setShowProperties(false);
+          }}
+          tools={
+            data && editable ? (
+              <>
+                {professionalToolbar}
+                {toolPalette}
+              </>
+            ) : null
+          }
+          actions={data ? quickActions : null}
+          selection={data ? selectionControls : null}
+          hasSelectionControls={
+            !!data &&
+            editable &&
+            (editingSelection ||
+              editingBlock ||
+              ['point', 'text', 'lasso', 'hatch'].includes(tool) ||
+              showStrokeControls)
+          }
+          selectionOptionsOpen={selectionOptionsOpen}
+          onSelectionOptionsChange={setSelectionOptionsOpen}
+          canvas={
+            data ? (
+              canvas
             ) : (
-              <IconButton label="Ajustar" icon="expand" onPress={fit} />
-            )}
-            {editable &&
-              (screen.width >= 360 ? (
-                <Button
-                  title={showProperties ? 'Fechar ajustes' : 'Ajustes'}
-                  small
-                  secondary
-                  icon="tool"
-                  style={{ minHeight: 44 }}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setShowProperties(!showProperties);
-                  }}
-                />
-              ) : (
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ padding: 20 }}
+              >
+                {content}
+              </ScrollView>
+            )
+          }
+          inspector={properties}
+          historyControls={
+            data && editable ? (
+              <View
+                testID="drawing-history-controls"
+                style={{ flexDirection: 'row', alignSelf: 'center', gap: 4 }}
+              >
                 <IconButton
-                  label={showProperties ? 'Fechar ajustes' : 'Ajustes'}
-                  icon="tool"
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setShowProperties(!showProperties);
-                  }}
+                  label="Desfazer última alteração"
+                  icon="undo"
+                  disabled={!history.length && !hatchCorners.length}
+                  onPress={() => undo()}
                 />
-              ))}
-            {start && <Button title="Concluir traçado" small onPress={() => setStart(undefined)} />}
-          </ScrollView>
-        </View>
-      }
-    />
-  ) : (
-    content
+                <IconButton
+                  label="Refazer última alteração"
+                  icon="redo"
+                  disabled={!future.length}
+                  onPress={() => undo(true)}
+                />
+              </View>
+            ) : null
+          }
+          showInspector={showProperties && editable && !!data}
+          onInspectorChange={setShowProperties}
+          onClose={() => {
+            if (annotationMode) {
+              onCloseAnnotation?.();
+              return;
+            }
+            setExpanded(false);
+            selectTool(tool);
+            setEntry(undefined);
+            setShowProperties(false);
+          }}
+          dialogs={
+            <>
+              {entryDialog}
+              {notesDialog}
+              {selectionDialog}
+              {professionalDialog}
+              {imageDialog}
+              {strokeDialog}
+              {data ? clearDialog : null}
+              {cleanupDialog}
+              {deleteDialog}
+              {pointRemovalDialog}
+            </>
+          }
+          footer={
+            <View style={{ gap: 4 }}>
+              <ScrollView
+                horizontal
+                style={{ flexGrow: 0, flexShrink: 0, minHeight: 44 }}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ gap: 4, alignItems: 'center' }}
+                showsHorizontalScrollIndicator={false}
+              >
+                <IconButton label="Diminuir zoom" icon="minus" onPress={() => zoom(1.25)} />
+                <IconButton label="Ampliar zoom" icon="plus" onPress={() => zoom(0.8)} />
+                {screen.width >= 360 ? (
+                  <Button title="Ajustar" small secondary onPress={fit} style={{ minHeight: 44 }} />
+                ) : (
+                  <IconButton label="Ajustar" icon="expand" onPress={fit} />
+                )}
+                {editable &&
+                  (screen.width >= 360 ? (
+                    <Button
+                      title={showProperties ? 'Fechar ajustes' : 'Ajustes'}
+                      small
+                      secondary
+                      icon="tool"
+                      style={{ minHeight: 44 }}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowProperties(!showProperties);
+                      }}
+                    />
+                  ) : (
+                    <IconButton
+                      label={showProperties ? 'Fechar ajustes' : 'Ajustes'}
+                      icon="tool"
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowProperties(!showProperties);
+                      }}
+                    />
+                  ))}
+                {start && (
+                  <Button title="Concluir traçado" small onPress={() => setStart(undefined)} />
+                )}
+              </ScrollView>
+            </View>
+          }
+        />
+      ) : (
+        content
+      )}
+    </DrawingColorSource.Provider>
   );
 }

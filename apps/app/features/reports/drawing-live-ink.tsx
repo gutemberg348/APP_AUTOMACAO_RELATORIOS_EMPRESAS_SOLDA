@@ -2,7 +2,7 @@ import { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } fr
 import Svg, { Path } from 'react-native-svg';
 import {
   drawingStrokeDash,
-  drawingBrush,
+  drawingBrushLayers,
   createFreehandPathBuilder,
   type DrawingPosition,
 } from '@weldcosta/shared';
@@ -66,20 +66,22 @@ export const DrawingLiveInk = memo(
         viewBox={viewBox}
         style={{ position: 'absolute', left: 0, top: 0 }}
       >
-        {ink && (
-          <Path
-            d={ink.path}
-            fill="none"
-            stroke={ink.style.strokeColor}
-            strokeWidth={ink.style.strokeWidth}
-            strokeLinecap={drawingBrush(ink.style.brush).cap}
-            strokeOpacity={drawingBrush(ink.style.brush).opacity}
-            strokeLinejoin="round"
-            strokeDasharray={
-              drawingStrokeDash(ink.style.strokeStyle, ink.style.strokeWidth) || undefined
-            }
-          />
-        )}
+        {ink &&
+          drawingBrushLayers(ink.style.brush, ink.style.strokeWidth).map((layer, i) => (
+            <Path
+              key={i}
+              d={ink.path}
+              fill="none"
+              stroke={ink.style.strokeColor}
+              strokeWidth={layer.width}
+              strokeLinecap={layer.cap}
+              strokeOpacity={layer.opacity}
+              strokeLinejoin="round"
+              strokeDasharray={
+                drawingStrokeDash(ink.style.strokeStyle, ink.style.strokeWidth) || undefined
+              }
+            />
+          ))}
       </Svg>
     );
   }),

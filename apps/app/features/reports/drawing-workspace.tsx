@@ -35,6 +35,7 @@ interface WorkspaceProps {
   canvas: ReactNode;
   inspector: ReactNode;
   footer: ReactNode;
+  historyControls?: ReactNode;
   message: string;
   showInspector: boolean;
   onInspectorChange(open: boolean): void;
@@ -334,6 +335,11 @@ function WorkspaceContent(props: WorkspaceProps) {
             </View>
           )}
         </View>
+        {!inputMode && props.historyControls && (
+          <View style={{ flexShrink: 0, paddingHorizontal: 8, paddingBottom: 4 }}>
+            {props.historyControls}
+          </View>
+        )}
         {!!props.message && inputMode && (
           <Text
             accessibilityRole="alert"

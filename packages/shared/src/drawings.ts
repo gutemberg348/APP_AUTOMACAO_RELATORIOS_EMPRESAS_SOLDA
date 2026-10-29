@@ -4,7 +4,7 @@ export { drawingSymbols, drawingSymbolDefinition, drawingSymbolPreview } from '.
 import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
 import { freehandPath } from './drawing-sketch';
-import { drawingBrush } from './drawing-brushes';
+import { drawingBrush, drawingBrushLayers } from './drawing-brushes';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
@@ -24,7 +24,7 @@ const elementMeta = {
 const line = { x1: coord, y1: xy.y, x2: coord, y2: xy.y };
 const strokeWidth = z.number().finite().min(0.5).max(60).optional();
 const strokeAppearance = {
-  brush: z.enum(['pen', 'fountain', 'pencil', 'brush', 'marker']).optional(),
+  brush: z.enum(['pen', 'fountain', 'pencil', 'brush', 'marker', 'airbrush']).optional(),
   strokeColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -769,12 +769,17 @@ export function drawingSvg(
         ? `<image x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} preserveAspectRatio="xMidYMid meet" href="${xml(uri)}"/>`
         : `<rect x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
     }
-    if (e.type === 'line')
-      body += `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${stroke}/>`;
-    if (e.type === 'polyline')
-      body += e.freehand
-        ? `<path d="${freehandPath(e.points)}" ${stroke}/>`
-        : `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${stroke}/>`;
+    if (e.type === 'line' || e.type === 'polyline') {
+      for (const layer of drawingBrushLayers(e.brush, drawingStrokeWidth(e))) {
+        const ink = `stroke="${color}" stroke-width="${layer.width}" fill="none" stroke-linecap="${layer.cap}" stroke-linejoin="round"${layer.opacity < 1 ? ` stroke-opacity="${layer.opacity}"` : ''}${dashAttribute}`;
+        body +=
+          e.type === 'line'
+            ? `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${ink}/>`
+            : e.freehand
+              ? `<path d="${freehandPath(e.points)}" ${ink}/>`
+              : `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${ink}/>`;
+      }
+    }
     if (e.type === 'polyline' && e.hatch)
       body += triangleHatchSegments(e.points, e.hatch.spacing, e.hatch.angle)
         .map(
