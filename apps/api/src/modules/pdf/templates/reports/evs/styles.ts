@@ -1,6 +1,6 @@
 export const evsStyles = `
 @page{size:A4;margin:10mm}*{box-sizing:border-box}
-body{margin:0;font:11px Arial,sans-serif;color:#111}p{margin:0}img{max-width:100%}
+body{margin:0;font:11px Arial,sans-serif;color:#111;text-transform:uppercase}p{margin:0}img{max-width:100%}
 .evs-sheet{width:190mm;height:277mm;border:2px solid #111;display:flex;flex-direction:column;break-after:page;position:relative}
 .evs-sheet:last-child{break-after:auto}
 .evs-header{height:25mm;flex-shrink:0;display:grid;grid-template-columns:28% 42% 30%;border-bottom:1.5px solid #111}

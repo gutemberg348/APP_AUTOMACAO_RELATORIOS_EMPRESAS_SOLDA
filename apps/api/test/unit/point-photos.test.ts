@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Report, ReportPoint } from '@weldcosta/shared';
 import { api } from '../../../app/services/api';
+import { ReportPhotoSaveError } from '../../../app/features/reports/report-photo-error';
 import {
   saveReportPhotos,
   useReportPhotoDrafts,
@@ -36,6 +37,71 @@ beforeEach(() => {
   useReportPhotoDrafts.setState({ reports: {} });
 });
 describe('Photos selected in the point form', () => {
+  it('includes pending paint in the same original photo upload', async () => {
+    const annotations = {
+      elements: [
+        {
+          id: 'ink',
+          type: 'line' as const,
+          x1: 100,
+          y1: 100,
+          x2: 200,
+          y2: 100,
+          brush: 'marker' as const,
+          strokeWidth: 18,
+        },
+      ],
+    };
+    useReportPhotoDrafts.getState().update('user:new', () => ({
+      photos: [{ ...draft('painted'), annotations }],
+      removedIds: [],
+    }));
+    apiMock
+      .mockResolvedValueOnce({ id: 'painted' })
+      .mockResolvedValueOnce({ ...saved, version: 2 });
+    await saveReportPhotos('user:new', saved, points);
+    const body = apiMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(JSON.parse(body.get('annotations') as string)).toEqual(annotations);
+    expect(body.get('reportPointId')).toBe('persisted-point');
+    expect((body.get('file') as File).name).toBe('foto.jpg');
+  });
+  it('saves photo marks without reuploading or reassigning the original and keeps failed marks retryable', async () => {
+    const annotations = {
+      elements: [
+        { id: 'ink', type: 'line', x1: 100, y1: 100, x2: 200, y2: 100, strokeColor: '#DC2626' },
+      ],
+    };
+    const photo = {
+      id: 'photo',
+      caption: 'Original',
+      sectionKey: 'photos',
+      reportPointId: 'persisted-point',
+    };
+    const report = { ...saved, media: [photo] } as Report;
+    useReportPhotoDrafts.getState().update('user:report-1', () => ({
+      photos: [],
+      removedIds: [],
+      annotationEdits: { photo: annotations as never },
+    }));
+    apiMock.mockRejectedValueOnce(new Error('Sem conexão')).mockResolvedValueOnce(report);
+    await saveReportPhotos('user:report-1', report, points);
+    expect(
+      useReportPhotoDrafts.getState().reports['user:report-1']?.annotationEdits?.photo,
+    ).toEqual(annotations);
+    apiMock
+      .mockReset()
+      .mockResolvedValueOnce({ id: 'photo' })
+      .mockResolvedValueOnce({ ...report, version: 2 });
+    await saveReportPhotos('user:report-1', report, points);
+    expect(apiMock.mock.calls[0]?.[0]).toBe('/reports/report-1/media/photo');
+    expect(JSON.parse(apiMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      caption: 'Original',
+      reportPointId: 'persisted-point',
+      annotations,
+    });
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']?.annotationEdits).toEqual({});
+    expect(apiMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+  });
   it('does not ask to resend a completed image when only refreshing the report fails', async () => {
     useReportPhotoDrafts.getState().update('user:new', () => ({
       photos: [{ ...draft('general'), pointKey: null }],
@@ -143,6 +209,10 @@ describe('Photos selected in the point form', () => {
     expect(pending.photos.map((item) => item.id)).toEqual(['b']);
     expect(pending.photos[0]?.pointKey).toBe('persisted-point');
     expect(pending.error).toBeInstanceOf(Error);
+    expect(pending.error).toBeInstanceOf(ReportPhotoSaveError);
+    expect((pending.error as ReportPhotoSaveError).location.pointNumber).toBe('S-42');
+    expect((pending.error as Error).message).toContain('foto.jpg');
+    expect((pending.error as Error).message).toContain('Sem conexão');
     apiMock.mockReset();
     apiMock.mockResolvedValueOnce({ id: 'b' }).mockResolvedValueOnce({ ...saved, version: 4 });
     await saveReportPhotos('user:report-1', { ...saved, version: 3 }, saved.points!);

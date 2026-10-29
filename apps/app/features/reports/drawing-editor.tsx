@@ -1,5 +1,6 @@
+import type { CorrectionRequest } from './report-save-feedback';
 import { useTheme } from '../../utils/theme';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
   Vibration,
@@ -18,6 +19,7 @@ import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
 import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
+import { DrawingLiveInk, type LiveInkHandle } from './drawing-live-ink';
 import {
   drawingGroupMembers,
   drawingUnlocked,
@@ -32,6 +34,7 @@ import type { ReportMedia } from '@weldcosta/shared';
 import { DrawingToolStrip } from './drawing-tool-strip';
 import {
   DrawingStrokePanel,
+  DrawingColorChoices,
   strokeStyleLabels,
   type StrokeAppearance,
 } from './drawing-stroke-panel';
@@ -73,6 +76,7 @@ import {
   type DrawingPosition,
   type ReportDrawing,
   type ReportPoint,
+  type DrawingBrush,
 } from '@weldcosta/shared';
 import {
   Badge,
@@ -114,6 +118,7 @@ function selectionSize(elements: DrawingElement[]) {
 }
 
 type Tool =
+  | 'eraser'
   | 'lasso'
   | 'hatch'
   | 'select'
@@ -126,6 +131,10 @@ type Tool =
   | 'dimension'
   | 'pan'
   | SketchTool;
+const DrawingScene = memo(function DrawingScene({ xml }: { xml: string }) {
+  return <SvgXml xml={xml} width="100%" height="100%" />;
+});
+const freehandDragThreshold = 0.35;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
 // Screen pixels: the same touch tolerance at any zoom level.
 const drawingDragThreshold = 6;
@@ -133,6 +142,7 @@ const primaryTools: Tool[] = [
   'straighten',
   'pipe',
   'pencil',
+  'eraser',
   'select',
   'lasso',
   'point',
@@ -164,6 +174,12 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     name: 'Lápis livre',
     icon: 'pencil',
     hint: 'Desenhe com o dedo ou mouse. O traço acompanha sua mão, sem prender à malha.',
+  },
+  {
+    id: 'eraser',
+    name: 'Borracha',
+    icon: 'eraser',
+    hint: 'Passe sobre um traço, forma ou texto para apagar. A foto de fundo é preservada.',
   },
   {
     id: 'straighten',
@@ -324,7 +340,19 @@ export function DrawingEditor({
   media,
   photoDraftKey,
   canUploadImages = false,
+  annotationMode = false,
+  onCloseAnnotation,
+  onCancelAnnotation,
+  annotationCloseLabel,
+  imageUris,
+  correction,
 }: {
+  correction?: CorrectionRequest;
+  onCancelAnnotation?(): void;
+  annotationCloseLabel?: string;
+  imageUris?: Record<string, string>;
+  annotationMode?: boolean;
+  onCloseAnnotation?(): void;
   reportId?: string;
   media?: ReportMedia[];
   photoDraftKey?: string;
@@ -344,9 +372,30 @@ export function DrawingEditor({
   const { tokens: t, styles } = useTheme();
   const revealInline = usePageScroll();
   const lastCanvasLayout = useRef<{ expanded: boolean; width: number } | undefined>(undefined);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(annotationMode);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const liveInk = useRef<LiveInkHandle>(null);
+  const availableTools = annotationMode
+    ? tools.filter((item) =>
+        [
+          'pencil',
+          'eraser',
+          'straighten',
+          'circle',
+          'rectangle',
+          'select',
+          'text',
+          'lasso',
+          'pan',
+        ].includes(item.id),
+      )
+    : tools;
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const drawingImages = useDrawingImages(reportId, media, photoDraftKey);
+  const resolvedImages = useMemo(
+    () => ({ ...drawingImages.images, ...imageUris }),
+    [drawingImages.images, imageUris],
+  );
   const [toolsOpen, setToolsOpen] = useState(false);
   const [clearMode, setClearMode] = useState<'strokes' | 'points' | 'all' | 'selection'>();
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -438,7 +487,9 @@ export function DrawingEditor({
     [text, setText] = useState(''),
     [dimension, setDimension] = useState('');
   const [textSize, setTextSize] = useState(20);
+  const [textColor, setTextColor] = useState('#285580');
   const [strokeWidth, setStrokeWidth] = useState(2.6);
+  const [brush, setBrush] = useState<DrawingBrush>('pen');
   const [strokeColor, setStrokeColor] = useState<string>();
   const [strokeStyle, setStrokeStyle] = useState<StrokeAppearance['strokeStyle']>();
   const [strokePanelOpen, setStrokePanelOpen] = useState(false);
@@ -485,6 +536,11 @@ export function DrawingEditor({
   const viewport = drawingViewport(view, width, height);
   const screen = useWindowDimensions();
   const mobile = screen.width < 1000;
+  useEffect(() => {
+    if (correction?.path[0] !== 'drawings') return;
+    const next = Number(correction.path[1]);
+    if (Number.isInteger(next) && next >= 0) setIndex(next);
+  }, [correction]);
   const activeIndex = Math.min(index, Math.max(0, value.length - 1)),
     drawing = value[activeIndex],
     data = drawing?.data;
@@ -561,6 +617,7 @@ export function DrawingEditor({
       : undefined;
   const currentStrokeWidth = strokeTarget ? drawingStrokeWidth(strokeTarget) : strokeWidth;
   const currentStrokeAppearance: StrokeAppearance = {
+    brush: strokeTarget?.brush ?? brush,
     strokeWidth: currentStrokeWidth,
     strokeColor: strokeTarget ? drawingStrokeColor(strokeTarget) : (strokeColor ?? '#263D52'),
     strokeStyle: strokeTarget ? drawingStrokeStyle(strokeTarget) : (strokeStyle ?? 'solid'),
@@ -571,6 +628,7 @@ export function DrawingEditor({
       if (patch.strokeWidth !== undefined) setStrokeWidth(patch.strokeWidth);
       if (patch.strokeColor !== undefined) setStrokeColor(patch.strokeColor);
       if (patch.strokeStyle !== undefined) setStrokeStyle(patch.strokeStyle);
+      if (patch.brush !== undefined) setBrush(patch.brush);
     }
   };
   const showStrokeControls =
@@ -578,7 +636,7 @@ export function DrawingEditor({
     (!editingSelection &&
       [...sketchTools, 'line', 'pipe', 'dimension', 'symbol', 'hatch'].includes(tool));
   const changeStrokeWidth = (amount: number) => {
-    const next = Math.round(Math.max(0.5, Math.min(12, currentStrokeWidth + amount)) * 10) / 10;
+    const next = Math.round(Math.max(0.5, Math.min(60, currentStrokeWidth + amount)) * 10) / 10;
     if (strokeTarget) updateElement({ ...strokeTarget, strokeWidth: next });
     else setStrokeWidth(next);
   };
@@ -588,6 +646,7 @@ export function DrawingEditor({
   };
   useEffect(() => {
     cancelHold();
+    liveInk.current?.clear();
     setHatchCorners([]);
     gesture.current = undefined;
     setDraftElement(undefined);
@@ -670,6 +729,7 @@ export function DrawingEditor({
       ? {
           ...element,
           strokeWidth: element.strokeWidth ?? strokeWidth,
+          ...(element.type === 'polyline' && element.freehand && !element.brush ? { brush } : {}),
           ...(strokeColor && element.strokeColor === undefined ? { strokeColor } : {}),
           ...(strokeStyle && element.strokeStyle === undefined ? { strokeStyle } : {}),
         }
@@ -831,6 +891,13 @@ export function DrawingEditor({
     setMessage('');
   };
   const selectTool = (next: Tool) => {
+    liveInk.current?.clear();
+    if (next === 'annotation' && !annotationMode) {
+      setNotesOpen(true);
+      setToolsOpen(false);
+      setShowProperties(false);
+      return;
+    }
     setContextOptionsOpen(false);
     setSelectionOptionsOpen(false);
     setSelectionPanelOpen(false);
@@ -1079,6 +1146,7 @@ export function DrawingEditor({
         ...p,
         size: textSize,
         rotation: textRotation,
+        color: textColor,
       });
       setText('');
       setMessage('');
@@ -1095,11 +1163,13 @@ export function DrawingEditor({
       });
   };
   const resetGesture = () => {
+    eraseGesture.current = undefined;
+    liveInk.current?.clear();
     endpointGesture.current = undefined;
     setSnapGuide(undefined);
     blockGesture.current = undefined;
     setBlockDraft(undefined);
-    setLassoPath([]);
+    setLassoPath((old) => (old.length ? [] : old));
     setRotationDelta(undefined);
     cancelHold();
     gesture.current = undefined;
@@ -1107,7 +1177,7 @@ export function DrawingEditor({
     setDraftElement(undefined);
     setTraceStart(undefined);
     setTraceEnd(undefined);
-    setStroke([]);
+    setStroke((old) => (old.length ? [] : old));
   };
   wheelHandler.current = (event) => {
     resetGesture();
@@ -1136,6 +1206,27 @@ export function DrawingEditor({
     surface.current = node;
   }, []);
   const gestureCallbacks = useRef<PanResponderCallbacks>({});
+  const eraseGesture = useRef<Set<string> | undefined>(undefined);
+  const eraseAt = (p: DrawingPosition) => {
+    if (!data || !eraseGesture.current) return;
+    const hit = hitElement(
+      data.elements.filter(
+        (e) => !['image', 'point', 'marker'].includes(e.type) && !eraseGesture.current!.has(e.id),
+      ),
+      p,
+      (12 * viewport.w) / width,
+    );
+    if (hit) {
+      eraseGesture.current.add(hit.id);
+      setBlockDraft(
+        data.elements.map((e) =>
+          eraseGesture.current!.has(e.id) && hasDrawingStroke(e)
+            ? { ...e, strokeWidth: 0.5, strokeColor: '#CBD5E1' }
+            : e,
+        ),
+      );
+    }
+  };
   gestureCallbacks.current = {
     onPanResponderStart: (event, state) => {
       if (event.nativeEvent.touches.length >= 2)
@@ -1160,6 +1251,11 @@ export function DrawingEditor({
         x: viewport.x + (event.nativeEvent.locationX / width) * viewport.w,
         y: viewport.y + (event.nativeEvent.locationY / width) * viewport.w,
       };
+      if (editable && tool === 'eraser') {
+        eraseGesture.current = new Set();
+        eraseAt(p);
+        return;
+      }
       if (editable && editingBlock) {
         const bounds = drawingSelectionBounds(blockElements);
         const corners = [
@@ -1285,7 +1381,7 @@ export function DrawingEditor({
         : undefined;
       const imageNeedsHold =
         found?.type === 'image' && !(editingSelection && selectedElement.id === found.id);
-      const candidates =
+      const candidates = () =>
         data?.elements
           .filter((e) => hitElement([e], p, (14 / width) * view.w, points))
           .map((e) => e.id) ?? [];
@@ -1314,7 +1410,7 @@ export function DrawingEditor({
         }
       }
       if (selectionOnly && found && !imageNeedsHold) {
-        setNearbyIds(candidates);
+        setNearbyIds(candidates());
         setSelected(found.id);
         setDirectSelection(true);
       }
@@ -1383,7 +1479,7 @@ export function DrawingEditor({
           }
           setHatchCorners([]);
           setSelected(found.id);
-          setNearbyIds(candidates);
+          setNearbyIds(candidates());
           setDirectSelection(true);
           setStart(undefined);
           setStroke([]);
@@ -1394,7 +1490,13 @@ export function DrawingEditor({
           setMessage('');
         }, 350);
       }
-      if (editable && !selectionOnly && !current.original && sketchTools.includes(tool)) {
+      if (
+        editable &&
+        !selectionOnly &&
+        !current.original &&
+        tool !== 'pencil' &&
+        sketchTools.includes(tool)
+      ) {
         setStroke([p]);
         setTraceStart(p);
         setTraceEnd(p);
@@ -1411,6 +1513,13 @@ export function DrawingEditor({
       }
     },
     onPanResponderMove: (event, state) => {
+      if (eraseGesture.current && event.nativeEvent.touches.length < 2) {
+        eraseAt({
+          x: viewport.x + ((event.nativeEvent.pageX - touchOrigin.current.x) / width) * viewport.w,
+          y: viewport.y + ((event.nativeEvent.pageY - touchOrigin.current.y) / width) * viewport.w,
+        });
+        return;
+      }
       const touches = event.nativeEvent.touches;
       if (touches.length >= 2) {
         const [a, b] = touches;
@@ -1565,8 +1674,9 @@ export function DrawingEditor({
         );
         return;
       }
-      if (!g.held && Math.hypot(state.dx, state.dy) > 10) cancelHold();
-      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= 10) return;
+      const penThreshold = tool === 'pencil' ? freehandDragThreshold : 10;
+      if (!g.held && Math.hypot(state.dx, state.dy) > penThreshold) cancelHold();
+      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= penThreshold) return;
       if (g.held && g.original) {
         if (Math.hypot(state.dx, state.dy) < 6) return;
         setDraftElement(
@@ -1583,16 +1693,37 @@ export function DrawingEditor({
         return;
       }
       if (sketchTools.includes(tool) || ['pipe', 'line', 'dimension'].includes(tool)) {
-        if (Math.hypot(state.dx, state.dy) >= drawingDragThreshold) g.drawingStarted = true;
+        if (
+          Math.hypot(state.dx, state.dy) >=
+          (tool === 'pencil' ? freehandDragThreshold : drawingDragThreshold)
+        )
+          g.drawingStarted = true;
         if (!g.drawingStarted) return;
-        setTraceStart(sketchTools.includes(tool) ? g.start : snapPosition(g.start, data!.grid));
+        if (tool !== 'pencil')
+          setTraceStart(sketchTools.includes(tool) ? g.start : snapPosition(g.start, data!.grid));
       }
       if (sketchTools.includes(tool)) {
         const p = clampPosition({
           x: g.start.x + (state.dx / g.width) * g.view.w,
           y: g.start.y + (state.dy / g.width) * g.view.w,
         });
-        g.samples = appendStrokePoint(g.samples, p);
+        // Sample in screen pixels so tiny curves feel the same at every zoom.
+        const samples = appendStrokePoint(
+          g.samples,
+          p,
+          tool === 'pencil' ? (0.25 * g.view.w) / g.width : 0.25,
+        );
+        if (tool === 'pencil' && samples === g.samples) return;
+        g.samples = samples;
+        if (tool === 'pencil') {
+          liveInk.current?.draw(g.samples, {
+            strokeWidth,
+            strokeColor: strokeColor ?? '#263D52',
+            strokeStyle: strokeStyle ?? 'solid',
+            brush,
+          });
+          return;
+        }
         setStroke(g.samples);
         setTraceEnd(tool === 'straighten' ? smartSnap(p) : p);
         return;
@@ -1614,6 +1745,16 @@ export function DrawingEditor({
         );
     },
     onPanResponderRelease: (_event, state) => {
+      if (eraseGesture.current) {
+        const erased = eraseGesture.current;
+        eraseGesture.current = undefined;
+        if (data && erased.size)
+          updateData({ ...data, elements: data.elements.filter((e) => !erased.has(e.id)) });
+        resetGesture();
+        setCanvasGestureActive(false);
+        return;
+      }
+      liveInk.current?.clear();
       setCanvasGestureActive(false);
       cancelHold();
       if (endpointGesture.current && !multiTouch.current) {
@@ -1695,7 +1836,10 @@ export function DrawingEditor({
           x: g.start.x + (state.dx / g.width) * g.view.w,
           y: g.start.y + (state.dy / g.width) * g.view.w,
         });
-        const dragged = g.drawingStarted || Math.hypot(state.dx, state.dy) >= drawingDragThreshold;
+        const dragged =
+          g.drawingStarted ||
+          Math.hypot(state.dx, state.dy) >=
+            (tool === 'pencil' ? freehandDragThreshold : drawingDragThreshold);
         const element = dragged
           ? sketchElement(tool as SketchTool, g.start, end, g.samples, drawingId())
           : undefined;
@@ -1736,6 +1880,7 @@ export function DrawingEditor({
       setTraceEnd(undefined);
     },
     onPanResponderTerminate: () => {
+      eraseGesture.current = undefined;
       setCanvasGestureActive(false);
       multiTouch.current = false;
       resetGesture();
@@ -1814,7 +1959,7 @@ export function DrawingEditor({
       anchorRadius: (2.5 * viewport.w) / width,
       endpointRadius: (3 * viewport.w) / width,
       snapGuide,
-      images: drawingImages.images,
+      images: resolvedImages,
       selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
       selectionFrame: editingSelection && !traceEnd,
       selectionOpacity,
@@ -1829,7 +1974,7 @@ export function DrawingEditor({
     });
   }, [
     snapGuide,
-    drawingImages.images,
+    resolvedImages,
     data,
     blockDraft,
     blockIds,
@@ -1937,6 +2082,7 @@ export function DrawingEditor({
         strokeWidth: drawingStrokeWidth(quickStrokeTarget),
         strokeColor: drawingStrokeColor(quickStrokeTarget),
         strokeStyle: drawingStrokeStyle(quickStrokeTarget),
+        brush: quickStrokeTarget.brush,
       }
     : undefined;
   const canvas = (
@@ -1950,10 +2096,12 @@ export function DrawingEditor({
           !previous || previous.expanded !== expanded || previous.width !== screen.width;
         lastCanvasLayout.current = { expanded, width: screen.width };
         if (expanded && needsFit) {
-          const w = Math.max(
-            1000,
-            (800 * e.nativeEvent.layout.width) / Math.max(1, e.nativeEvent.layout.height),
-          );
+          const fitWidth =
+            (800 * e.nativeEvent.layout.width) / Math.max(1, e.nativeEvent.layout.height);
+          const w =
+            annotationMode && !imageUris
+              ? Math.max(150, Math.min(1000, fitWidth))
+              : Math.max(1000, fitWidth);
           setView({ x: (1000 - w) / 2, y: (800 - w * 0.8) / 2, w, h: w * 0.8 });
         }
       }}
@@ -1971,7 +2119,7 @@ export function DrawingEditor({
         pointerEvents="none"
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
       >
-        <SvgXml xml={preview} width="100%" height="100%" />
+        <DrawingScene xml={preview} />
       </View>
       <View
         ref={setSurface}
@@ -1993,6 +2141,10 @@ export function DrawingEditor({
               : {}),
           } as ViewStyle
         }
+      />
+      <DrawingLiveInk
+        ref={liveInk}
+        viewBox={`${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`}
       />
       {expanded && !toolsOpen && !showProperties && !message && (
         <View
@@ -2058,16 +2210,23 @@ export function DrawingEditor({
             />
           )}
           {editable &&
-            (['lasso', 'point', 'straighten'] as const).map((mode) => (
+            (annotationMode
+              ? (['lasso', 'pencil', 'text'] as const)
+              : (['lasso', 'point', 'straighten'] as const)
+            ).map((mode) => (
               <Pressable
                 key={mode}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  mode === 'lasso'
-                    ? 'Selecionar com laço'
-                    : mode === 'point'
-                      ? 'Marcar ponto no desenho'
-                      : 'Endireitar traço'
+                  mode === 'pencil'
+                    ? 'Escrever à mão'
+                    : mode === 'text'
+                      ? 'Texto nas observações'
+                      : mode === 'lasso'
+                        ? 'Selecionar com laço'
+                        : mode === 'point'
+                          ? 'Marcar ponto no desenho'
+                          : 'Endireitar traço'
                 }
                 accessibilityState={{
                   selected: tool === mode && !editingSelection && !editingBlock,
@@ -2151,6 +2310,15 @@ export function DrawingEditor({
                 contentContainerStyle={{ padding: 8 }}
               >
                 <DrawingSelectionQuickOptions
+                  textColor={
+                    editingSelection && selectedElement.type === 'text'
+                      ? (selectedElement.color ?? '#285580')
+                      : undefined
+                  }
+                  onTextColor={(color) => {
+                    if (selectedElement?.type === 'text')
+                      updateElement({ ...selectedElement, color });
+                  }}
                   stroke={quickStroke}
                   onStroke={(patch) =>
                     editingBlock
@@ -2193,8 +2361,8 @@ export function DrawingEditor({
             style={{
               position: 'absolute',
               bottom: 8,
-              left: 8,
-              right: 8,
+              left: annotationMode ? 8 : 64,
+              right: editable ? 64 : 8,
               backgroundColor: t.colors.surface,
               borderRadius: 10,
               padding: 10,
@@ -2239,6 +2407,77 @@ export function DrawingEditor({
           />
         </View>
       )}
+      {!annotationMode && !canvasGestureActive && !contextOptionsOpen && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Abrir folha de observações"
+          onPress={() => {
+            resetGesture();
+            setNotesOpen(true);
+          }}
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 8,
+            width: 44,
+            minHeight: 54,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            backgroundColor: t.colors.surface,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: t.colors.line,
+          }}
+        >
+          <Icon name="report" size={20} />
+          <Text style={[styles.label, { fontSize: 10 }]}>Obs.</Text>
+        </Pressable>
+      )}
+      {editable &&
+        !editingSelection &&
+        !editingBlock &&
+        !canvasGestureActive &&
+        !contextOptionsOpen && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              right: 8,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: t.colors.line,
+              backgroundColor: t.colors.surface,
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Borracha do desenho"
+              accessibilityState={selectionState(tool === 'eraser')}
+              aria-pressed={tool === 'eraser'}
+              onPress={() => selectTool(tool === 'eraser' ? 'pencil' : 'eraser')}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 8,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: tool === 'eraser' ? t.colors.blueSoft : 'transparent',
+              }}
+            >
+              <Icon
+                name="eraser"
+                size={20}
+                color={tool === 'eraser' ? t.colors.blue : t.colors.text}
+              />
+            </Pressable>
+            <IconButton
+              label="Pincéis e cores"
+              icon="pencil"
+              onPress={() => setStrokePanelOpen(true)}
+            />
+          </View>
+        )}
       {canRotateSelection &&
         rotationDelta === undefined &&
         !contextOptionsOpen &&
@@ -2324,20 +2563,33 @@ export function DrawingEditor({
       )}
     </View>
   );
-  const annotation = data ? (
-    <View ref={annotationField} collapsable={false} style={{ gap: 6 }}>
-      <Field
-        label="Anotação abaixo do desenho"
-        value={data.notes ?? ''}
-        editable={editable}
-        onChangeText={(notes) => updateData({ ...data, notes })}
-        multiline
-        maxLength={2000}
-        placeholder="Escreva uma observação para acompanhar este desenho no relatório"
-      />
-      <Text style={[styles.muted, { fontSize: 12 }]}>Aparece no PDF, abaixo deste desenho.</Text>
-    </View>
-  ) : null;
+  const annotation =
+    data && !annotationMode ? (
+      <View ref={annotationField} collapsable={false} style={{ gap: 6 }}>
+        <Button
+          title="Abrir folha de observações"
+          icon="report"
+          secondary
+          onPress={() => setNotesOpen(true)}
+        />
+        {!!data.notesDrawing?.elements.length && (
+          <DrawingPreview
+            data={{ ...newDrawingData(), grid: 'none', elements: data.notesDrawing.elements }}
+            points={[]}
+          />
+        )}
+        <Field
+          label="Anotação abaixo do desenho"
+          value={data.notes ?? ''}
+          editable={editable}
+          onChangeText={(notes) => updateData({ ...data, notes })}
+          multiline
+          maxLength={2000}
+          placeholder="Escreva uma observação para acompanhar este desenho no relatório"
+        />
+        <Text style={[styles.muted, { fontSize: 12 }]}>Aparece no PDF, abaixo deste desenho.</Text>
+      </View>
+    ) : null;
   const pointEntry = (
     <>
       {pointTarget === 'new' && canEditPoints && (
@@ -2419,6 +2671,8 @@ export function DrawingEditor({
         placeholder={'Ex.: TQ\nÁGUA IONIZADA'}
       />
       <Numeric label="Tamanho do texto" value={textSize} min={10} max={40} onChange={setTextSize} />
+      <Text style={styles.label}>Cor do texto</Text>
+      <DrawingColorChoices value={textColor} onChange={setTextColor} />
       <SelectField
         label="Inclinação do texto"
         value={String(textRotation)}
@@ -2633,6 +2887,11 @@ export function DrawingEditor({
             )}
             {selectedElement.type === 'text' && (
               <>
+                <Text style={styles.label}>Cor do texto selecionado</Text>
+                <DrawingColorChoices
+                  value={selectedElement.color ?? '#285580'}
+                  onChange={(color) => updateElement({ ...selectedElement, color })}
+                />
                 <Numeric
                   label="Tamanho do texto selecionado"
                   value={selectedElement.size ?? 20}
@@ -2890,7 +3149,12 @@ export function DrawingEditor({
       </View>
     ) : null;
   const fit = () => {
-    const w = expanded ? Math.max(1000, (800 * width) / Math.max(1, height)) : 1000;
+    const fitWidth = (800 * width) / Math.max(1, height);
+    const w = expanded
+      ? annotationMode && !imageUris
+        ? Math.max(150, Math.min(1000, fitWidth))
+        : Math.max(1000, fitWidth)
+      : 1000;
     setView({ x: (1000 - w) / 2, y: (800 - w * 0.8) / 2, w, h: w * 0.8 });
   };
   const clearDialog = (
@@ -3089,7 +3353,7 @@ export function DrawingEditor({
           onPress={() => setClearMode('all')}
         />
 
-        {expanded && (
+        {expanded && !annotationMode && (
           <Button
             title="Limpar pontos do desenho"
             small
@@ -3148,7 +3412,7 @@ export function DrawingEditor({
               small
               secondary
               icon="plus"
-              disabled={currentStrokeWidth >= 12}
+              disabled={currentStrokeWidth >= 60}
               onPress={() => changeStrokeWidth(0.5)}
             />
           </View>
@@ -3245,6 +3509,7 @@ export function DrawingEditor({
                 ...textPosition,
                 size: textSize,
                 rotation: textRotation,
+                color: textColor,
               });
               setText('');
               setMessage('');
@@ -3272,7 +3537,7 @@ export function DrawingEditor({
   );
   const toolPalette = (
     <DrawingToolStrip label="ferramentas" rows={2}>
-      {tools.map((item) => (
+      {availableTools.map((item) => (
         <Pressable
           key={item.id}
           accessibilityRole="button"
@@ -3626,6 +3891,17 @@ export function DrawingEditor({
   );
   const strokeDialog = (
     <DrawingStrokePanel
+      onBrush={(nextBrush, nextWidth) => {
+        if (editingBlock)
+          updateBlock(
+            blockElements.map((e) =>
+              hasDrawingStroke(e) ? { ...e, brush: nextBrush, strokeWidth: nextWidth } : e,
+            ),
+          );
+        else updateStrokeAppearance({ brush: nextBrush, strokeWidth: nextWidth });
+        if (!editingSelection && !editingBlock) setTool('pencil');
+      }}
+      onEraser={() => selectTool('eraser')}
       visible={strokePanelOpen}
       value={editingBlock && quickStroke ? quickStroke : currentStrokeAppearance}
       selected={!!strokeTarget || editingBlock}
@@ -3638,7 +3914,9 @@ export function DrawingEditor({
     />
   );
   const imageAction =
-    editable && canUploadImages && photoDraftKey && data ? (
+    annotationMode && onCancelAnnotation ? (
+      <IconButton label="Cancelar marcações" icon="close" onPress={onCancelAnnotation} />
+    ) : editable && canUploadImages && photoDraftKey && data ? (
       <IconButton
         label="Inserir imagem no desenho"
         icon="image"
@@ -3691,7 +3969,7 @@ export function DrawingEditor({
           setSnapGuide(undefined);
         }}
       />
-      {data?.elements.some((e) => e.type === 'image' && e.locked) && (
+      {!annotationMode && data?.elements.some((e) => e.type === 'image' && e.locked) && (
         <Button
           title="Imagens bloqueadas"
           small
@@ -3784,6 +4062,34 @@ export function DrawingEditor({
       />
     </>
   );
+  const notesDialog =
+    notesOpen && data && !annotationMode ? (
+      <DrawingEditor
+        annotationMode
+        value={[
+          {
+            data: {
+              ...newDrawingData(),
+              title: 'Observações · ' + data.title,
+              grid: 'none',
+              elements: data.notesDrawing?.elements ?? [],
+            },
+          },
+        ]}
+        points={[]}
+        editable={editable}
+        canEditPoints={false}
+        onChange={(next) => {
+          const elements = next[0]?.data.elements;
+          if (elements) updateData({ ...data, notesDrawing: { elements } });
+        }}
+        onPointsChange={() => {}}
+        onRemovePoint={() => false}
+        onRemovePoints={() => false}
+        pointPhotoCount={() => 0}
+        onCloseAnnotation={() => setNotesOpen(false)}
+      />
+    ) : null;
   const content = (
     <View style={{ gap: 18 }}>
       <PanelHeader
@@ -4089,6 +4395,7 @@ export function DrawingEditor({
         </>
       )}
       {entryDialog}
+      {notesDialog}
       {selectionDialog}
       {professionalDialog}
       {imageDialog}
@@ -4101,6 +4408,7 @@ export function DrawingEditor({
   );
   return expanded ? (
     <DrawingWorkspace
+      closeLabel={annotationMode ? (annotationCloseLabel ?? 'Concluir observações') : undefined}
       imageAction={imageAction}
       title={data?.title ?? 'Desenho técnico'}
       toolName={
@@ -4159,6 +4467,10 @@ export function DrawingEditor({
       showInspector={showProperties && editable && !!data}
       onInspectorChange={setShowProperties}
       onClose={() => {
+        if (annotationMode) {
+          onCloseAnnotation?.();
+          return;
+        }
         setExpanded(false);
         selectTool(tool);
         setEntry(undefined);
@@ -4167,6 +4479,7 @@ export function DrawingEditor({
       dialogs={
         <>
           {entryDialog}
+          {notesDialog}
           {selectionDialog}
           {professionalDialog}
           {imageDialog}

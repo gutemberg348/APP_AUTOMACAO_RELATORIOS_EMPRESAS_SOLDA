@@ -3,12 +3,16 @@ import { clampPosition, type DrawingElement, type DrawingPosition } from './draw
 export type SketchTool = 'pencil' | 'straighten' | 'circle' | 'rectangle';
 
 // Keep long gestures within the existing polyline contract without losing either end.
-export function appendStrokePoint(samples: DrawingPosition[], point: DrawingPosition) {
+export function appendStrokePoint(
+  samples: DrawingPosition[],
+  point: DrawingPosition,
+  minDistance = 0.25,
+) {
   const p = clampPosition(point),
     last = samples.at(-1);
-  if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1) return samples;
+  if (last && Math.hypot(p.x - last.x, p.y - last.y) < minDistance) return samples;
   const compact =
-    samples.length >= 298 ? samples.filter((_, index) => index === 0 || index % 2 === 1) : samples;
+    samples.length >= 1198 ? samples.filter((_, index) => index === 0 || index % 2 === 1) : samples;
   return [...compact, p];
 }
 
@@ -23,7 +27,7 @@ export function sketchElement(
     b = clampPosition(end);
   if (tool === 'pencil') {
     const points = appendStrokePoint(samples.length ? samples : [a], b);
-    return points.length >= 2 ? { id, type: 'polyline', points } : undefined;
+    return points.length >= 2 ? { id, type: 'polyline', freehand: true, points } : undefined;
   }
   if (Math.hypot(b.x - a.x, b.y - a.y) < 2) return undefined;
   if (tool === 'straighten') return { id, type: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y };
@@ -40,6 +44,52 @@ export function sketchElement(
   }));
   points.push({ ...points[0]! });
   return { id, type: 'polyline', points };
+}
+
+/** Midpoint quadratics keep the pen continuous without snapping or straightening. */
+export function freehandPath(points: DrawingPosition[]) {
+  if (!points.length) return '';
+  const n = (v: number) => String(Math.round(v * 100) / 100);
+  let path = `M${n(points[0]!.x)} ${n(points[0]!.y)}`;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i - 1]!,
+      q = points[i]!;
+    path += `Q${n(p.x)} ${n(p.y)} ${n((p.x + q.x) / 2)} ${n((p.y + q.y) / 2)}`;
+  }
+  const last = points.at(-1)!;
+  return path + `L${n(last.x)} ${n(last.y)}`;
+}
+
+/** Append only the new curve segments while drawing; rebuild after sampling compaction.
+ * Input points are immutable, as returned by appendStrokePoint. The temporary tail
+ * is never cached, so every frame exactly matches the saved SVG/PDF curve. */
+export function createFreehandPathBuilder() {
+  let count = 0;
+  let first: DrawingPosition | undefined;
+  let last: DrawingPosition | undefined;
+  let prefix = '';
+  const n = (v: number) => String(Math.round(v * 100) / 100);
+  return (points: DrawingPosition[]) => {
+    if (!points.length) {
+      count = 0;
+      first = last = undefined;
+      prefix = '';
+      return '';
+    }
+    if (points[0] !== first || points.length < count || points[count - 1] !== last) {
+      prefix = `M${n(points[0]!.x)} ${n(points[0]!.y)}`;
+      count = 1;
+    }
+    for (let i = count; i < points.length; i++) {
+      const p = points[i - 1]!,
+        q = points[i]!;
+      prefix += `Q${n(p.x)} ${n(p.y)} ${n((p.x + q.x) / 2)} ${n((p.y + q.y) / 2)}`;
+    }
+    first = points[0];
+    last = points.at(-1)!;
+    count = points.length;
+    return prefix + `L${n(last.x)} ${n(last.y)}`;
+  };
 }
 
 export function drawingViewport(

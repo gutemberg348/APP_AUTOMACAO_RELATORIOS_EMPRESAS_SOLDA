@@ -1,12 +1,14 @@
+import { ReportPhotoSaveError } from './report-photo-error';
 import { create } from 'zustand';
 import type { DocumentPickerAsset } from 'expo-document-picker';
-import type { Report, ReportPoint } from '@weldcosta/shared';
+import type { Report, ReportPoint, PhotoAnnotations } from '@weldcosta/shared';
 import { pointKey } from '@weldcosta/shared';
 import { api, jsonBody } from '../../services/api';
 import { appendUploadFile } from '../../services/upload-file';
 import type { TransferState } from '../../components/transfer-progress';
 
 export interface ReportPhotoDraft {
+  annotations?: PhotoAnnotations;
   sectionKey?: 'photos' | 'drawing';
   id: string;
   pointKey: string | null;
@@ -18,6 +20,7 @@ export interface PhotoDrafts {
   photos: ReportPhotoDraft[];
   removedIds: string[];
   captionEdits?: Record<string, string>;
+  annotationEdits?: Record<string, PhotoAnnotations | null>;
   error?: unknown;
 }
 export const emptyPhotoDrafts: PhotoDrafts = { photos: [], removedIds: [] };
@@ -70,11 +73,27 @@ export async function saveReportPhotos(
   const initial = useReportPhotoDrafts.getState().reports[nextKey]!;
   const total = initial.photos.length;
   let completed = 0;
+  let location: { pointNumber?: string; drawing?: boolean; label: string } = {
+    label: 'Fotos do relatório',
+  };
+  const locateMedia = (id: string, action: string) => {
+    const media = current.media?.find((item) => item.id === id);
+    const number = current.points?.find((point) => point.id === media?.reportPointId)?.number;
+    location = {
+      pointNumber: number,
+      drawing: media?.sectionKey === 'drawing',
+      label:
+        action +
+        (number ? ' · Ponto ' + number : '') +
+        (media?.originalName ? ' · ' + media.originalName : ''),
+    };
+  };
   const progress = (message: string, detail?: string) =>
     onProgress?.({ message, detail, total, completed });
   try {
     const draft = useReportPhotoDrafts.getState().reports[nextKey]!;
     for (const id of draft.removedIds) {
+      locateMedia(id, 'Excluir foto');
       progress('Atualizando fotos do relatório…');
       await api(
         '/reports/' + saved.id + '/media/' + id,
@@ -86,9 +105,15 @@ export async function saveReportPhotos(
       }));
       current = await api<Report>('/reports/' + saved.id);
     }
-    for (const [id, caption] of Object.entries(draft.captionEdits ?? {})) {
-      progress('Salvando legendas das fotos…');
+    const editedIds = new Set([
+      ...Object.keys(draft.captionEdits ?? {}),
+      ...Object.keys(draft.annotationEdits ?? {}),
+    ]);
+    for (const id of editedIds) {
+      locateMedia(id, 'Legenda / marcações da foto');
+      progress('Salvando legendas e marcações das fotos…');
       const media = current.media?.find((item) => item.id === id);
+      const caption = draft.captionEdits?.[id] ?? media?.caption ?? '';
       if (media)
         await api(
           '/reports/' + saved.id + '/media/' + id,
@@ -97,16 +122,28 @@ export async function saveReportPhotos(
             caption,
             sectionKey: media.sectionKey ?? 'photos',
             reportPointId: media.reportPointId,
+            ...(draft.annotationEdits?.[id] !== undefined
+              ? { annotations: draft.annotationEdits[id] }
+              : {}),
           }),
         );
       store.update(nextKey, (remaining) => {
         const captionEdits = { ...remaining.captionEdits };
         delete captionEdits[id];
-        return { ...remaining, captionEdits };
+        const annotationEdits = { ...remaining.annotationEdits };
+        delete annotationEdits[id];
+        return { ...remaining, captionEdits, annotationEdits };
       });
       if (media) current = await api<Report>('/reports/' + saved.id);
     }
     for (const photo of draft.photos) {
+      const pointNumber = current.points?.find((point) => point.id === photo.pointKey)?.number;
+      location = {
+        pointNumber,
+        drawing: photo.sectionKey === 'drawing',
+        label:
+          'Enviar foto' + (pointNumber ? ' · Ponto ' + pointNumber : '') + ' · ' + photo.asset.name,
+      };
       if (
         photo.sectionKey === 'drawing' &&
         !current.drawings?.some((d) =>
@@ -133,6 +170,7 @@ export async function saveReportPhotos(
       form.append('sectionKey', photo.sectionKey ?? 'photos');
       if (photo.pointKey) form.append('reportPointId', photo.pointKey);
       form.append('caption', photo.caption);
+      if (photo.annotations) form.append('annotations', JSON.stringify(photo.annotations));
       progress('Enviando foto ' + (completed + 1) + ' de ' + total + '…', detail);
       await api('/reports/' + saved.id + '/media', { method: 'POST', body: form });
       completed++;
@@ -143,8 +181,7 @@ export async function saveReportPhotos(
       progress('Foto enviada. Atualizando relatório…', detail);
       current = await api<Report>('/reports/' + saved.id);
     }
-    if (total || draft.removedIds.length || Object.keys(draft.captionEdits ?? {}).length)
-      progress('Concluindo o salvamento…');
+    if (total || draft.removedIds.length || editedIds.size) progress('Concluindo o salvamento…');
   } catch (cause) {
     progress('Conferindo o envio e recuperando as fotos pendentes…');
     const reason = cause instanceof Error ? cause.message : 'Confira sua conexão.';
@@ -155,19 +192,23 @@ export async function saveReportPhotos(
         draft.photos.length ||
         draft.removedIds.length ||
         Object.keys(draft.captionEdits ?? {}).length;
+      const hasAnnotationEdits = Object.keys(draft.annotationEdits ?? {}).length;
       return {
         ...draft,
-        error: pending
-          ? new Error(
-              'Os dados do relatório foram salvos. Há fotos ou legendas pendentes: ' +
-                reason +
-                ' Use Salvar rascunho para tentar novamente.',
-            )
-          : refreshed
-            ? undefined
-            : new Error(
-                'As alterações foram enviadas. Não foi possível atualizar a visualização; reabra o relatório.',
-              ),
+        error:
+          pending || hasAnnotationEdits
+            ? new ReportPhotoSaveError(
+                location.label +
+                  ': Os dados do relatório foram salvos. Há fotos, legendas ou marcações pendentes: ' +
+                  reason +
+                  ' Confira a foto e toque em Salvar para tentar novamente.',
+                location,
+              )
+            : refreshed
+              ? undefined
+              : new Error(
+                  'As alterações foram enviadas. Não foi possível atualizar a visualização; reabra o relatório.',
+                ),
       };
     });
   }

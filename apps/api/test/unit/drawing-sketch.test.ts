@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendStrokePoint,
+  freehandPath,
+  createFreehandPathBuilder,
   sketchElement,
   drawingViewport,
   zoomDrawingAt,
@@ -13,6 +15,42 @@ import {
 } from '@weldcosta/shared';
 
 describe('Hand-drawn tools and responsive canvas', () => {
+  it('incrementally previews the exact saved curve across frames, compaction and new strokes', () => {
+    const preview = createFreehandPathBuilder();
+    let points: DrawingPosition[] = [];
+    for (let i = 0; i < 2500; i++) {
+      points = appendStrokePoint(points, { x: 100 + (i % 800), y: 200 + Math.sin(i / 12) * 80 });
+      if (i % 25 === 0) expect(preview(points)).toBe(freehandPath(points));
+    }
+    expect(preview(points)).toBe(freehandPath(points));
+    expect(preview([])).toBe('');
+    const next = [
+      { x: 40, y: 50 },
+      { x: 41, y: 53 },
+      { x: 45, y: 57 },
+    ];
+    expect(preview(next)).toBe(freehandPath(next));
+    // Undo / same-length replacement must invalidate the cached prefix too.
+    const replacement = next.map((p) => ({ x: p.x + 10, y: p.y }));
+    expect(preview(replacement)).toBe(freehandPath(replacement));
+  });
+  it('samples freehand movement at the same screen distance across zoom levels', () => {
+    for (const worldPerPixel of [0.2, 1, 3, 5]) {
+      const origin = { x: 100, y: 100 };
+      const samples = [origin];
+      expect(
+        appendStrokePoint(samples, { x: 100 + 0.1 * worldPerPixel, y: 100 }, 0.25 * worldPerPixel),
+      ).toBe(samples);
+      const points = appendStrokePoint(
+        samples,
+        { x: 100 + 0.4 * worldPerPixel, y: 100 },
+        0.25 * worldPerPixel,
+      );
+      expect(points).toHaveLength(2);
+      expect(samples).toEqual([origin]);
+      expect(points[1]!.x).toBeCloseTo(100 + 0.4 * worldPerPixel);
+    }
+  });
   it('anchors pinch zoom under the fingers while allowing simultaneous panning', () => {
     for (const [width, height] of [
       [390, 620],
@@ -55,10 +93,23 @@ describe('Hand-drawn tools and responsive canvas', () => {
     const e = sketchElement('pencil', samples[0]!, { x: 990, y: 790 }, samples, 'free')!;
     expect(e.type).toBe('polyline');
     if (e.type !== 'polyline') return;
-    expect(e.points.length).toBeLessThanOrEqual(300);
+    expect(e.points.length).toBeLessThanOrEqual(1200);
     expect(e.points[0]).toEqual({ x: 10, y: 10 });
     expect(e.points.at(-1)).toEqual({ x: 990, y: 790 });
     expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: [e] }).success).toBe(true);
+  });
+  it('keeps small pen movements and renders a smooth path through the original endpoints', () => {
+    const samples = [{ x: 100, y: 100 }];
+    const points = appendStrokePoint(samples, { x: 100.4, y: 100.3 });
+    expect(points).toHaveLength(2);
+    const stroke = sketchElement('pencil', samples[0]!, { x: 101, y: 100.8 }, points, 'ink')!;
+    expect(stroke).toMatchObject({ type: 'polyline', freehand: true });
+    if (stroke.type !== 'polyline') throw new Error('Expected freehand');
+    expect(freehandPath(stroke.points)).toMatch(/^M100 100Q/);
+    expect(freehandPath(stroke.points)).toMatch(/L101 100.8$/);
+    expect(drawingSvg({ ...newDrawingData(), grid: 'none', elements: [stroke] }, [])).toContain(
+      '<path d="M100 100Q',
+    );
   });
   it('straightens only the selected tool, retaining the direction drawn by the user', () => {
     const samples = [

@@ -5,7 +5,28 @@ import type { Report, ReportMedia } from '@weldcosta/shared';
 import { apiBlob, apiUrl } from '../../services/api';
 import { useAuth } from '../../stores/auth';
 import { Notice, PanelHeader, FormGrid, FormCell } from '../../components/ui';
+import { PhotoPreview } from './photo-preview';
 export function MediaImage({
+  reportId,
+  item,
+  height = 200,
+}: {
+  reportId: string;
+  item: ReportMedia;
+  height?: number;
+}) {
+  return item.annotations?.elements.length ? (
+    <PhotoPreview
+      reportId={reportId}
+      mediaId={item.id}
+      annotations={item.annotations}
+      height={height}
+    />
+  ) : (
+    <OriginalMediaImage reportId={reportId} item={item} height={height} />
+  );
+}
+function OriginalMediaImage({
   reportId,
   item,
   height = 200,

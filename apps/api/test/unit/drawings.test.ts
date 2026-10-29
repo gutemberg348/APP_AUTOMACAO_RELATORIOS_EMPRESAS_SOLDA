@@ -398,7 +398,36 @@ describe('Technical drawing geometry and safe rendering', () => {
       signatures: [],
       media: [],
       drawings: [
-        { data: { ...newDrawingData(), title: 'Drawing A', notes: 'NOTE_A <script> & test' } },
+        {
+          data: {
+            ...newDrawingData(),
+            title: 'Drawing A',
+            notes: 'NOTE_A <script> & test',
+            notesDrawing: {
+              elements: [
+                {
+                  id: 'hand',
+                  type: 'polyline',
+                  freehand: true,
+                  points: [
+                    { x: 100, y: 100 },
+                    { x: 120, y: 115 },
+                    { x: 150, y: 100 },
+                  ],
+                  strokeColor: '#DC2626',
+                },
+                {
+                  id: 'caption',
+                  type: 'text',
+                  text: 'Nota <segura>',
+                  x: 100,
+                  y: 200,
+                  color: '#16725B',
+                },
+              ],
+            },
+          },
+        },
         { data: { ...newDrawingData(), title: 'Drawing B', notes: 'NOTE_B' } },
       ],
     } as unknown as PdfReport;
@@ -410,8 +439,59 @@ describe('Technical drawing geometry and safe rendering', () => {
       expect(sheets[0]).not.toContain('NOTE_B');
       expect(sheets[1]).toContain('NOTE_B');
       expect(sheets[1]).not.toContain('NOTE_A');
+      expect(sheets[0]).toContain('class="drawing-notes"');
+      expect(sheets[0]).toContain('Nota &lt;segura&gt;');
+      expect(sheets[0]).toContain('fill="#16725B"');
+      expect(sheets[0]).toContain('stroke="#DC2626"');
+      expect(sheets[1]).not.toContain('class="drawing-notes"');
       expect(sheets[0]!.indexOf('NOTE_A')).toBeGreaterThan(sheets[0]!.indexOf('</svg>'));
     }
+  });
+  it('persists handwritten notes and text colors while rejecting unsafe or unsupported data', () => {
+    const data = {
+      ...newDrawingData(),
+      notesDrawing: {
+        elements: [
+          { id: 'note', type: 'text' as const, text: 'NOTA', x: 100, y: 200, color: '#DC2626' },
+        ],
+      },
+    };
+    expect(drawingDataSchema.parse(JSON.parse(JSON.stringify(data))).notesDrawing).toEqual(
+      data.notesDrawing,
+    );
+    expect(
+      drawingDataSchema.safeParse({
+        ...data,
+        notesDrawing: {
+          elements: [{ ...data.notesDrawing.elements[0], color: 'url(https://example.invalid)' }],
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      drawingDataSchema.safeParse({
+        ...data,
+        notesDrawing: {
+          elements: [
+            {
+              id: 'photo',
+              type: 'image',
+              mediaKey: 'x',
+              x: 100,
+              y: 100,
+              width: 100,
+              height: 100,
+              rotation: 0,
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      drawingDataSchema.safeParse({
+        ...data,
+        notesDrawing: { elements: [...data.notesDrawing.elements, ...data.notesDrawing.elements] },
+      }).success,
+    ).toBe(false);
   });
   it('keeps an independent numbered marker when removing a point and preserves its geometry in PDF', () => {
     const point = { id: 'point-01', number: '01', data: { acceptable: true } };
@@ -529,7 +609,7 @@ describe('Technical drawing geometry and safe rendering', () => {
       const svg = drawingSvg(restored, [], { selectedId });
       for (const width of [8, 0.5, 6, 3, 2.6]) expect(svg).toContain(`stroke-width="${width}"`);
     }
-    for (const width of [0, -1, 13, Infinity]) {
+    for (const width of [0, -1, 61, Infinity]) {
       expect(
         drawingDataSchema.safeParse({
           ...data,

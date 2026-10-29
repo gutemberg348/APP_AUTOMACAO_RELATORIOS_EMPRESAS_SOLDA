@@ -2,18 +2,23 @@ import { Pressable, Text, View } from 'react-native';
 import { Button, IconButton } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 import {
+  DrawingColorChoices,
   drawingStrokeColors,
   strokeStyleLabels,
   type StrokeAppearance,
 } from './drawing-stroke-panel';
 
 export function DrawingSelectionQuickOptions({
+  textColor,
+  onTextColor,
   stroke,
   onStroke,
   onResize,
   onMore,
   onFullStyle,
 }: {
+  textColor?: string;
+  onTextColor?: (color: string) => void;
   stroke?: StrokeAppearance;
   onStroke(patch: Partial<StrokeAppearance>): void;
   onResize?: (scale: number) => void;
@@ -23,6 +28,12 @@ export function DrawingSelectionQuickOptions({
   const { tokens: t, styles } = useTheme();
   return (
     <View style={{ gap: 8 }}>
+      {textColor && onTextColor && (
+        <>
+          <Text style={[styles.label, { fontSize: 12 }]}>Cor do texto</Text>
+          <DrawingColorChoices value={textColor} onChange={onTextColor} />
+        </>
+      )}
       {stroke && (
         <>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -42,10 +53,10 @@ export function DrawingSelectionQuickOptions({
             <IconButton
               label="Engrossar traço selecionado"
               icon="plus"
-              disabled={stroke.strokeWidth >= 12}
+              disabled={stroke.strokeWidth >= 60}
               onPress={() =>
                 onStroke({
-                  strokeWidth: Math.min(12, Math.round((stroke.strokeWidth + 0.5) * 10) / 10),
+                  strokeWidth: Math.min(60, Math.round((stroke.strokeWidth + 0.5) * 10) / 10),
                 })
               }
             />

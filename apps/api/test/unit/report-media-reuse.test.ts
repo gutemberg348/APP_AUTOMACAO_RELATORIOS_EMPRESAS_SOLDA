@@ -96,6 +96,72 @@ const upload = (point = pointId) =>
     .field('reportPointId', point)
     .attach('file', image, 'renamed.png');
 
+it('stores paint separately on upload and patch without replacing the photo hash or point', async () => {
+  const annotations = {
+    elements: [
+      {
+        id: 'ink',
+        type: 'line',
+        x1: 100,
+        y1: 100,
+        x2: 200,
+        y2: 100,
+        strokeWidth: 18,
+        brush: 'marker',
+        strokeColor: '#DC2626',
+      },
+    ],
+  };
+  const response = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .field('reportPointId', pointId)
+    .field('annotations', JSON.stringify(annotations))
+    .attach('file', image, 'photo.png');
+  expect(response.status).toBe(201);
+  expect(prisma.reportMedia.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({
+        annotations,
+        reportPointId: pointId,
+        sha256: createHash('sha256').update(image).digest('hex'),
+      }),
+    }),
+  );
+  existing = { id: mediaId, reportId, reportPointId: pointId, sha256: 'a'.repeat(64) };
+  const patch = () => request(app).patch(`/reports/${reportId}/media/${mediaId}`).set(auth);
+  expect(
+    (
+      await patch().send({
+        version: 1,
+        caption: 'Original',
+        reportPointId: pointId,
+        sectionKey: 'photos',
+        annotations,
+      })
+    ).status,
+  ).toBe(200);
+  expect(prisma.reportMedia.update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({ annotations, reportPointId: pointId }),
+    }),
+  );
+  const count = vi.mocked(prisma.reportMedia.update).mock.calls.length;
+  expect(
+    (
+      await patch().send({
+        version: 1,
+        caption: 'Original',
+        reportPointId: pointId,
+        sectionKey: 'photos',
+        annotations: { elements: [{ ...annotations.elements[0], strokeColor: 'url(invalid)' }] },
+      })
+    ).status,
+  ).toBe(400);
+  expect(prisma.reportMedia.update).toHaveBeenCalledTimes(count);
+});
+
 it('accepts a repeated image in the same saved point both during selection and upload', async () => {
   existing = { id: mediaId, reportId, reportPointId: pointId };
   expect((await check()).status).toBe(200);
@@ -143,6 +209,32 @@ it('returns an already completed slot after a lost response without creating ano
   expect(response.body.data.id).toBe(mediaId);
   expect(prisma.reportMedia.create).not.toHaveBeenCalled();
   expect(prisma.report.updateMany).not.toHaveBeenCalled();
+});
+it('keeps newer paint on an idempotent upload retry without creating another image', async () => {
+  vi.mocked(prisma.reportMedia.findFirst).mockResolvedValue({
+    id: mediaId,
+    reportId,
+    reportPointId: pointId,
+    sha256: createHash('sha256').update(image).digest('hex'),
+    annotations: { elements: [] },
+  } as never);
+  const annotations = {
+    elements: [{ id: 'ink', type: 'line', x1: 100, y1: 100, x2: 200, y2: 100 }],
+  };
+  const result = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .field('reportPointId', pointId)
+    .field('clientUploadId', 'slot-retry')
+    .field('annotations', JSON.stringify(annotations))
+    .attach('file', image, 'photo.png');
+  expect(result.status).toBe(201);
+  expect(prisma.reportMedia.create).not.toHaveBeenCalled();
+  expect(prisma.reportMedia.update).toHaveBeenCalledWith({
+    where: { id: mediaId },
+    data: { annotations },
+  });
 });
 it('checks reassignment too, while permitting a caption change on the same point', async () => {
   existing = { id: mediaId, reportId, reportPointId: pointId, sha256: 'a'.repeat(64) };

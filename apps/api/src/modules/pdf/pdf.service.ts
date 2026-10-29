@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { reportCreateSchema, drawingDataSchema } from '@weldcosta/shared';
+import { photoWithAnnotations } from './photo-annotations';
 import { access } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 import type { Report } from '../../generated/prisma/client';
@@ -102,10 +103,11 @@ export class PdfService implements PdfProvider {
     for (const media of report.media)
       images.set(
         media.id,
-        'data:' +
-          media.mimeType +
-          ';base64,' +
-          (await this.storage.get(media.filePath)).toString('base64'),
+        await photoWithAnnotations(
+          await this.storage.get(media.filePath),
+          media.mimeType,
+          media.annotations,
+        ),
       );
     const browser = await puppeteer.launch({
       executablePath: await this.executable(),

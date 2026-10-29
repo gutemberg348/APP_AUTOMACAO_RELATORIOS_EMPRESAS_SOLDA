@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Text, View, Pressable } from 'react-native';
+import { Text, View, Pressable } from 'react-native';
 import type { ReportMedia } from '@weldcosta/shared';
 import { drawingId } from '@weldcosta/shared';
 import { MediaSourcePicker } from '../../components/media-source-picker';
@@ -7,7 +7,8 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Button, Field, Notice } from '../../components/ui';
 import { Icon } from '../../components/icon';
 import { useTheme } from '../../utils/theme';
-import { MediaImage } from './report-media';
+import { PhotoPreview, type PhotoSource } from './photo-preview';
+import { PhotoAnnotationEditor } from './photo-annotation-editor';
 import { useReportPhotoDrafts, emptyPhotoDrafts } from './report-photo-drafts';
 import { checkReportPhoto } from './check-report-photo';
 
@@ -38,6 +39,12 @@ export function PointPhotos({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [removing, setRemoving] = useState<ReportMedia>();
   const [error, setError] = useState<unknown>();
+  const [editingPhoto, setEditingPhoto] = useState<{
+    id: string;
+    pending: boolean;
+    source: PhotoSource;
+    editable: boolean;
+  }>();
   const draft = useReportPhotoDrafts((state) => state.reports[draftKey] ?? emptyPhotoDrafts);
   const update = (
     change: Parameters<ReturnType<typeof useReportPhotoDrafts.getState>['update']>[1],
@@ -61,6 +68,14 @@ export function PointPhotos({
     setSourceOpen(true);
     onPickingChange(true);
   };
+  const closePreview = () => {
+    setEditingPhoto(undefined);
+    onPickingChange(false);
+  };
+  const openPreview = (id: string, pending: boolean, source: PhotoSource) => {
+    onPickingChange(true);
+    setEditingPhoto({ id, pending, source, editable });
+  };
   return (
     <View style={{ gap: 12 }}>
       {!additional && <Text style={styles.label}>Fotos do ponto {number}</Text>}
@@ -72,6 +87,12 @@ export function PointPhotos({
         </Text>
       )}
       <Notice error={error} />
+      {(pending.some((photo) => photo.annotations?.elements.length) ||
+        existing.some((photo) => draft.annotationEdits?.[photo.id] !== undefined)) && (
+        <Text style={[styles.muted, { fontSize: 12 }]}>
+          Marcações preparadas. Salve o relatório para gravá-las e incluí-las no PDF.
+        </Text>
+      )}
       {editable && !additional && count === 0 && (
         <Button title="Selecionar as duas fotos" icon="image" onPress={openSource} />
       )}
@@ -80,7 +101,13 @@ export function PointPhotos({
           <View key={photo.id} style={{ flexBasis: '46%', flexGrow: 1, minWidth: 0 }}>
             <View style={{ gap: 8 }}>
               <Text style={styles.label}>Foto {index + 1}</Text>
-              <MediaImage reportId={reportId!} item={photo} height={140} />
+              <PhotoPreview
+                reportId={reportId}
+                mediaId={photo.id}
+                annotations={draft.annotationEdits?.[photo.id] ?? photo.annotations}
+                action={(editable ? 'Ver e pintar foto ' : 'Ver foto ') + (index + 1)}
+                onOpen={(source) => openPreview(photo.id, false, source)}
+              />
               {photo.sectionKey === 'drawing' && (
                 <Text style={styles.muted}>Croqui anexado como imagem</Text>
               )}
@@ -126,13 +153,13 @@ export function PointPhotos({
               }}
             >
               <Text style={styles.label}>Foto {existing.length + index + 1}</Text>
-              <Image
-                source={{ uri: photo.asset.uri }}
-                accessibilityLabel={
-                  additional ? 'Foto adicional pendente' : 'Foto pendente do ponto ' + number
+              <PhotoPreview
+                uri={photo.asset.uri}
+                annotations={photo.annotations}
+                action={
+                  (editable ? 'Ver e pintar foto ' : 'Ver foto ') + (existing.length + index + 1)
                 }
-                resizeMode="contain"
-                style={{ width: '100%', height: 140 }}
+                onOpen={(source) => openPreview(photo.id, true, source)}
               />
               <Text style={styles.muted}>Será enviada ao salvar · {photo.asset.name}</Text>
               <Field
@@ -265,7 +292,9 @@ export function PointPhotos({
           media.some(
             (photo) =>
               !photo.reportPointId &&
-              (draft.captionEdits?.[photo.id] !== undefined || draft.removedIds.includes(photo.id)),
+              (draft.captionEdits?.[photo.id] !== undefined ||
+                draft.annotationEdits?.[photo.id] !== undefined ||
+                draft.removedIds.includes(photo.id)),
           )) && (
           <Text style={[styles.muted, { fontSize: 11 }]}>
             As imagens e legendas serão atualizadas ao salvar o relatório.
@@ -283,6 +312,44 @@ export function PointPhotos({
           setRemoving(undefined);
         }}
       />
+      {editingPhoto && (
+        <PhotoAnnotationEditor
+          key={editingPhoto.id}
+          source={editingPhoto.source}
+          editable={editingPhoto.editable}
+          value={
+            (editingPhoto.pending
+              ? draft.photos.find((p) => p.id === editingPhoto.id)?.annotations
+              : (draft.annotationEdits?.[editingPhoto.id] ??
+                media.find((p) => p.id === editingPhoto.id)?.annotations)) ?? { elements: [] }
+          }
+          onClose={closePreview}
+          onSave={(annotations) => {
+            const previous = editingPhoto.pending
+              ? draft.photos.find((photo) => photo.id === editingPhoto.id)?.annotations
+              : (draft.annotationEdits?.[editingPhoto.id] ??
+                media.find((photo) => photo.id === editingPhoto.id)?.annotations);
+            if (JSON.stringify(previous ?? { elements: [] }) === JSON.stringify(annotations)) {
+              closePreview();
+              return;
+            }
+            update((current) =>
+              editingPhoto.pending
+                ? {
+                    ...current,
+                    photos: current.photos.map((photo) =>
+                      photo.id === editingPhoto.id ? { ...photo, annotations } : photo,
+                    ),
+                  }
+                : {
+                    ...current,
+                    annotationEdits: { ...current.annotationEdits, [editingPhoto.id]: annotations },
+                  },
+            );
+            closePreview();
+          }}
+        />
+      )}
     </View>
   );
 }

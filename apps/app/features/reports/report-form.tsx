@@ -1,3 +1,4 @@
+import { ReportPhotoSaveError } from './report-photo-error';
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,7 +18,7 @@ import {
   type ReportType,
   type Paginated,
 } from '@weldcosta/shared';
-import { api, jsonBody } from '../../services/api';
+import { api, ApiError, jsonBody } from '../../services/api';
 import { useUnsavedChanges } from '../../hooks/use-unsaved-changes';
 import {
   Card,
@@ -56,6 +57,14 @@ import {
   formErrorGuidance,
   type ValidationIssue,
 } from '../../utils/form-feedback';
+import {
+  reportCorrections,
+  reportBusinessCorrection,
+  type ReportCorrection,
+  type CorrectionRequest,
+} from './report-save-feedback';
+import { PickerSheet } from '../../components/picker-sheet';
+import { ReportSaveIssues } from './report-save-issues';
 const resultOptions: SelectOption[] = [
   { value: '', label: 'Não informado', description: 'Definir o resultado depois.', icon: 'clock' },
   {
@@ -139,7 +148,8 @@ export function ReportForm({
   const hasPhotoDrafts = !!(
     photoDrafts.photos.length ||
     photoDrafts.removedIds.length ||
-    Object.keys(photoDrafts.captionEdits ?? {}).length
+    Object.keys(photoDrafts.captionEdits ?? {}).length ||
+    Object.keys(photoDrafts.annotationEdits ?? {}).length
   );
   const photoCount =
     (report?.media ?? []).filter((photo) => !photoDrafts.removedIds.includes(photo.id)).length +
@@ -183,6 +193,11 @@ export function ReportForm({
   const [saving, setSaving] = useState(false);
   const [acting, setActing] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(!report?.number.trim());
+  const [saveIssues, setSaveIssues] = useState<ReportCorrection[]>([]);
+  const [failureOpen, setFailureOpen] = useState(false);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [correction, setCorrection] = useState<CorrectionRequest>();
+  const fieldViews = useRef<Record<string, ViewInstance | null>>({});
   const reveal = usePageScroll();
   const formTop = useRef<ViewInstance>(null);
   const conclusionActions = useRef<ViewInstance>(null);
@@ -471,62 +486,22 @@ export function ReportForm({
       });
     }
   }, [report, reset, hasChanges]);
-  const showIssues = (issues: ValidationIssue[], specificData = false) => {
-    const technicalFields = sections.flatMap((section) => section.fields);
-    const normalized = issues.map((issue) => {
-      const path = issue.path.map(String);
-      if (specificData || technicalFields.some((field) => field.path === path.join('.')))
-        path.unshift('specificData');
-      return { ...issue, path };
-    });
-    const labels: Record<string, string> = {
-      number: 'Número',
-      title: 'Título',
-      reportDate: 'Data do relatório',
-      name: 'Nome',
-      value: 'Leitura',
-      unit: 'Unidade',
-      dimension: 'Dimensão',
-      signedAt: 'Data da assinatura',
-      label: 'Identificação',
-      discontinuity: 'Descontinuidade',
-      acceptable: 'Aceitável',
-      points: 'Pontos',
-      drawings: 'Desenhos',
-      signatures: 'Responsáveis',
-    };
-    const messages = normalized.map(({ path, message }) => {
-      const key = path.join('.');
-      const technical = technicalFields.find((field) => 'specificData.' + field.path === key);
-      const date =
-        path[0] === 'reportDate' || path.at(-1) === 'signedAt' || technical?.kind === 'date';
-      const detail = date ? 'Informe uma data válida em DD/MM/AAAA.' : message;
-      const label = technical?.label ?? labels[path.at(-1) ?? ''] ?? 'Dados do relatório';
-      const prefix =
-        path.length < 2
-          ? ''
-          : path[0] === 'points'
-            ? 'Ponto ' +
-              (getValues('points')[Number(path[1])]?.number || Number(path[1]) + 1) +
-              ' · '
-            : path[0] === 'signatures'
-              ? 'Responsável ' + (Number(path[1]) + 1) + ' · '
-              : path[0] === 'drawings'
-                ? 'Desenho ' + (Number(path[1]) + 1) + ' · '
-                : '';
-      setFieldError(key as 'number' | 'title' | 'reportDate', {
-        type: 'validation',
-        message: detail,
-      });
-      return prefix + label + ': ' + detail;
-    });
-    setError(new Error(messages.join('\n')));
-    const first = normalized[0]?.path ?? [];
+  const correctIssue = (issue: ReportCorrection) => {
+    Keyboard.dismiss();
+    setIssuesOpen(false);
+    const first = issue.path;
     const target = sections.findIndex((section) =>
       section.content
-        ? section.content === first[0]
+        ? section.content === first[0] ||
+          (section.content === 'discontinuities' && first[1] === 'discontinuities')
         : section.fields.some(
-            (field) => first[0] === 'specificData' && field.path === first.slice(1).join('.'),
+            (field) =>
+              first[0] === 'specificData' &&
+              (first.slice(1).join('.') === field.path ||
+                first
+                  .slice(1)
+                  .join('.')
+                  .startsWith(field.path + '.')),
           ),
     );
     if (target >= 0) openSection(target);
@@ -535,7 +510,69 @@ export function ReportForm({
       setOpenSectionTitle(null);
       setStep(0);
     }
+    setCorrection({ ...issue, request: Date.now() });
+    setSectionNavigation((n) => n + 1);
   };
+  useEffect(() => {
+    if (!correction) return;
+    const timer = setTimeout(() => {
+      const view = fieldViews.current[correction.path.join('.')];
+      if (view) reveal(view);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [correction, reveal]);
+  const showIssues = (issues: ValidationIssue[], specificData = false) => {
+    const resolved = reportCorrections(issues, sections, getValues('points'), specificData);
+    for (const issue of resolved)
+      setFieldError(issue.path.join('.') as 'number', {
+        type: 'validation',
+        message: issue.message,
+      });
+    setError(undefined);
+    setSaveIssues(resolved);
+    setIssuesOpen(true);
+  };
+  const showSaveError = (cause: unknown) => {
+    const issues = apiValidationIssues(cause);
+    if (issues.length) return showIssues(issues);
+    const known =
+      cause instanceof ApiError ? reportBusinessCorrection(cause.code, cause.message) : undefined;
+    if (known) {
+      setSaveIssues([known]);
+      setIssuesOpen(true);
+      setError(undefined);
+    } else {
+      setSaveIssues([]);
+      setError(cause);
+      setFailureOpen(true);
+    }
+  };
+  useEffect(() => {
+    const cause = photoDrafts.error;
+    if (!cause) return;
+    if (cause instanceof ReportPhotoSaveError) {
+      const pointIndex = getValues('points').findIndex(
+        (point) => point.number === cause.location.pointNumber,
+      );
+      setSaveIssues([
+        {
+          path: cause.location.drawing
+            ? ['drawings']
+            : pointIndex >= 0
+              ? ['points', String(pointIndex)]
+              : ['points'],
+          label: cause.location.label,
+          message: cause.message,
+          guidance:
+            'Confira a conexão e a foto indicada. Se o arquivo foi recusado, escolha uma imagem de até 10 MB. As fotos pendentes continuam na fila; toque em Salvar para repetir o envio.',
+        },
+      ]);
+      setIssuesOpen(true);
+    } else {
+      setError(cause);
+      setFailureOpen(true);
+    }
+  }, [photoDrafts.error, getValues]);
   const removeDrawingPoints = (keys: string[], clearDrawingIndex?: number) => {
     const removedKeys = new Set(keys);
     const mediaIds = (report?.media ?? [])
@@ -575,6 +612,9 @@ export function ReportForm({
       ...draft,
       photos: draft.photos.filter((photo) => !photo.pointKey || !removedKeys.has(photo.pointKey)),
       removedIds: [...new Set([...draft.removedIds, ...mediaIds])],
+      annotationEdits: Object.fromEntries(
+        Object.entries(draft.annotationEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
+      ),
       captionEdits: Object.fromEntries(
         Object.entries(draft.captionEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
       ),
@@ -624,6 +664,11 @@ export function ReportForm({
         useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
           ...draft,
           removedIds: draft.removedIds.filter((id) => !removePointMediaIds.includes(id)),
+          annotationEdits: Object.fromEntries(
+            Object.entries(draft.annotationEdits ?? {}).filter(
+              ([id]) => !removePointMediaIds.includes(id),
+            ),
+          ),
           captionEdits: Object.fromEntries(
             Object.entries(draft.captionEdits ?? {}).filter(
               ([id]) => !removePointMediaIds.includes(id),
@@ -644,9 +689,7 @@ export function ReportForm({
       await client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'report' });
     },
     onError: (cause) => {
-      const issues = apiValidationIssues(cause);
-      if (issues.length) showIssues(issues);
-      else setError(cause);
+      showSaveError(cause);
     },
     onSettled: () => {
       setSaving(false);
@@ -655,32 +698,49 @@ export function ReportForm({
   });
   const save = async () => {
     let saved: Report | undefined;
-    await handleSubmit(async (data) => {
-      setError(undefined);
-      clearErrors();
-      const body = {
-        ...data,
-        reportDate: data.reportDate || null,
-        specificData: clean(data.specificData),
-        points: clean(data.points),
-        signatures: clean(data.signatures),
-      };
-      const common = report
-        ? reportUpdateSchema.safeParse({ ...body, version: report.version })
-        : reportCreateSchema.safeParse({ ...body, reportTypeId: type.id, companyId, projectId });
-      if (!common.success) {
-        showIssues(common.error.issues);
-        return;
-      }
-      try {
-        validateSpecificData(type.code, body.specificData, 'draft', type.config);
-      } catch (cause) {
-        if (cause instanceof ZodError) showIssues(cause.issues, true);
-        else setError(cause);
-        return;
-      }
-      saved = await mutation.mutateAsync(data).catch(() => undefined);
-    })();
+    clearErrors();
+    await handleSubmit(
+      async (data) => {
+        setError(undefined);
+        setSaveIssues([]);
+        setCorrection(undefined);
+        clearErrors();
+        const body = {
+          ...data,
+          reportDate: data.reportDate || null,
+          specificData: clean(data.specificData),
+          points: clean(data.points),
+          signatures: clean(data.signatures),
+        };
+        const common = report
+          ? reportUpdateSchema.safeParse({ ...body, version: report.version })
+          : reportCreateSchema.safeParse({ ...body, reportTypeId: type.id, companyId, projectId });
+        const validationIssues: ValidationIssue[] = common.success ? [] : [...common.error.issues];
+        try {
+          validateSpecificData(type.code, body.specificData, 'draft', type.config);
+        } catch (cause) {
+          if (cause instanceof ZodError)
+            validationIssues.push(
+              ...cause.issues.map((issue) => ({ ...issue, path: ['specificData', ...issue.path] })),
+            );
+          else {
+            showSaveError(cause);
+            return;
+          }
+        }
+        if (validationIssues.length) {
+          showIssues(validationIssues);
+          return;
+        }
+        saved = await mutation.mutateAsync(data).catch(() => undefined);
+      },
+      () =>
+        showSaveError(
+          new Error(
+            'Não foi possível validar o preenchimento. Confira os campos destacados e tente salvar novamente.',
+          ),
+        ),
+    )();
     return saved;
   };
   return (
@@ -759,6 +819,25 @@ export function ReportForm({
         </View>
       </Card>
       <Notice error={error} guidance={formErrorGuidance(error)} />
+      <ReportSaveIssues
+        issues={saveIssues}
+        visible={issuesOpen}
+        onClose={() => setIssuesOpen(false)}
+        onOpen={() => setIssuesOpen(true)}
+        onCorrect={correctIssue}
+      />
+      <PickerSheet
+        visible={failureOpen}
+        title="Não foi possível concluir"
+        icon="alert"
+        onClose={() => setFailureOpen(false)}
+      >
+        <Notice error={error} guidance={formErrorGuidance(error)} />
+        <Text style={styles.muted}>
+          Seu preenchimento continua nesta tela. Depois de resolver o aviso, tente a ação novamente.
+        </Text>
+        <Button title="Voltar ao relatório" secondary onPress={() => setFailureOpen(false)} />
+      </PickerSheet>
       {step === 0 && (reusable.length > 0 || autofillMessage) && (
         <Card>
           <PanelHeader
@@ -825,64 +904,82 @@ export function ReportForm({
               </View>
               <FormGrid>
                 <FormCell>
-                  <Controller
-                    name="number"
-                    control={control}
-                    render={({ field }) => (
-                      <Field
-                        label="Número do relatório"
-                        required
-                        placeholder="Identificação do relatório"
-                        value={field.value}
-                        onChangeText={field.onChange}
-                        onBlur={field.onBlur}
-                        error={errors.number?.message}
-                        editable={canEdit('number')}
-                      />
-                    )}
-                  />
+                  <View
+                    ref={(view) => {
+                      fieldViews.current['number'] = view;
+                    }}
+                  >
+                    <Controller
+                      name="number"
+                      control={control}
+                      render={({ field }) => (
+                        <Field
+                          label="Número do relatório"
+                          required
+                          placeholder="Identificação do relatório"
+                          value={field.value}
+                          onChangeText={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.number?.message}
+                          editable={canEdit('number')}
+                        />
+                      )}
+                    />
+                  </View>
                 </FormCell>
                 <FormCell>
-                  <Controller
-                    name="reportDate"
-                    control={control}
-                    render={({ field }) => (
-                      <DateField
-                        label="Data do relatório"
-                        value={field.value}
-                        onChangeText={field.onChange}
-                        onBlur={field.onBlur}
-                        error={errors.reportDate?.message}
-                        editable={canEdit('reportDate')}
-                      />
-                    )}
-                  />
+                  <View
+                    ref={(view) => {
+                      fieldViews.current['reportDate'] = view;
+                    }}
+                  >
+                    <Controller
+                      name="reportDate"
+                      control={control}
+                      render={({ field }) => (
+                        <DateField
+                          label="Data do relatório"
+                          value={field.value}
+                          onChangeText={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.reportDate?.message}
+                          editable={canEdit('reportDate')}
+                        />
+                      )}
+                    />
+                  </View>
                 </FormCell>
                 <FormCell full>
-                  <Controller
-                    name="title"
-                    control={control}
-                    render={({ field }) => (
-                      <Field
-                        label={type.code === 'EVS' ? 'Título da linha / equipamento' : 'Título'}
-                        placeholder={
-                          type.code === 'EVS'
-                            ? 'Ex.: LINHA RETORNO DE CIP'
-                            : 'Identifique a inspeção de forma clara'
-                        }
-                        hint={
-                          type.code === 'EVS'
-                            ? 'Este nome aparece no centro da segunda página do PDF.'
-                            : undefined
-                        }
-                        value={field.value}
-                        onChangeText={field.onChange}
-                        onBlur={field.onBlur}
-                        error={errors.title?.message}
-                        editable={canEdit('title')}
-                      />
-                    )}
-                  />
+                  <View
+                    ref={(view) => {
+                      fieldViews.current['title'] = view;
+                    }}
+                  >
+                    <Controller
+                      name="title"
+                      control={control}
+                      render={({ field }) => (
+                        <Field
+                          label={type.code === 'EVS' ? 'Título da linha / equipamento' : 'Título'}
+                          placeholder={
+                            type.code === 'EVS'
+                              ? 'Ex.: LINHA RETORNO DE CIP'
+                              : 'Identifique a inspeção de forma clara'
+                          }
+                          hint={
+                            type.code === 'EVS'
+                              ? 'Este nome aparece no centro da segunda página do PDF.'
+                              : undefined
+                          }
+                          value={field.value}
+                          onChangeText={field.onChange}
+                          onBlur={field.onBlur}
+                          error={errors.title?.message}
+                          editable={canEdit('title')}
+                        />
+                      )}
+                    />
+                  </View>
                 </FormCell>
               </FormGrid>
               <Button
@@ -984,12 +1081,21 @@ export function ReportForm({
               </Pressable>
               {isSectionOpen(section) && (
                 <View style={{ padding: 20, gap: 22 }}>
+                  {correction &&
+                    section.content === correction.path[0] &&
+                    section.content !== 'points' && (
+                      <Notice
+                        error={new Error(correction.label + ': ' + correction.message)}
+                        guidance={correction.guidance}
+                      />
+                    )}
                   {section.content === 'points' ? (
                     <ReportPoints
                       control={control}
                       code={type.code}
                       editable={canEdit('points')}
                       errors={errors}
+                      correction={correction}
                       photoDraftKey={photoDraftKey}
                       report={report}
                       canUploadPhotos={!editingBusy && user.permissions.includes('media.upload')}
@@ -1006,6 +1112,7 @@ export function ReportForm({
                       control={control}
                       editable={canEdit('signatures')}
                       errors={errors}
+                      correction={correction}
                       reportDate={getValues('reportDate')}
                       setValue={setValue}
                       previousSignatures={previousReport.data?.signatures}
@@ -1035,6 +1142,7 @@ export function ReportForm({
                             !editingBusy && user.permissions.includes('media.upload')
                           }
                           savedVersion={report?.version}
+                          correction={correction}
                           value={field.value}
                           points={watchedPoints}
                           onChange={field.onChange}
@@ -1064,81 +1172,87 @@ export function ReportForm({
                         key={item.path}
                         full={item.kind === 'long' || item.kind === 'result'}
                       >
-                        <Controller
-                          control={control}
-                          name={('specificData.' + item.path) as `specificData.${string}`}
-                          render={({ field }) =>
-                            item.kind === 'result' ? (
-                              <SelectField
-                                label={item.label}
-                                value={String(field.value ?? '')}
-                                options={resultOptions}
-                                onChange={(value) => {
-                                  editedSetupPaths.current.add(item.path);
-                                  field.onChange(value);
-                                }}
-                                disabled={!canEdit('specificData.' + item.path)}
-                                icon="check-circle"
-                                error={
-                                  getFieldState(
-                                    ('specificData.' + item.path) as `specificData.${string}`,
-                                  ).error?.message
-                                }
-                              />
-                            ) : item.kind === 'date' ? (
-                              <DateField
-                                label={item.label}
-                                value={String(field.value ?? '')}
-                                onChangeText={(value) => {
-                                  editedSetupPaths.current.add(item.path);
-                                  field.onChange(value);
-                                }}
-                                onBlur={field.onBlur}
-                                error={
-                                  getFieldState(
-                                    ('specificData.' + item.path) as `specificData.${string}`,
-                                  ).error?.message
-                                }
-                                editable={canEdit('specificData.' + item.path)}
-                              />
-                            ) : (
-                              <Field
-                                label={item.label}
-                                value={
-                                  typeof field.value === 'string'
-                                    ? field.value
-                                    : field.value === undefined
-                                      ? ''
-                                      : String(field.value)
-                                }
-                                onChangeText={(value) => {
-                                  editedSetupPaths.current.add(item.path);
-                                  const kind = config.customFields?.[item.path];
-                                  field.onChange(
-                                    kind === 'number' && value
-                                      ? Number(value)
-                                      : kind === 'boolean'
-                                        ? value === 'true'
-                                        : value,
-                                  );
-                                }}
-                                onBlur={field.onBlur}
-                                error={
-                                  getFieldState(
-                                    ('specificData.' + item.path) as `specificData.${string}`,
-                                  ).error?.message
-                                }
-                                multiline={item.kind === 'long'}
-                                placeholder={
-                                  item.kind === 'long'
-                                    ? 'Registre as informações da inspeção…'
-                                    : undefined
-                                }
-                                editable={canEdit('specificData.' + item.path)}
-                              />
-                            )
-                          }
-                        />
+                        <View
+                          ref={(view) => {
+                            fieldViews.current['specificData.' + item.path] = view;
+                          }}
+                        >
+                          <Controller
+                            control={control}
+                            name={('specificData.' + item.path) as `specificData.${string}`}
+                            render={({ field }) =>
+                              item.kind === 'result' ? (
+                                <SelectField
+                                  label={item.label}
+                                  value={String(field.value ?? '')}
+                                  options={resultOptions}
+                                  onChange={(value) => {
+                                    editedSetupPaths.current.add(item.path);
+                                    field.onChange(value);
+                                  }}
+                                  disabled={!canEdit('specificData.' + item.path)}
+                                  icon="check-circle"
+                                  error={
+                                    getFieldState(
+                                      ('specificData.' + item.path) as `specificData.${string}`,
+                                    ).error?.message
+                                  }
+                                />
+                              ) : item.kind === 'date' ? (
+                                <DateField
+                                  label={item.label}
+                                  value={String(field.value ?? '')}
+                                  onChangeText={(value) => {
+                                    editedSetupPaths.current.add(item.path);
+                                    field.onChange(value);
+                                  }}
+                                  onBlur={field.onBlur}
+                                  error={
+                                    getFieldState(
+                                      ('specificData.' + item.path) as `specificData.${string}`,
+                                    ).error?.message
+                                  }
+                                  editable={canEdit('specificData.' + item.path)}
+                                />
+                              ) : (
+                                <Field
+                                  label={item.label}
+                                  value={
+                                    typeof field.value === 'string'
+                                      ? field.value
+                                      : field.value === undefined
+                                        ? ''
+                                        : String(field.value)
+                                  }
+                                  onChangeText={(value) => {
+                                    editedSetupPaths.current.add(item.path);
+                                    const kind = config.customFields?.[item.path];
+                                    field.onChange(
+                                      kind === 'number' && value
+                                        ? Number(value)
+                                        : kind === 'boolean'
+                                          ? value === 'true'
+                                          : value,
+                                    );
+                                  }}
+                                  onBlur={field.onBlur}
+                                  error={
+                                    getFieldState(
+                                      ('specificData.' + item.path) as `specificData.${string}`,
+                                    ).error?.message
+                                  }
+                                  multiline={item.kind === 'long'}
+                                  placeholder={
+                                    item.kind === 'long'
+                                      ? 'Registre as informações da inspeção…'
+                                      : undefined
+                                  }
+                                  editable={canEdit('specificData.' + item.path)}
+                                />
+                              )
+                            }
+                          />
+                        </View>
                       </FormCell>
                     ))}
                   </FormGrid>
@@ -1206,6 +1320,7 @@ export function ReportForm({
             busy={pickingPhoto || saving}
             creating={!initialReport}
             onBusyChange={setActing}
+            onError={showSaveError}
           />
         </View>
       )}

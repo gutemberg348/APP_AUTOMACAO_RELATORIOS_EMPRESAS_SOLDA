@@ -224,6 +224,7 @@ model ReportMedia {
   sha256 String @db.Char(64)
   clientUploadId String? @db.VarChar(100)
   caption String?
+  annotations Json? @db.JsonB
   sortOrder Int @default(0)
   uploadedById String @db.Uuid
   uploadedBy User @relation(fields: [uploadedById], references: [id])

@@ -1,4 +1,4 @@
-import { reportSections, drawingDataSchema, drawingSvg } from '@weldcosta/shared';
+import { reportSections, drawingDataSchema, drawingSvg, drawingNotesSvg } from '@weldcosta/shared';
 import type { Prisma } from '../../../../generated/prisma/client';
 export type PdfReport = Prisma.ReportGetPayload<{
   include: {
@@ -100,7 +100,10 @@ export function reportBody(report: PdfReport, images: Map<string, string>, code:
     }));
     html += section(
       'Desenho técnico · ' + String(index + 1).padStart(2, '0'),
-      `<div class="cad-frame"><div class="cad-title"><strong>${escape(cad.title)}</strong><span>${cad.grid === 'isometric' ? 'ISOMÉTRICO' : cad.grid === 'orthogonal' ? 'VISTA ORTOGONAL' : 'CROQUI'} · SEM ESCALA</span></div><div class="cad-canvas">${drawingSvg(cad, points, { images: drawingImageSources(report, images) })}</div><div class="cad-stamp"><div>${field('Obra', data.work)}${field('Desenho / projeto', data.project || data.referenceDrawing || data.drawing)}</div><div>${field('Relatório', report.number)}${field('Revisão / prancha', cad.revision + ' / ' + (index + 1) + ' de ' + report.drawings.length)}</div></div></div><p class="cad-legend"><span>● Pendente</span><span>● Aceitável</span><span>● Não aceitável</span> · A numeração corresponde aos pontos e às evidências deste relatório.</p>${cad.notes ? field('Notas do desenho', cad.notes) : ''}`,
+      `<div class="cad-frame"><div class="cad-title"><strong>${escape(cad.title)}</strong><span>${cad.grid === 'isometric' ? 'ISOMÉTRICO' : cad.grid === 'orthogonal' ? 'VISTA ORTOGONAL' : 'CROQUI'} · SEM ESCALA</span></div><div class="cad-canvas">${drawingSvg(cad, points, { images: drawingImageSources(report, images) })}</div><div class="cad-stamp"><div>${field('Obra', data.work)}${field('Desenho / projeto', data.project || data.referenceDrawing || data.drawing)}</div><div>${field('Relatório', report.number)}${field('Revisão / prancha', cad.revision + ' / ' + (index + 1) + ' de ' + report.drawings.length)}</div></div></div><p class="cad-legend"><span>● Pendente</span><span>● Aceitável</span><span>● Não aceitável</span> · A numeração corresponde aos pontos e às evidências deste relatório.</p>${cad.notes ? field('Notas do desenho', cad.notes) : ''}` +
+        (cad.notesDrawing?.elements.length
+          ? `<section class="drawing-notes" style="height:64mm"><b>OBSERVAÇÕES</b><div style="height:58mm">${drawingNotesSvg(cad)}</div></section>`
+          : ''),
       true,
     );
   }

@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
-import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg, drawingNotesSvg } from '@weldcosta/shared';
 import { escape, displayDate, signatureImage, type PdfReport } from '../layout';
 import { referenceLogo } from './reference-logo';
 import { evsStyles } from './styles';
@@ -124,7 +124,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
     const cad = drawingDataSchema.parse(drawing.data);
     html += sheet(
       'DESENHO',
-      `<div class="evs-drawing">${drawingSvg(
+      `<div class="evs-drawing"${cad.notesDrawing?.elements.length ? ' style="height:165mm"' : ''}>${drawingSvg(
         cad,
         report.points.map((p) => ({
           id: p.id,
@@ -133,6 +133,9 @@ export function render(report: PdfReport, images: Map<string, string>) {
         })),
         { images: drawingImageSources(report, images) },
       )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>` +
+        (cad.notesDrawing?.elements.length
+          ? `<section class="drawing-notes" style="height:64mm;padding:0 3mm"><b style="font-size:11px">OBSERVAÇÕES</b><div style="height:58mm">${drawingNotesSvg(cad)}</div></section>`
+          : '') +
         (cad.notes
           ? chunks(cad.notes)
               .map((part) => `<p class="evs-annotation">${escape(part)}</p>`)
@@ -213,7 +216,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   const signatureCell = (label: string, role: string) => {
     const signer = report.signatures.find((s) => s.role === role && !used.has(s.id));
     if (signer) used.add(signer.id);
-    return `<div class="evs-signer"><div>${label}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || (role === 'CLIENT' ? data.client : '') || '')}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;
+    return `<div class="evs-signer"><div>${label}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || '')}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;
   };
   const signers =
     signatureCell('INSPETOR', 'INSPECTOR') +

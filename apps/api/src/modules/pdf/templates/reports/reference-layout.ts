@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
-import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg, drawingNotesSvg } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, type PdfReport } from './layout';
 export { chunks } from './evs';
@@ -77,10 +77,11 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
   let html = '';
   for (const drawing of report.drawings) {
     const cad = drawingDataSchema.parse(drawing.data);
+    const notesSvg = drawingNotesSvg(cad);
     html += sheet(
       report,
       'DESENHO',
-      `<div class="evs-drawing">${drawingSvg(
+      `<div class="evs-drawing"${notesSvg ? ' style="height:165mm"' : ''}>${drawingSvg(
         cad,
         report.points.map((p) => ({
           id: p.id,
@@ -90,6 +91,9 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
         { images: drawingImageSources(report, images) },
       )}</div>` +
         annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala') +
+        (notesSvg
+          ? `<section class="drawing-notes" style="height:64mm;padding:0 3mm"><b style="font-size:11px">OBSERVAÇÕES</b><div style="height:58mm">${notesSvg}</div></section>`
+          : '') +
         (cad.notes ? annotations(cad.notes, 'Notas') : ''),
     );
   }
@@ -145,15 +149,15 @@ export function resultAndSignatures(
 ) {
   const data = report.specificData as Record<string, unknown>;
   const used = new Set<string>();
-  const cell = (label: string, signer?: PdfReport['signatures'][number], fallback = '') => {
+  const cell = (label: string, signer?: PdfReport['signatures'][number]) => {
     if (signer) used.add(signer.id);
-    return `<div class="evs-signer"><div>${escape(label)}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || fallback)}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;
+    return `<div class="evs-signer"><div>${escape(label)}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || '')}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;
   };
   const signer = (role: string) => report.signatures.find((s) => s.role === role);
   const main =
     cell(labels[0]!, signer('INSPECTOR')) +
     cell(labels[1]!, signer('TECHNICAL_RESPONSIBLE') || signer('REVIEWER')) +
-    cell(labels[2]!, signer('CLIENT'), String(data.client || ''));
+    cell(labels[2]!, signer('CLIENT'));
   let html = `<div class="evs-signoff"><div class="evs-result">${[
     ['APPROVED', 'APROVADO'],
     ['REJECTED', 'REPROVADO'],

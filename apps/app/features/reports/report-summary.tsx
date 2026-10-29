@@ -156,6 +156,19 @@ export function ReportSummary({ report }: { report: Report }) {
             icon="layers"
           />
           <DrawingPreview data={drawing.data} points={report.points ?? []} images={images} />
+          {!!drawing.data.notesDrawing?.elements.length && (
+            <>
+              <Text style={styles.label}>Observações</Text>
+              <DrawingPreview
+                data={{
+                  ...drawing.data,
+                  grid: 'none',
+                  elements: drawing.data.notesDrawing.elements,
+                }}
+                points={[]}
+              />
+            </>
+          )}
           {!!drawing.data.notes && <Text style={styles.text}>{drawing.data.notes}</Text>}
         </Card>
       ))}

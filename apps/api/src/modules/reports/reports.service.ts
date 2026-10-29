@@ -41,6 +41,7 @@ export const reportInclude = {
       reportPointId: true,
       sectionKey: true,
       caption: true,
+      annotations: true,
       originalName: true,
       clientUploadId: true,
       mimeType: true,

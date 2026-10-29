@@ -19,6 +19,7 @@ import { useTheme } from '../../utils/theme';
 import { inputScrollOffset } from '../../utils/input-scroll';
 
 interface WorkspaceProps {
+  closeLabel?: string;
   imageAction?: ReactNode;
   title: string;
   toolName: string;
@@ -195,7 +196,7 @@ function WorkspaceContent(props: WorkspaceProps) {
             </Text>
           </View>
           <Button
-            title="Concluir desenho"
+            title={props.closeLabel ?? 'Concluir desenho'}
             small
             icon="check"
             style={{ flexShrink: 1, maxWidth: '55%', minHeight: 44 }}

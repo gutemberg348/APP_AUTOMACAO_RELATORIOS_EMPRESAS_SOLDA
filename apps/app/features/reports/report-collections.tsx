@@ -1,3 +1,4 @@
+import type { CorrectionRequest } from './report-save-feedback';
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useState, useEffect, useRef } from 'react';
@@ -98,6 +99,7 @@ export function ReportPoints({
   code,
   editable,
   errors,
+  correction,
   photoDraftKey,
   report,
   canUploadPhotos,
@@ -111,6 +113,7 @@ export function ReportPoints({
   code: string;
   editable: boolean;
   errors: FieldErrors<ReportFormValues>;
+  correction?: CorrectionRequest;
   photoDraftKey: string;
   report?: Report;
   canUploadPhotos: boolean;
@@ -166,6 +169,15 @@ export function ReportPoints({
     }, 160);
     return () => clearTimeout(timer);
   }, [expandedPoint, fields, reveal]);
+  useEffect(() => {
+    if (correction?.path[0] !== 'points') return;
+    const index = Number(correction.path[1]);
+    if (!Number.isInteger(index) || !fields[index]) return;
+    revealPending.current = true;
+    setExpandedPoint(index);
+    const timer = setTimeout(() => reveal(headers.current[fields[index]!._formKey]), 300);
+    return () => clearTimeout(timer);
+  }, [correction, fields, reveal]);
   const photoCount = (key: string) =>
     (report?.media ?? []).filter(
       (photo) => photo.reportPointId === key && !draft.removedIds.includes(photo.id),
@@ -215,6 +227,9 @@ export function ReportPoints({
       ...draft,
       photos: draft.photos.filter((photo) => photo.pointKey !== removingKey),
       removedIds: [...new Set([...draft.removedIds, ...mediaIds])],
+      annotationEdits: Object.fromEntries(
+        Object.entries(draft.annotationEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
+      ),
       captionEdits: Object.fromEntries(
         Object.entries(draft.captionEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
       ),
@@ -370,19 +385,25 @@ export function ReportPoints({
             </Pressable>
             {open && (
               <View style={{ padding: 18, paddingTop: 4, gap: 16 }}>
+                {correction?.path[0] === 'points' && Number(correction.path[1]) === index && (
+                  <Notice
+                    error={new Error(correction.label + ': ' + correction.message)}
+                    guidance={correction.guidance}
+                  />
+                )}
                 <FormGrid>
                   <FormCell>
                     <Controller
                       control={control}
                       name={`points.${index}.number`}
-                      render={({ field }) => (
+                      render={({ field, fieldState }) => (
                         <Field
+                          error={fieldState.error?.message}
                           label="Número do ponto / solda"
                           value={field.value}
                           onChangeText={field.onChange}
                           editable={editable}
                           maxLength={100}
-                          error={errors.points?.[index]?.number?.message}
                         />
                       )}
                     />
@@ -391,8 +412,9 @@ export function ReportPoints({
                     <Controller
                       control={control}
                       name={`points.${index}.label`}
-                      render={({ field }) => (
+                      render={({ field, fieldState }) => (
                         <Field
+                          error={fieldState.error?.message}
                           label={measurement ? 'Lado / parte do equipamento' : 'Identificação'}
                           value={field.value ?? ''}
                           onChangeText={field.onChange}
@@ -407,12 +429,12 @@ export function ReportPoints({
                       <Controller
                         control={control}
                         name={`points.${index}.value`}
-                        render={({ field }) => (
+                        render={({ field, fieldState }) => (
                           <MeasurementInput
+                            error={fieldState.error?.message}
                             value={field.value}
                             onChange={field.onChange}
                             editable={editable}
-                            error={errors.points?.[index]?.value?.message}
                           />
                         )}
                       />
@@ -420,8 +442,9 @@ export function ReportPoints({
                       <Controller
                         control={control}
                         name={`points.${index}.data.dimension`}
-                        render={({ field }) => (
+                        render={({ field, fieldState }) => (
                           <Field
+                            error={fieldState.error?.message}
                             label="Dimensão"
                             value={field.value ?? ''}
                             onChangeText={field.onChange}
@@ -436,8 +459,9 @@ export function ReportPoints({
                     <Controller
                       control={control}
                       name={`points.${index}.data.discontinuity`}
-                      render={({ field }) => (
+                      render={({ field, fieldState }) => (
                         <Field
+                          error={fieldState.error?.message}
                           label="Descontinuidade"
                           value={field.value ?? ''}
                           onChangeText={field.onChange}
@@ -451,8 +475,9 @@ export function ReportPoints({
                     <Controller
                       control={control}
                       name={`points.${index}.data.acceptable`}
-                      render={({ field }) => (
+                      render={({ field, fieldState }) => (
                         <SelectField
+                          error={fieldState.error?.message}
                           label="Aceitável"
                           value={field.value === undefined ? '' : String(field.value)}
                           options={acceptableOptions}
@@ -495,8 +520,9 @@ export function ReportPoints({
                           <Controller
                             control={control}
                             name={`points.${index}.unit`}
-                            render={({ field }) => (
+                            render={({ field, fieldState }) => (
                               <Field
+                                error={fieldState.error?.message}
                                 label="Unidade"
                                 value={field.value ?? ''}
                                 onChangeText={field.onChange}
@@ -509,8 +535,9 @@ export function ReportPoints({
                           <Controller
                             control={control}
                             name={`points.${index}.data.projectThickness`}
-                            render={({ field }) => (
+                            render={({ field, fieldState }) => (
                               <Field
+                                error={fieldState.error?.message}
                                 label="Espessura de projeto"
                                 value={field.value ?? ''}
                                 onChangeText={field.onChange}
@@ -525,8 +552,9 @@ export function ReportPoints({
                       <Controller
                         control={control}
                         name={`points.${index}.data.notes`}
-                        render={({ field }) => (
+                        render={({ field, fieldState }) => (
                           <Field
+                            error={fieldState.error?.message}
                             label="Observações do ponto"
                             value={field.value ?? ''}
                             onChangeText={field.onChange}
@@ -694,6 +722,7 @@ export function ReportSigners({
   control,
   editable,
   errors,
+  correction,
   previousSignatures = [],
   reportDate,
   setValue,
@@ -701,6 +730,7 @@ export function ReportSigners({
   control: Control<ReportFormValues>;
   editable: boolean;
   errors: FieldErrors<ReportFormValues>;
+  correction?: CorrectionRequest;
   previousSignatures?: ReportSigner[];
   reportDate: string;
   setValue: UseFormSetValue<ReportFormValues>;
@@ -717,6 +747,12 @@ export function ReportSigners({
   const [revealIndex, setRevealIndex] = useState<number | null>(null);
   const registrationView = useRef<ViewInstance>(null);
   const revealSigner = usePageScroll();
+  useEffect(() => {
+    if (correction?.path[0] !== 'signatures') return;
+    const index = Number(correction.path[1]);
+    const timer = setTimeout(() => revealSigner(signerViews.current[index]), 300);
+    return () => clearTimeout(timer);
+  }, [correction, revealSigner]);
   useEffect(() => {
     if (registering === null) return;
     const timer = setTimeout(() => revealSigner?.(registrationView.current), 160);
@@ -963,6 +999,7 @@ export function ReportSigners({
                       value={field.value ?? ''}
                       onChangeText={field.onChange}
                       editable={editable}
+                      error={errors.signatures?.[index]?.registrationNumber?.message}
                     />
                   )}
                 />

@@ -1,0 +1,140 @@
+import type { ReportSection } from './report-fields';
+import type { ValidationIssue } from '../../utils/form-feedback';
+
+export interface ReportCorrection {
+  path: string[];
+  label: string;
+  message: string;
+  guidance: string;
+}
+export interface CorrectionRequest extends ReportCorrection {
+  request: number;
+}
+const labels: Record<string, string> = {
+  number: 'Número',
+  title: 'Título',
+  reportDate: 'Data do relatório',
+  name: 'Nome',
+  value: 'Leitura',
+  unit: 'Unidade',
+  dimension: 'Dimensão',
+  signedAt: 'Data da assinatura',
+  label: 'Identificação',
+  discontinuity: 'Descontinuidade',
+  acceptable: 'Aceitável',
+  registrationNumber: 'Registro profissional',
+  signatureAssetId: 'Assinatura',
+  role: 'Função',
+  notes: 'Observações',
+  projectThickness: 'Espessura de projeto',
+  points: 'Pontos',
+  drawings: 'Desenhos',
+  signatures: 'Responsáveis',
+  elements: 'Elementos do desenho',
+  notesDrawing: 'Folha de observações',
+  color: 'Cor',
+  strokeColor: 'Cor do traço',
+  strokeWidth: 'Espessura do traço',
+  fontSize: 'Tamanho do texto',
+  text: 'Texto',
+  revision: 'Revisão',
+};
+
+export function reportCorrections(
+  issues: ValidationIssue[],
+  sections: ReportSection[],
+  points: { number: string }[],
+  specificData = false,
+): ReportCorrection[] {
+  const fields = sections.flatMap((s) => s.fields);
+  return issues.map((issue) => {
+    const path = issue.path.map(String);
+    if (
+      path[0] !== 'specificData' &&
+      (specificData || fields.some((f) => f.path === path.join('.')))
+    )
+      path.unshift('specificData');
+    const technical = fields.find((f) => 'specificData.' + f.path === path.join('.'));
+    const key = path.at(-1) ?? '';
+    const date = key === 'reportDate' || key === 'signedAt' || technical?.kind === 'date';
+    const prefix = /^\d+$/.test(path[1] ?? '')
+      ? path[0] === 'points'
+        ? `Ponto ${points[Number(path[1])]?.number || Number(path[1]) + 1} · `
+        : path[0] === 'signatures'
+          ? `Responsável ${Number(path[1]) + 1} · `
+          : path[0] === 'drawings'
+            ? `Desenho ${Number(path[1]) + 1} · `
+            : ''
+      : '';
+    const section = technical ? sections.find((s) => s.fields.includes(technical)) : undefined;
+    const label =
+      prefix + (technical?.label ?? labels[key] ?? labels[path[0] ?? ''] ?? 'Dados do relatório');
+    const message = date ? 'Informe uma data válida em DD/MM/AAAA.' : issue.message;
+    const guidance = date
+      ? 'Digite dia, mês e ano, por exemplo 29/10/2026. Confira se a data existe.'
+      : key === 'number'
+        ? path[0] === 'points'
+          ? 'Preencha o número deste ponto. Cada ponto deve ter um número diferente no relatório.'
+          : 'Abra Identificação e informe o número usado para identificar este relatório, por exemplo 001.'
+        : path[0] === 'drawings'
+          ? 'Abra este desenho e ajuste o item indicado nas propriedades. Depois conclua o desenho e salve o relatório.'
+          : key === 'value'
+            ? 'Informe apenas uma leitura numérica válida, por exemplo 2,5. A unidade fica no campo Unidade.'
+            : key === 'acceptable'
+              ? 'Escolha Sim, Não ou Não informado na opção Aceitável do ponto.'
+              : issue.code === 'too_big'
+                ? 'Reduza o conteúdo ou a quantidade de itens até o limite informado acima.'
+                : issue.code === 'invalid_value'
+                  ? 'Selecione uma das opções disponíveis neste campo.'
+                  : path[0] === 'signatures'
+                    ? 'Confira os dados deste responsável. Se a assinatura não estiver disponível, selecione a pessoa ou envie a assinatura novamente.'
+                    : `Revise o campo ${technical?.label ?? labels[key] ?? 'indicado'}${section ? ' em ' + section.title : ''} e salve novamente.`;
+    return { path, label, message, guidance };
+  });
+}
+
+// Business errors do not always carry Zod paths. Only route codes with a known location.
+export function reportBusinessCorrection(
+  code: string,
+  message: string,
+): ReportCorrection | undefined {
+  const cases: Record<string, [string, string, string]> = {
+    INVALID_POINT: [
+      'points',
+      'Pontos do relatório',
+      'Confira os pontos repetidos e seus números. Remova a cópia indevida e salve novamente.',
+    ],
+    AMBIGUOUS_POINT_NUMBER: [
+      'points',
+      'Número dos pontos',
+      'Use um número diferente para cada ponto marcado no desenho.',
+    ],
+    POINT_HAS_PHOTOS: [
+      'points',
+      'Fotos do ponto removido',
+      'Remova ou transfira as fotos do ponto antes de excluí-lo.',
+    ],
+    POINT_IN_DRAWING: [
+      'drawings',
+      'Marcação do ponto no desenho',
+      'Remova a marcação correspondente no desenho antes de excluir o ponto.',
+    ],
+    INVALID_DRAWING: [
+      'drawings',
+      'Desenhos do relatório',
+      'Confira se o desenho foi duplicado ou removido. Preserve suas edições antes de reabrir o relatório.',
+    ],
+    INVALID_DRAWING_POINT: [
+      'drawings',
+      'Ponto no desenho',
+      'Confira os pontos marcados. Remova a marcação sem vínculo e posicione novamente um ponto cadastrado neste relatório.',
+    ],
+    INVALID_SIGNATURE: [
+      'signatures',
+      'Assinatura do responsável',
+      'Selecione a pessoa ou envie a assinatura novamente em Responsáveis.',
+    ],
+  };
+  const entry = cases[code];
+  return entry ? { path: [entry[0]], label: entry[1], message, guidance: entry[2] } : undefined;
+}

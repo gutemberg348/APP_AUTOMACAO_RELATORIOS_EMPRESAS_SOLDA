@@ -74,6 +74,7 @@ export interface Report {
 export type ReportPoint = z.infer<typeof pointInputSchema>;
 export type ReportSigner = z.infer<typeof reportSignerSchema>;
 export interface ReportMedia {
+  annotations?: import('../photo-annotations').PhotoAnnotations | null;
   clientUploadId?: string | null;
   id: string;
   reportPointId: string | null;

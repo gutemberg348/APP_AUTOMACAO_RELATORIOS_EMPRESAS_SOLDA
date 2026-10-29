@@ -2,7 +2,9 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { Prisma } from '../../generated/prisma/client';
 import { prisma } from '../../prisma/client';
 import { env } from '../../config/env';
 import { AppError } from '../../errors/app-error';
@@ -12,9 +14,10 @@ import { LocalStorageProvider } from '../../services/storage/local-storage-provi
 import { assertEditable } from './reports.policy';
 import { reportScope } from '../../middlewares/access-scope';
 import { assertPhotoPoint, lockPhotoHash } from './reports.media-duplicates';
+import { photoAnnotationsSchema } from '@weldcosta/shared';
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 6 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 7, fieldSize: 4 * 1024 * 1024 },
 });
 const storage = new LocalStorageProvider(env.STORAGE_PATH);
 const metadata = z
@@ -24,6 +27,18 @@ const metadata = z
     sectionKey: z.enum(['photos', 'drawing']).default('photos'),
     reportPointId: z.uuid().optional(),
     clientUploadId: z.string().min(1).max(100).optional(),
+    annotations: z
+      .string()
+      .transform((value, ctx) => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          ctx.addIssue({ code: 'custom', message: 'Marcações da foto inválidas.' });
+          return z.NEVER;
+        }
+      })
+      .pipe(photoAnnotationsSchema)
+      .optional(),
   })
   .strict();
 async function prepareImage(file: Express.Multer.File | undefined) {
@@ -119,6 +134,40 @@ reportMediaRoutes.post(
                 'UPLOAD_CONFLICT',
                 'Esta seleção de foto mudou. Remova a foto pendente e selecione novamente.',
               );
+            // A retry may contain newer paint edits after an earlier upload
+            // reached the server but its response was lost.
+            if (
+              (input.annotations !== undefined &&
+                !isDeepStrictEqual(previous.annotations, input.annotations)) ||
+              (input.caption !== undefined && previous.caption !== input.caption)
+            ) {
+              const changed = await tx.report.updateMany({
+                where: { id: reportId, version: input.version, status: report.status },
+                data: { version: { increment: 1 } },
+              });
+              if (changed.count !== 1)
+                throw new AppError(
+                  409,
+                  'VERSION_CONFLICT',
+                  'O relatório foi alterado. Atualize a tela.',
+                );
+              await tx.reportMedia.update({
+                where: { id: previous.id },
+                data: {
+                  ...(input.annotations !== undefined ? { annotations: input.annotations } : {}),
+                  ...(input.caption !== undefined ? { caption: input.caption } : {}),
+                },
+              });
+              await tx.auditLog.create({
+                data: {
+                  userId: req.user!.id,
+                  action: 'UPDATE_MEDIA',
+                  entity: 'Report',
+                  entityId: reportId,
+                  metadata: { mediaId: previous.id },
+                },
+              });
+            }
             return { id: previous.id, reused: true };
           }
         }
@@ -135,6 +184,7 @@ reportMediaRoutes.post(
             reportPointId: input.reportPointId,
             sectionKey: input.sectionKey,
             caption: input.caption,
+            ...(input.annotations ? { annotations: input.annotations } : {}),
             type: input.sectionKey === 'drawing' ? 'DRAWING' : 'IMAGE',
             originalName: req.file!.originalname,
             fileName,
@@ -218,6 +268,7 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       caption: z.string().max(2000),
       reportPointId: z.uuid().nullable(),
       sectionKey: z.enum(['photos', 'drawing']),
+      annotations: photoAnnotationsSchema.nullable().optional(),
     })
     .strict()
     .parse(req.body);
@@ -245,6 +296,9 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       where: { id: mediaId },
       data: {
         caption: input.caption,
+        ...(input.annotations !== undefined
+          ? { annotations: input.annotations ?? Prisma.JsonNull }
+          : {}),
         sectionKey: input.sectionKey,
         type: input.sectionKey === 'drawing' ? 'DRAWING' : 'IMAGE',
         reportPointId: targetPointId,

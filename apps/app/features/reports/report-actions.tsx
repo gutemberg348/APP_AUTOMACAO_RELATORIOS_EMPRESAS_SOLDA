@@ -27,6 +27,7 @@ export interface ReportActionControls {
   busy?: boolean;
   creating?: boolean;
   onBusyChange?(busy: boolean): void;
+  onError?(error: unknown): void;
 }
 type Action = 'save' | 'download' | 'share' | 'send' | 'approve' | 'reopen';
 type Pending = { action: Action; report: Report; warnings: string[] };
@@ -37,6 +38,7 @@ export function ReportActions({
   busy = false,
   creating = false,
   onBusyChange,
+  onError,
 }: ReportActionControls) {
   const { tokens: t, styles } = useTheme();
   const user = useAuth((state) => state.session!.user),
@@ -69,6 +71,7 @@ export function ReportActions({
     onMutate: () => onBusyChange?.(true),
     onSettled: () => onBusyChange?.(false),
     onError: (error) => {
+      onError?.(error);
       setPending(undefined);
       if (error instanceof ApiError && error.status === 409 && report) {
         void client.invalidateQueries({ queryKey: ['report', report.id] });
@@ -89,10 +92,11 @@ export function ReportActions({
         if (
           draft.photos.length ||
           draft.removedIds.length ||
-          Object.keys(draft.captionEdits ?? {}).length
+          Object.keys(draft.captionEdits ?? {}).length ||
+          Object.keys(draft.annotationEdits ?? {}).length
         )
           warnings.push(
-            'Há fotos ou legendas aguardando envio. Elas continuam na fila para tentar novamente.',
+            'Há fotos, legendas ou marcações aguardando envio. Elas continuam na fila para tentar novamente.',
           );
         if (warnings.length) {
           setPending({ action, report: saved, warnings });
@@ -137,7 +141,9 @@ export function ReportActions({
       setPending(undefined);
       setMessage(
         action === 'save'
-          ? 'Relatório salvo.'
+          ? useReportPhotoDrafts.getState().reports[user.id + ':' + saved.id]?.error
+            ? 'Dados salvos. Confira o aviso das fotos pendentes antes de continuar.'
+            : 'Relatório salvo.'
           : action === 'send'
             ? 'Relatório enviado para análise.'
             : action === 'approve'
@@ -148,7 +154,8 @@ export function ReportActions({
                   ? 'PDF preparado para compartilhar. Se o navegador não oferecer compartilhamento, o arquivo é baixado.'
                   : 'PDF preparado com os dados registrados.',
       );
-      if (creating) router.replace('/reports/' + saved.id + '?etapa=conclusao');
+      if (creating && !useReportPhotoDrafts.getState().reports[user.id + ':' + saved.id]?.error)
+        router.replace('/reports/' + saved.id + '?etapa=conclusao');
     },
   });
   const queue = (action: Action, confirmed?: Report) => {

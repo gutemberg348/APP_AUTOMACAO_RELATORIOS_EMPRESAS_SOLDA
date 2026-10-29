@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
-import { drawingStrokeDash } from '@weldcosta/shared';
+import {
+  drawingStrokeDash,
+  drawingBrushes,
+  drawingBrush,
+  type DrawingBrush,
+} from '@weldcosta/shared';
 import { PickerSheet } from '../../components/picker-sheet';
 import { Button, Field, IconButton } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 
 export type StrokeAppearance = {
+  brush?: DrawingBrush;
   strokeWidth: number;
   strokeColor: string;
   strokeStyle: 'solid' | 'dotted' | 'dashed';
@@ -22,13 +28,55 @@ export const drawingStrokeColors = [
   ['Roxo', '#7C3AED'],
   ['Cinza', '#64748B'],
 ] as const;
+export function DrawingColorChoices({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange(color: string): void;
+}) {
+  const { tokens: t } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
+      {drawingStrokeColors.map(([name, color]) => (
+        <Pressable
+          key={color}
+          accessibilityRole="button"
+          accessibilityLabel={'Cor do texto ' + name.toLowerCase()}
+          accessibilityState={{ selected: value === color }}
+          onPress={() => onChange(color)}
+          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              backgroundColor: color,
+              borderWidth: 2,
+              borderColor: value === color ? t.colors.text : t.colors.line,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {value === color && <Text style={{ color: 'white' }}>✓</Text>}
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
 export function DrawingStrokePanel({
   visible,
   value,
   selected,
   onChange,
   onClose,
+  onBrush,
+  onEraser,
 }: {
+  onBrush?(brush: DrawingBrush, width: number): void;
+  onEraser?(): void;
   visible: boolean;
   value: StrokeAppearance;
   selected: boolean;
@@ -46,7 +94,7 @@ export function DrawingStrokePanel({
   return (
     <PickerSheet
       visible={visible}
-      title="Estilo da linha"
+      title={onBrush ? 'Pincéis, cores e espessura' : 'Estilo da linha'}
       icon="line"
       onClose={onClose}
       subtitle={
@@ -57,11 +105,47 @@ export function DrawingStrokePanel({
       footer={<Button title="Concluir estilo" icon="check" onPress={onClose} />}
     >
       <View style={{ gap: 16 }}>
+        {onBrush && (
+          <View style={{ gap: 8 }}>
+            <Text style={styles.label}>Escolha o pincel</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {drawingBrushes.map((brush) => (
+                <Pressable
+                  key={brush.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={'Pincel ' + brush.name.toLowerCase()}
+                  accessibilityState={{ selected: (value.brush ?? 'pen') === brush.id }}
+                  onPress={() => onBrush(brush.id, brush.width)}
+                  style={{
+                    width: 92,
+                    minHeight: 80,
+                    borderWidth: 1,
+                    borderColor: t.colors.line,
+                    borderRadius: 10,
+                    padding: 8,
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor:
+                      (value.brush ?? 'pen') === brush.id ? t.colors.blueSoft : t.colors.surface,
+                  }}
+                >
+                  <SvgXml
+                    width={64}
+                    height={28}
+                    xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 28"><path d="M6 20Q20 1 32 14T58 10" fill="none" stroke="${value.strokeColor}" stroke-width="${Math.min(14, brush.width)}" stroke-opacity="${brush.opacity}" stroke-linecap="${brush.cap}"/></svg>`}
+                  />
+                  <Text style={[styles.label, { fontSize: 11 }]}>{brush.name}</Text>
+                </Pressable>
+              ))}
+              {onEraser && <Button title="Borracha" icon="eraser" secondary onPress={onEraser} />}
+            </View>
+          </View>
+        )}
         <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 8 }}>
           <SvgXml
             width="100%"
             height={42}
-            xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 42"><line x1="15" y1="21" x2="285" y2="21" stroke="${value.strokeColor}" stroke-width="${value.strokeWidth}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`}
+            xml={`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 42"><line x1="15" y1="21" x2="285" y2="21" stroke="${value.strokeColor}" stroke-width="${value.strokeWidth}" stroke-opacity="${drawingBrush(value.brush).opacity}" stroke-linecap="${drawingBrush(value.brush).cap}"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`}
           />
         </View>
         <View
@@ -82,17 +166,17 @@ export function DrawingStrokePanel({
             <IconButton
               label="Aumentar espessura da linha"
               icon="plus"
-              disabled={value.strokeWidth >= 12}
+              disabled={value.strokeWidth >= 60}
               onPress={() =>
                 onChange({
-                  strokeWidth: Math.min(12, Math.round((value.strokeWidth + 0.5) * 10) / 10),
+                  strokeWidth: Math.min(60, Math.round((value.strokeWidth + 0.5) * 10) / 10),
                 })
               }
             />
           </View>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-          {[0.5, 1, 2, 3, 5, 8, 12].map((w) => (
+          {[0.5, 1, 2, 3, 5, 8, 12, 18, 30, 45, 60].map((w) => (
             <Button
               key={w}
               title={String(w)}

@@ -3,6 +3,8 @@ import { drawingSymbols, drawingSymbolDefinition } from './drawing-symbols';
 export { drawingSymbols, drawingSymbolDefinition, drawingSymbolPreview } from './drawing-symbols';
 import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
+import { freehandPath } from './drawing-sketch';
+import { drawingBrush } from './drawing-brushes';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
@@ -20,8 +22,9 @@ const elementMeta = {
   layer: z.number().int().min(-10000).max(10000).optional(),
 };
 const line = { x1: coord, y1: xy.y, x2: coord, y2: xy.y };
-const strokeWidth = z.number().finite().min(0.5).max(12).optional();
+const strokeWidth = z.number().finite().min(0.5).max(60).optional();
 const strokeAppearance = {
+  brush: z.enum(['pen', 'fountain', 'pencil', 'brush', 'marker']).optional(),
   strokeColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -59,9 +62,10 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       id,
       ...elementMeta,
       type: z.literal('polyline'),
+      freehand: z.boolean().optional(),
       strokeWidth,
       ...strokeAppearance,
-      points: z.array(z.object(xy).strict()).min(2).max(300),
+      points: z.array(z.object(xy).strict()).min(2).max(1200),
       hatch: z
         .object({
           spacing: z.number().finite().min(2).max(80),
@@ -99,6 +103,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       id,
       ...elementMeta,
       type: z.literal('text'),
+      color: strokeAppearance.strokeColor,
       text: z.string().min(1).max(300),
       ...xy,
       size: z.number().min(10).max(40).optional(),
@@ -138,6 +143,20 @@ export const drawingDataSchema = z
     revision: z.string().max(30).default('00'),
     grid: z.enum(['isometric', 'orthogonal', 'none']).default('isometric'),
     notes: z.string().max(2000).default(''),
+    notesDrawing: z
+      .object({
+        elements: z
+          .array(drawingElementSchema)
+          .max(600)
+          .refine(
+            (elements) =>
+              elements.every((e) => ['polyline', 'line', 'text'].includes(e.type)) &&
+              new Set(elements.map((e) => e.id)).size === elements.length,
+            'Use apenas traços, formas e textos sem identificações repetidas nas observações.',
+          ),
+      })
+      .strict()
+      .optional(),
     elements: z.array(drawingElementSchema).max(600),
   })
   .strict()
@@ -174,6 +193,13 @@ export const reportDrawingSchema = z
   .object({ id: z.uuid().optional(), data: drawingDataSchema })
   .strict();
 export type DrawingElement = z.infer<typeof drawingElementSchema>;
+export function drawingNotesSvg(data: DrawingData) {
+  const elements = data.notesDrawing?.elements;
+  if (!elements?.length) return '';
+  const b = drawingSelectionBounds(elements);
+  const viewBox = `${Math.max(0, b.x - 20)} ${Math.max(0, b.y - 20)} ${Math.max(100, b.width + 40)} ${Math.max(80, b.height + 40)}`;
+  return drawingSvg({ ...newDrawingData(), grid: 'none', elements }, [], { viewBox });
+}
 export function hasDrawingStroke(
   element: DrawingElement,
 ): element is Extract<DrawingElement, { type: 'line' | 'polyline' | 'symbol' | 'dimension' }> {
@@ -734,7 +760,8 @@ export function drawingSvg(
         ? drawingStrokeDash(e.strokeStyle, drawingStrokeWidth(e))
         : '';
     const dashAttribute = dash ? ` stroke-dasharray="${dash}"` : '';
-    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}`;
+    const brush = drawingBrush(hasDrawingStroke(e) ? e.brush : undefined);
+    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="${brush.cap}" stroke-linejoin="round"${brush.opacity < 1 ? ` stroke-opacity="${brush.opacity}"` : ''}${dashAttribute}`;
     if (e.type === 'image') {
       const uri = options.images?.[e.mediaKey];
       const transform = `transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
@@ -745,7 +772,9 @@ export function drawingSvg(
     if (e.type === 'line')
       body += `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${stroke}/>`;
     if (e.type === 'polyline')
-      body += `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${stroke}/>`;
+      body += e.freehand
+        ? `<path d="${freehandPath(e.points)}" ${stroke}/>`
+        : `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${stroke}/>`;
     if (e.type === 'polyline' && e.hatch)
       body += triangleHatchSegments(e.points, e.hatch.spacing, e.hatch.angle)
         .map(
@@ -770,7 +799,7 @@ export function drawingSvg(
         body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
     }
     if (e.type === 'text')
-      body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${selected ? '#1764C0' : '#285580'}">${e.text
+      body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${e.color ?? (selected ? '#1764C0' : '#285580')}">${e.text
         .split(/\r?\n/)
         .map(
           (line, i) =>
