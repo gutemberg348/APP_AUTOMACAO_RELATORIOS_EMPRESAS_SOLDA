@@ -6,6 +6,7 @@ import { render as th } from '../../src/modules/pdf/templates/reports/hydrostati
 import { render as me } from '../../src/modules/pdf/templates/reports/thickness';
 import { render as rdo } from '../../src/modules/pdf/templates/reports/rdo';
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
+import { reportForPdf } from '../../src/modules/pdf/pdf-snapshot';
 
 describe('Internal drawing observations', () => {
   it.each(Object.entries({ EVS: evs, EVD: evs, LP: lp, TH: th, ME: me, RDO: rdo }))(
@@ -52,7 +53,10 @@ describe('Internal drawing observations', () => {
         drawings: [{ data }],
       } as unknown as PdfReport;
       const before = structuredClone(report);
-      const html = render(report, new Map());
+      const printable = reportForPdf(report);
+      expect(printable.drawings[0]!.data).not.toHaveProperty('notes');
+      expect(printable.drawings[0]!.data).not.toHaveProperty('notesDrawing');
+      const html = render(printable, new Map());
       for (const secret of [
         'INTERNAL-TYPED-NOTE',
         'INTERNAL-HANDWRITTEN-TEXT',

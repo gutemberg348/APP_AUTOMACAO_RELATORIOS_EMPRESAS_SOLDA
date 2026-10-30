@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import request from 'supertest';
 import sharp from 'sharp';
+import { newDrawingData } from '@weldcosta/shared';
 import { app } from '../../src/app';
 import { prisma } from '../../src/prisma/client';
 import { PdfService } from '../../src/modules/pdf/pdf.service';
@@ -126,6 +127,19 @@ it('downloads a fresh PDF for an existing finalized report without replacing its
       reportTypeId: typeId,
       number: 'ME-OLD-01',
       points: [{ number: '1', type: 'MEASUREMENT', value: 4.7 }],
+      drawings: [
+        {
+          data: {
+            ...newDrawingData(),
+            notes: 'INTERNAL-ONLY-IN-APP',
+            notesDrawing: {
+              elements: [
+                { id: 'private', type: 'text', text: 'PRIVATE-HANDWRITING', x: 200, y: 200 },
+              ],
+            },
+          },
+        },
+      ],
     });
   expect(create.status, JSON.stringify(create.body)).toBe(201);
   const report = await prisma.report.update({
@@ -144,6 +158,12 @@ it('downloads a fresh PDF for an existing finalized report without replacing its
   expect(response.headers['cache-control']).toContain('no-store');
   expect(response.body.subarray(0, 5).toString()).toBe('%PDF-');
   expect(response.body.length).toBeGreaterThan(1000);
+  const afterDownload = await request(app).get(`/reports/${report.id}`).set(auth());
+  expect(afterDownload.status).toBe(200);
+  expect(afterDownload.body.data.drawings[0].data).toMatchObject({
+    notes: 'INTERNAL-ONLY-IN-APP',
+    notesDrawing: { elements: [{ text: 'PRIVATE-HANDWRITING' }] },
+  });
   expect(await storage.get(filePath)).toEqual(archivedBytes);
   expect(await prisma.reportPdf.findMany({ where: { reportId: report.id } })).toEqual([archive]);
   expect(await prisma.report.findUnique({ where: { id: report.id } })).toEqual(report);

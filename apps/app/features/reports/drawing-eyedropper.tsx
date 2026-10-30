@@ -7,7 +7,7 @@ import { PickerSheet } from '../../components/picker-sheet';
 import { Button } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 
-export const DrawingColorSource = createContext('');
+export const DrawingColorSource = createContext<(() => string) | null>(null);
 
 async function webPixel(source: string, x: number, y: number) {
   // Images referenced by an SVG loaded into a browser canvas must be embedded.
@@ -59,7 +59,8 @@ async function webPixel(source: string, x: number, y: number) {
 }
 
 export function DrawingEyedropper({ onChange }: { onChange(color: string): void }) {
-  const source = useContext(DrawingColorSource);
+  const getSource = useContext(DrawingColorSource);
+  const [source, setSource] = useState('');
   const { styles, tokens: t } = useTheme();
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false);
@@ -119,7 +120,7 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
       if (token === request.current) setBusy(false);
     }
   };
-  if (!source) return null;
+  if (!getSource) return null;
   return (
     <>
       <Pressable
@@ -136,6 +137,8 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
           backgroundColor: t.colors.soft,
         }}
         onPress={() => {
+          // Build the full SVG only when sampling is requested, not after every stroke.
+          setSource(getSource());
           setColor(undefined);
           setPoint(undefined);
           setError('');

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   html: vi.fn(),
   archivedPdf: vi.fn(),
+  save: vi.fn(),
 }));
 vi.mock('../../src/prisma/client', () => ({
   prisma: { report: { findFirst: mocks.snapshot }, reportPdf: { findFirst: mocks.archivedPdf } },
@@ -17,6 +18,7 @@ vi.mock('../../src/services/storage/local-storage-provider', () => ({
   LocalStorageProvider: class {
     exists = mocks.exists;
     get = mocks.get;
+    save = mocks.save;
   },
 }));
 vi.mock('puppeteer-core', () => ({
@@ -57,6 +59,74 @@ beforeEach(() => {
   mocks.exists.mockResolvedValue(true);
 });
 describe('PDF for incomplete reports and located errors', () => {
+  it.each(['preview', 'generate', 'download'])(
+    'does not print saved LP point dimensions during %s of an existing report',
+    async (operation) => {
+      const report = {
+        ...fixture('LP'),
+        status: operation === 'generate' ? 'APPROVED' : 'FINISHED',
+        points: [
+          {
+            id: 'old-point',
+            number: '3',
+            label: '3',
+            type: 'WELD',
+            data: { dimension: '2" LEGACY-DIMENSION', acceptable: true, discontinuity: '-' },
+          },
+        ],
+        specificData: { generalData: { thickness: '2,11 MM' } },
+      };
+      const before = structuredClone(report);
+      mocks.snapshot.mockResolvedValue(report);
+      mocks.archivedPdf.mockResolvedValue({ filePath: 'old-lp.pdf', version: 1 });
+      const service = new PdfService();
+      if (operation === 'generate')
+        await service.generate(report as unknown as Parameters<PdfService['generate']>[0], 'user');
+      else if (operation === 'preview') await service.preview(report.id);
+      else await service.download(report.id);
+      const html = mocks.html.mock.calls[0]?.[0];
+      expect(html).not.toContain('LEGACY-DIMENSION');
+      expect(html).not.toMatch(/DIMENS[ÃA]O/i);
+      expect(html).toContain('2,11 MM');
+      expect(html).toContain('SOLDA N');
+      expect(report).toEqual(before);
+    },
+  );
+  it.each(
+    ['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'].flatMap((code) =>
+      ['preview', 'generate', 'download'].map((operation) => [code, operation]),
+    ),
+  )(
+    'excludes internal notes before %s %s and preserves them in the app snapshot',
+    async (code, operation) => {
+      const report = {
+        ...fixture(code),
+        status: operation === 'generate' ? 'APPROVED' : 'FINISHED',
+        drawings: [
+          {
+            data: {
+              ...newDrawingData(),
+              notes: 'PRIVATE-TYPED-NOTE',
+              notesDrawing: { elements: [{ invalidInternalSketch: 'PRIVATE-HANDWRITTEN-NOTE' }] },
+            },
+          },
+        ],
+      };
+      const before = structuredClone(report);
+      mocks.snapshot.mockResolvedValue(report);
+      mocks.archivedPdf.mockResolvedValue({ filePath: 'legacy.pdf', version: 1 });
+      const service = new PdfService();
+      if (operation === 'generate')
+        await service.generate(report as unknown as Parameters<PdfService['generate']>[0], 'user');
+      else if (operation === 'preview') await service.preview(report.id);
+      else await service.download(report.id);
+      const html = mocks.html.mock.calls[0]?.[0];
+      expect(html).not.toContain('PRIVATE-TYPED-NOTE');
+      expect(html).not.toContain('PRIVATE-HANDWRITTEN-NOTE');
+      expect(html).not.toContain('drawing-notes');
+      expect(report).toEqual(before);
+    },
+  );
   it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
     'downloads an existing finalized %s through the current renderer, preserving its archive',
     async (code) => {

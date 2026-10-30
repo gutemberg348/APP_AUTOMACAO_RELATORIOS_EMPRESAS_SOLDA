@@ -9,6 +9,8 @@ import {
   drawingViewport,
   clampDrawingCrop,
   croppedDrawingImageSize,
+  drawingImageFrame,
+  moveElement,
 } from '@weldcosta/shared';
 
 const image = {
@@ -35,8 +37,9 @@ describe('drawing image crop and printed page', () => {
     const parsed = drawingDataSchema.parse(JSON.parse(JSON.stringify(data)));
     expect(parsed).toEqual(data);
     const svg = drawingSvg(parsed, [], { images: { photo: 'data:image/png;base64,AAAA' } });
-    expect(svg).toContain('viewBox="0.375 0.2 0.75 0.6"');
-    expect(svg).toContain('xMidYMid slice');
+    expect(svg).toContain('clip-path="url(#drawing-image-image)"');
+    expect(svg).toContain('transform="translate(500 400) rotate(0)"');
+    expect(svg.match(/<svg\s/g)).toHaveLength(1);
     expect(svg).toContain('drawing-portrait-page');
     expect(svg).toContain('data:image/png;base64,AAAA');
     expect(
@@ -45,6 +48,25 @@ describe('drawing image crop and printed page', () => {
         elements: [{ ...image, crop: { x: 0.8, y: 0, width: 0.5, height: 1 } }],
       }).success,
     ).toBe(false);
+  });
+  it('moves the cropped pixels and their frame together, preserving the source and crop', () => {
+    const cropped = {
+      ...image,
+      crop: { x: 0.25, y: 0.2, width: 0.5, height: 0.6 },
+      fit: 'cover' as const,
+    };
+    const moved = moveElement(cropped, 50, 60);
+    expect(moved).toMatchObject({ ...cropped, x: 550, y: 460 });
+    if (moved.type !== 'image') throw new Error('Expected image');
+    expect(drawingImageFrame(moved)).toEqual(drawingImageFrame(cropped));
+    const svg = drawingSvg({ ...newDrawingData(), elements: [moved] }, [], {
+      images: { photo: 'data:image/png;base64,AAAA' },
+      selectedId: moved.id,
+      selectionFrame: true,
+    });
+    expect(svg).toContain('translate(550 460) rotate(0)');
+    expect(svg).toContain('data-selection-frame="true"');
+    expect(drawingImageFrame(cropped)).toEqual({ x: -600, y: -400, width: 1200, height: 800 });
   });
   it('matches the print aspect and fits the same page on narrow and wide screens', () => {
     const data = { page: 'portrait' as const },

@@ -21,4 +21,14 @@
 
 ## Publicação
 
-Atualizar os containers na VPS para aplicar aos PDFs gerados pelo servidor. Os PDFs já baixados/finalizados permanecem como foram gerados: criar uma nova prévia para conferir o novo layout. Atualizar o app/Expo para receber os textos novos de orientação. Nenhuma migração de banco adicional nesta alteração.
+Atualizar os containers na VPS para aplicar aos PDFs gerados pelo servidor. O download dos relatórios finalizados também gera uma cópia pelo template atual; arquivos já baixados precisam ser baixados novamente. Nenhuma migração de banco adicional nesta alteração.
+
+## Reforço na geração e abertura de arquivos
+
+O serviço de PDF remove `notes` e `notesDrawing` de uma cópia do relatório antes de validar/renderizar qualquer template. A exclusão é comum à prévia, à geração final e ao download de finalizados; os campos originais continuam salvos para o app. Notas internas incompletas também deixam de bloquear a exportação do desenho principal.
+
+O app usa um caminho de cache exclusivo para cada PDF recebido. Reutilizar e sobrescrever a mesma URI podia permitir ao visualizador/compartilhamento reutilizar uma cópia anterior. Para receber essa mudança no APK instalado é necessário gerar e instalar outro APK; no Expo, recarregar o bundle atualizado.
+
+Validação do reforço: build shared/API, typecheck do app e lint passaram; 41 testes específicos cobrem os seis tipos e os três caminhos do serviço, a preservação das notas e arquivos novos no celular, inclusive downloads no mesmo milissegundo. O teste do visualizador usa mocks de sistema de arquivos/compartilhamento; não houve verificação em aparelho físico nem publicação na VPS.
+
+Dois testes de integração também passaram com banco isolado e Chromium real. O download de um relatório finalizado gerou outro PDF, preservou o arquivo histórico e manteve texto e desenho das observações disponíveis na consulta do relatório pelo app.

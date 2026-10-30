@@ -1,7 +1,7 @@
 import type { CorrectionRequest } from './report-save-feedback';
 import { DrawingColorSource } from './drawing-eyedropper';
 import { useTheme } from '../../utils/theme';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
   Vibration,
@@ -21,6 +21,8 @@ import { DrawingWorkspace } from './drawing-workspace';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
 import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
 import { DrawingLiveInk, type LiveInkHandle } from './drawing-live-ink';
+import { DrawingCanvas } from './drawing-canvas';
+import { createDrawingFrameQueue } from './drawing-frame-queue';
 import {
   drawingGroupMembers,
   drawingUnlocked,
@@ -137,9 +139,6 @@ type Tool =
   | 'dimension'
   | 'pan'
   | SketchTool;
-const DrawingScene = memo(function DrawingScene({ xml }: { xml: string }) {
-  return <SvgXml xml={xml} width="100%" height="100%" />;
-});
 const freehandDragThreshold = 0.35;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
 // Screen pixels: the same touch tolerance at any zoom level.
@@ -1238,6 +1237,7 @@ export function DrawingEditor({
       });
   };
   const resetGesture = () => {
+    moveQueue.clear();
     eraseGesture.current = undefined;
     setErasedPreview(undefined);
     setEraserCursor(undefined);
@@ -1283,6 +1283,17 @@ export function DrawingEditor({
     surface.current = node;
   }, []);
   const gestureCallbacks = useRef<PanResponderCallbacks>({});
+  const currentTool = useRef(tool);
+  currentTool.current = tool;
+  type MoveArgs = Parameters<NonNullable<PanResponderCallbacks['onPanResponderMove']>>;
+  const moveQueue = useMemo(
+    () =>
+      createDrawingFrameQueue<MoveArgs>((args) =>
+        gestureCallbacks.current.onPanResponderMove?.(...args),
+      ),
+    [],
+  );
+  useEffect(() => () => moveQueue.clear(), [moveQueue]);
   const eraseGesture = useRef<
     | { elements: DrawingElement[]; last: DrawingPosition; changed: boolean; radius: number }
     | undefined
@@ -1974,35 +1985,59 @@ export function DrawingEditor({
   const pan = useMemo(
     () =>
       PanResponder.create({
-        onPanResponderStart: (...args) => gestureCallbacks.current.onPanResponderStart?.(...args),
+        onPanResponderStart: (...args) => {
+          moveQueue.flush();
+          gestureCallbacks.current.onPanResponderStart?.(...args);
+        },
         onStartShouldSetPanResponder: (...args) =>
           gestureCallbacks.current.onStartShouldSetPanResponder?.(...args) ?? false,
         onMoveShouldSetPanResponder: (...args) =>
           gestureCallbacks.current.onMoveShouldSetPanResponder?.(...args) ?? false,
         onPanResponderTerminationRequest: (...args) =>
           gestureCallbacks.current.onPanResponderTerminationRequest?.(...args) ?? false,
-        onPanResponderGrant: (...args) => gestureCallbacks.current.onPanResponderGrant?.(...args),
-        onPanResponderMove: (...args) => gestureCallbacks.current.onPanResponderMove?.(...args),
-        onPanResponderRelease: (...args) =>
-          gestureCallbacks.current.onPanResponderRelease?.(...args),
-        onPanResponderTerminate: (...args) =>
-          gestureCallbacks.current.onPanResponderTerminate?.(...args),
+        onPanResponderGrant: (...args) => {
+          moveQueue.clear();
+          gestureCallbacks.current.onPanResponderGrant?.(...args);
+        },
+        onPanResponderMove: (event, state) => {
+          if (
+            currentTool.current === 'pencil' &&
+            !gesture.current?.original &&
+            event.nativeEvent.touches.length < 2 &&
+            !multiTouch.current
+          ) {
+            // Keep every freehand sample; its isolated ink layer already batches paints.
+            gestureCallbacks.current.onPanResponderMove?.(event, state);
+            return;
+          }
+          event.persist();
+          // PanResponder reuses gestureState: retain the position for this event.
+          moveQueue.push([event, { ...state }]);
+        },
+        onPanResponderRelease: (...args) => {
+          moveQueue.flush();
+          gestureCallbacks.current.onPanResponderRelease?.(...args);
+        },
+        onPanResponderTerminate: (...args) => {
+          moveQueue.clear();
+          gestureCallbacks.current.onPanResponderTerminate?.(...args);
+        },
       }),
-    [],
+    [moveQueue],
   );
   const zoom = (factor: number) =>
     setView((old) =>
       zoomDrawingAt(old, width, height, { x: width / 2, y: height / 2 }, 1 / factor),
     );
-  const colorSource = useMemo(
+  const colorSource = useCallback(
     () => (data ? drawingSvg(data, points, { images: resolvedImages }) : ''),
     [data, points, resolvedImages],
   );
   const preview = useMemo(() => {
-    if (!data) return '';
+    if (!data) return undefined;
+    const drafts = new Map(blockDraft?.map((element) => [element.id, element]));
     const elements = (erasedPreview ?? data.elements).map(
-      (e) =>
-        blockDraft?.find((d) => d.id === e.id) ?? (draftElement?.id === e.id ? draftElement : e),
+      (e) => drafts.get(e.id) ?? (draftElement?.id === e.id ? draftElement : e),
     );
     if (hatchCorners.length === 2)
       elements.push({
@@ -2043,24 +2078,27 @@ export function DrawingEditor({
         });
       }
     }
-    return drawingSvg({ ...data, elements }, points, {
-      anchor: start,
-      anchorRadius: (2.5 * viewport.w) / width,
-      endpointRadius: (3 * viewport.w) / width,
-      snapGuide,
-      images: resolvedImages,
-      selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
-      selectionFrame: editingSelection && !traceEnd,
-      selectionOpacity,
-      constructionCorners: hatchCorners,
-      selectedIds: editingBlock ? blockIds : undefined,
-      resizeHandleRadius: editingBlock ? (3 * viewport.w) / width : undefined,
-      lasso: lassoPath,
-      rotationControl: rotationHandle
-        ? { ...rotationHandle, radius: (11 * viewport.w) / width }
-        : undefined,
-      viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
-    });
+    return {
+      data: { ...data, elements },
+      options: {
+        anchor: start,
+        anchorRadius: (2.5 * viewport.w) / width,
+        endpointRadius: (3 * viewport.w) / width,
+        snapGuide,
+        images: resolvedImages,
+        selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
+        selectionFrame: editingSelection && !traceEnd,
+        selectionOpacity,
+        constructionCorners: hatchCorners,
+        selectedIds: editingBlock ? blockIds : undefined,
+        resizeHandleRadius: editingBlock ? (3 * viewport.w) / width : undefined,
+        lasso: lassoPath,
+        rotationControl: rotationHandle
+          ? { ...rotationHandle, radius: (11 * viewport.w) / width }
+          : undefined,
+        viewBox: `${viewport.x} ${viewport.y} ${viewport.w} ${viewport.h}`,
+      },
+    };
   }, [
     erasedPreview,
     snapGuide,
@@ -2221,7 +2259,7 @@ export function DrawingEditor({
         pointerEvents="none"
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
       >
-        <DrawingScene xml={preview} />
+        {preview && <DrawingCanvas data={preview.data} points={points} options={preview.options} />}
       </View>
       <View
         ref={setSurface}

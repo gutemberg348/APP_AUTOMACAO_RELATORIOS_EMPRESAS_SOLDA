@@ -47,7 +47,11 @@ it('keeps grouped weld numbers on one point and preserves photos when editing th
         removalTechnique: 'AGUA',
       },
       points: [
-        { number: '01 - 02 - 03', type: 'WELD', data: { acceptable: true, discontinuity: '-' } },
+        {
+          number: '01 - 02 - 03',
+          type: 'WELD',
+          data: { dimension: '2"', acceptable: true, discontinuity: '-' },
+        },
         { number: '09 - 10 - 11', type: 'WELD', data: { acceptable: true } },
       ],
     });
@@ -101,7 +105,14 @@ it('keeps grouped weld numbers on one point and preserves photos when editing th
   expect(update.body.data.points[0].number).toBe('01 - 02 - 03 - 04');
   expect(update.body.data.media[0].reportPointId).toBe(firstId);
   expect(update.body.data.specificData.removalTechnique).toBe('SOLVENTE');
+  expect(update.body.data.points[0].data.dimension).toBe('2"');
   expect((await new PdfService().preview(saved.id)).subarray(0, 5).toString()).toBe('%PDF-');
+  const reloaded = await request(app)
+    .get('/reports/' + saved.id)
+    .set(auth());
+  expect(reloaded.body.data.points[0].id).toBe(firstId);
+  expect(reloaded.body.data.points[0].data.dimension).toBe('2"');
+  expect(reloaded.body.data.media).toHaveLength(1);
 }, 90000);
 
 it('persists full-page image crops with marks in every model without changing the original media', async () => {

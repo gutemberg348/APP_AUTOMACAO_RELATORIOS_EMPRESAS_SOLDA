@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   drawingDataSchema,
   drawingSvg,
+  drawingImageFrame,
   newDrawingData,
   hitElement,
   transformDrawingElement,
@@ -41,7 +42,8 @@ describe('Images embedded in technical drawings', () => {
     const svg = drawingSvg(data, [{ id: 'weld-1', number: '01' }], {
       images: { 'drawing-image-upload': 'data:image/png;base64,AA==' },
     });
-    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(drawingImageFrame(image)).toEqual({ x: -200, y: -100, width: 400, height: 200 });
+    expect(svg).toContain('translate(500 400) rotate(0)');
     expect(svg.indexOf('<image ')).toBeLessThan(svg.indexOf('<circle '));
     expect(hitElement([point, image], { x: 500, y: 400 })?.id).toBe('point');
     expect(hitElement([image], { x: 330, y: 320 })?.id).toBe('image');

@@ -7,6 +7,20 @@ export interface DrawingCrop {
   height: number;
 }
 export const fullDrawingCrop: DrawingCrop = { x: 0, y: 0, width: 1, height: 1 };
+
+/** Image geometry in local frame coordinates. Move/rotate the whole frame as one group. */
+export function drawingImageFrame(image: Extract<DrawingElement, { type: 'image' }>) {
+  const aspect = image.sourceAspectRatio ?? image.width / image.height;
+  const crop = image.crop ?? fullDrawingCrop;
+  const fit = image.fit === 'cover' ? Math.max : Math.min;
+  const scale = fit(image.width / (crop.width * aspect), image.height / crop.height);
+  return {
+    x: -image.width / 2 + (image.width - crop.width * aspect * scale) / 2 - crop.x * aspect * scale,
+    y: -image.height / 2 + (image.height - crop.height * scale) / 2 - crop.y * scale,
+    width: aspect * scale,
+    height: scale,
+  };
+}
 export function drawingPageBounds(data?: Pick<DrawingData, 'page'>) {
   const width = data?.page === 'portrait' ? (800 * 196) / 239 : 1000;
   return { x: (1000 - width) / 2, y: 0, width, height: 800 };

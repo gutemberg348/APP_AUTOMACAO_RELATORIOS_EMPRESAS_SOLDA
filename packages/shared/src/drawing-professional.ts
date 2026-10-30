@@ -33,24 +33,43 @@ export function drawingLayerChange(elements: DrawingElement[], ids: string[], fr
     layer,
   }));
 }
+// Elements are immutable editor snapshots: unchanged geometry can reuse its targets.
+const snapTargets = new WeakMap<DrawingElement, DrawingPosition[]>();
 export function drawingSnap(p: DrawingPosition, elements: DrawingElement[], tolerance: number) {
-  const targets = elements.flatMap((e) => {
-    const bounds = drawingSelectionBounds([e]);
-    return [...drawingElementFootprint(e), bounds.center];
-  });
-  const closest = targets
-    .filter((t) => Math.hypot(t.x - p.x, t.y - p.y) <= tolerance)
-    .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
-  const vertical =
-    closest ??
-    targets
-      .filter((t) => Math.abs(t.x - p.x) <= tolerance)
-      .sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
-  const horizontal =
-    closest ??
-    targets
-      .filter((t) => Math.abs(t.y - p.y) <= tolerance)
-      .sort((a, b) => Math.abs(a.y - p.y) - Math.abs(b.y - p.y))[0];
+  let closest: DrawingPosition | undefined,
+    vertical: DrawingPosition | undefined,
+    horizontal: DrawingPosition | undefined;
+  let distance = Infinity,
+    xDistance = Infinity,
+    yDistance = Infinity;
+  for (const element of elements) {
+    let targets = snapTargets.get(element);
+    if (!targets) {
+      targets = [...drawingElementFootprint(element), drawingSelectionBounds([element]).center];
+      snapTargets.set(element, targets);
+    }
+    for (const target of targets) {
+      const dx = Math.abs(target.x - p.x),
+        dy = Math.abs(target.y - p.y);
+      if (dx <= tolerance && dx < xDistance) {
+        vertical = target;
+        xDistance = dx;
+      }
+      if (dy <= tolerance && dy < yDistance) {
+        horizontal = target;
+        yDistance = dy;
+      }
+      if (dx <= tolerance && dy <= tolerance) {
+        const d = dx * dx + dy * dy;
+        if (d <= tolerance * tolerance && d < distance) {
+          closest = target;
+          distance = d;
+        }
+      }
+    }
+  }
+  vertical = closest ?? vertical;
+  horizontal = closest ?? horizontal;
   return {
     position: { x: vertical?.x ?? p.x, y: horizontal?.y ?? p.y },
     x: vertical?.x,

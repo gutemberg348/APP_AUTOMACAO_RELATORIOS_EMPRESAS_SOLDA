@@ -9,6 +9,7 @@ import {
   drawingSnap,
   drawingPreciseTransform,
   drawingSelectionBounds,
+  drawingElementFootprint,
   hitElement,
   selectDrawingLasso,
   transformDrawingSelection,
@@ -27,6 +28,65 @@ const image: DrawingElement = {
   rotation: 0,
 };
 describe('Professional drawing editing', () => {
+  it('keeps nearest snap and tie behavior while reusing unchanged stroke geometry', () => {
+    const elements: DrawingElement[] = [
+      line,
+      image,
+      {
+        id: 'curve',
+        type: 'polyline',
+        freehand: true,
+        points: Array.from({ length: 1200 }, (_, i) => ({ x: i % 1000, y: (i * 37) % 800 })),
+      },
+    ];
+    const targets = elements.flatMap((e) => [
+      ...drawingElementFootprint(e),
+      drawingSelectionBounds([e]).center,
+    ]);
+    const reference = (p: { x: number; y: number }, tolerance: number) => {
+      const closest = targets
+        .filter((t) => Math.hypot(t.x - p.x, t.y - p.y) <= tolerance)
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      const vertical =
+        closest ??
+        targets
+          .filter((t) => Math.abs(t.x - p.x) <= tolerance)
+          .sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+      const horizontal =
+        closest ??
+        targets
+          .filter((t) => Math.abs(t.y - p.y) <= tolerance)
+          .sort((a, b) => Math.abs(a.y - p.y) - Math.abs(b.y - p.y))[0];
+      return {
+        position: { x: vertical?.x ?? p.x, y: horizontal?.y ?? p.y },
+        x: vertical?.x,
+        y: horizontal?.y,
+        anchor: closest,
+      };
+    };
+    for (let i = 0; i < 100; i++) {
+      const p = { x: (i * 79) % 1000, y: (i * 23) % 800 },
+        tolerance = i % 17;
+      expect(drawingSnap(p, elements, tolerance)).toEqual(reference(p, tolerance));
+    }
+    const edited = { ...line, x1: 120, x2: 200 } as DrawingElement;
+    expect(drawingSnap({ x: 121, y: 300 }, [edited], 5).position.x).toBe(120);
+  });
+  it('finds bounds for a whole dense drawing without exceeding the argument limit', () => {
+    const elements: DrawingElement[] = Array.from({ length: 600 }, (_, i) => ({
+      id: String(i),
+      type: 'polyline',
+      freehand: true,
+      points: Array.from({ length: 1200 }, (_, j) => ({ x: j % 1000, y: i })),
+    }));
+    expect(drawingSelectionBounds(elements)).toEqual({
+      x: 0,
+      y: 0,
+      width: 999,
+      height: 599,
+      center: { x: 499.5, y: 299.5 },
+    });
+  });
   it('centers asymmetric rotated shapes exactly and rejects a clamped scale during rotation', () => {
     const triangle: DrawingElement = {
       id: 'triangle',

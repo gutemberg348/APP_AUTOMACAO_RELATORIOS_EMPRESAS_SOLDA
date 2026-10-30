@@ -3,6 +3,7 @@ import { lpChoiceValue, validateSpecificData, reportUpdateSchema } from '@weldco
 import { render } from '../../src/modules/pdf/templates/reports/lp';
 import { render as renderTh } from '../../src/modules/pdf/templates/reports/hydrostatic';
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
+import { reportForPdf } from '../../src/modules/pdf/pdf-snapshot';
 import { nextLpWeldNumber, pointBatch } from '../../../app/features/reports/report-autofill';
 
 const report = {
@@ -50,6 +51,21 @@ const report = {
 } as unknown as PdfReport;
 
 describe('LP grouped welds and faithful form', () => {
+  it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
+    'filters legacy point dimensions only for LP when printing %s',
+    (code) => {
+      const saved = {
+        ...structuredClone(report),
+        reportType: { ...report.reportType, code },
+      } as PdfReport;
+      const before = structuredClone(saved);
+      const printable = reportForPdf(saved);
+      if (code === 'LP') expect(printable.points[0]!.data).not.toHaveProperty('dimension');
+      else expect(printable.points[0]!.data).toHaveProperty('dimension', 'OLD-DIMENSION');
+      expect(printable.specificData).toEqual(saved.specificData);
+      expect(saved).toEqual(before);
+    },
+  );
   it('saves groups as one inspection point and suggests the next weld after the group', () => {
     const points = pointBatch([], false, 1, false, '01 - 02 - 03');
     const body = reportUpdateSchema.parse({ version: 1, points });

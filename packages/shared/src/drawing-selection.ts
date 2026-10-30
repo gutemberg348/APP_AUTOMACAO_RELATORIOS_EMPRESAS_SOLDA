@@ -58,11 +58,19 @@ export function drawingElementFootprint(e: DrawingElement): DrawingPosition[] {
   ].map((p) => rotate(p, e, e.rotation ?? 0));
 }
 export function drawingSelectionBounds(elements: DrawingElement[]) {
-  const points = elements.flatMap(drawingElementFootprint);
-  const x = Math.min(...points.map((p) => p.x)),
-    y = Math.min(...points.map((p) => p.y));
-  const right = Math.max(...points.map((p) => p.x)),
-    bottom = Math.max(...points.map((p) => p.y));
+  // Avoid flattening the whole drawing or spreading thousands of stroke samples
+  // into Math.min/max (which can also exceed the native JS argument limit).
+  let x = Infinity,
+    y = Infinity,
+    right = -Infinity,
+    bottom = -Infinity;
+  for (const element of elements)
+    for (const point of drawingElementFootprint(element)) {
+      x = Math.min(x, point.x);
+      y = Math.min(y, point.y);
+      right = Math.max(right, point.x);
+      bottom = Math.max(bottom, point.y);
+    }
   return {
     x,
     y,

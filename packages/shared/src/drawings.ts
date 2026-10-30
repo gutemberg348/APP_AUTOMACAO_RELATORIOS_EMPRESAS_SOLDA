@@ -5,7 +5,7 @@ import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
 import { freehandPath } from './drawing-sketch';
 import { drawingBrush, drawingBrushLayers } from './drawing-brushes';
-import { drawingPageBounds, drawingPageViewBox } from './drawing-image-layout';
+import { drawingPageBounds, drawingPageViewBox, drawingImageFrame } from './drawing-image-layout';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
@@ -656,6 +656,9 @@ export function drawingSvg(
     selectedId?: string;
     viewBox?: string;
     showGrid?: boolean;
+    showBackground?: boolean;
+    renderElements?: boolean;
+    selectionControls?: boolean;
     selectionOpacity?: number;
     selectionFrame?: boolean;
     constructionCorners?: DrawingPosition[];
@@ -670,7 +673,8 @@ export function drawingSvg(
   } = {},
 ) {
   const grid = data.grid ?? 'isometric';
-  let body = '<rect width="1000" height="800" fill="#fff"/>';
+  let body =
+    options.showBackground === false ? '' : '<rect width="1000" height="800" fill="#fff"/>';
   if (options.showGrid !== false && grid !== 'none') {
     let d = '';
     if (grid === 'orthogonal') {
@@ -772,43 +776,86 @@ export function drawingSvg(
         corners.map((p, i) => `${i ? 'L' : 'M'}${num(p.x)} ${num(p.y)}`).join(' ') + 'Z';
       selectionOverlay = `<path data-selection-frame="true" d="${outline}" fill="#1764C0" fill-opacity="0.06" stroke="#1764C0" stroke-width="1.5" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
     }
-    const dash =
-      hasDrawingStroke(e) && e.strokeStyle
-        ? drawingStrokeDash(e.strokeStyle, drawingStrokeWidth(e))
-        : '';
-    const dashAttribute = dash ? ` stroke-dasharray="${dash}"` : '';
-    const brush = drawingBrush(hasDrawingStroke(e) ? e.brush : undefined);
-    const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="${brush.cap}" stroke-linejoin="round"${brush.opacity < 1 ? ` stroke-opacity="${brush.opacity}"` : ''}${dashAttribute}`;
-    if (e.type === 'image') {
-      const uri = options.images?.[e.mediaKey];
-      const transform = `transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
-      const aspect = e.sourceAspectRatio ?? e.width / e.height;
-      const crop = e.crop ?? { x: 0, y: 0, width: 1, height: 1 };
-      body += uri
-        ? e.crop || e.fit === 'cover'
-          ? `<g ${transform}><svg x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" viewBox="${crop.x * aspect} ${crop.y} ${crop.width * aspect} ${crop.height}" preserveAspectRatio="xMidYMid ${e.fit === 'cover' ? 'slice' : 'meet'}" overflow="hidden"><image x="0" y="0" width="${aspect}" height="1" preserveAspectRatio="none" href="${xml(uri)}"/></svg></g>`
-          : `<image x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} preserveAspectRatio="xMidYMid meet" href="${xml(uri)}"/>`
-        : `<rect x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
-    }
-    if (e.type === 'line' || e.type === 'polyline') {
-      for (const layer of drawingBrushLayers(e.brush, drawingStrokeWidth(e))) {
-        const ink = `stroke="${color}" stroke-width="${layer.width}" fill="none" stroke-linecap="${layer.cap}" stroke-linejoin="round"${layer.opacity < 1 ? ` stroke-opacity="${layer.opacity}"` : ''}${dashAttribute}`;
-        body +=
-          e.type === 'line'
-            ? `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${ink}/>`
-            : e.freehand
-              ? `<path d="${freehandPath(e.points)}" ${ink}/>`
-              : `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${ink}/>`;
+    if (options.renderElements !== false) {
+      const dash =
+        hasDrawingStroke(e) && e.strokeStyle
+          ? drawingStrokeDash(e.strokeStyle, drawingStrokeWidth(e))
+          : '';
+      const dashAttribute = dash ? ` stroke-dasharray="${dash}"` : '';
+      const brush = drawingBrush(hasDrawingStroke(e) ? e.brush : undefined);
+      const stroke = `stroke="${color}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="${brush.cap}" stroke-linejoin="round"${brush.opacity < 1 ? ` stroke-opacity="${brush.opacity}"` : ''}${dashAttribute}`;
+      if (e.type === 'image') {
+        const uri = options.images?.[e.mediaKey];
+        const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation})"`;
+        const frame = drawingImageFrame(e);
+        const clipId = `drawing-image-${e.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        body += uri
+          ? `<g ${transform}><defs><clipPath id="${clipId}"><rect x="${-e.width / 2}" y="${-e.height / 2}" width="${e.width}" height="${e.height}"/></clipPath></defs><g clip-path="url(#${clipId})"><image x="${frame.x}" y="${frame.y}" width="${frame.width}" height="${frame.height}" preserveAspectRatio="none" href="${xml(uri)}"/></g></g>`
+          : `<rect x="${-e.width / 2}" y="${-e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
+      }
+      if (e.type === 'line' || e.type === 'polyline') {
+        for (const layer of drawingBrushLayers(e.brush, drawingStrokeWidth(e))) {
+          const ink = `stroke="${color}" stroke-width="${layer.width}" fill="none" stroke-linecap="${layer.cap}" stroke-linejoin="round"${layer.opacity < 1 ? ` stroke-opacity="${layer.opacity}"` : ''}${dashAttribute}`;
+          body +=
+            e.type === 'line'
+              ? `<line x1="${e.x1}" y1="${e.y1}" x2="${e.x2}" y2="${e.y2}" ${ink}/>`
+              : e.freehand
+                ? `<path d="${freehandPath(e.points)}" ${ink}/>`
+                : `<polyline points="${e.points.map((p) => p.x + ',' + p.y).join(' ')}" ${ink}/>`;
+        }
+      }
+      if (e.type === 'polyline' && e.hatch)
+        body += triangleHatchSegments(e.points, e.hatch.spacing, e.hatch.angle)
+          .map(
+            ({ a, b }) =>
+              `<line x1="${num(a.x)}" y1="${num(a.y)}" x2="${num(b.x)}" y2="${num(b.y)}" stroke="${color}" stroke-width="${Math.max(0.5, drawingStrokeWidth(e) * 0.45)}"/>`,
+          )
+          .join('');
+      if (e.type === 'symbol') {
+        const definition = drawingSymbolDefinition(e.symbolCode);
+        const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})"`;
+        const symbolStroke = `stroke="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+        body += `<path d="${definition.path}" ${transform} ${symbolStroke}${e.strokeStyle ? dashAttribute : definition.dash ? ` stroke-dasharray="${definition.dash}"` : ''}/>`;
+        if (definition.accentPath)
+          body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
+      }
+      if (e.type === 'text')
+        body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${e.color ?? (selected ? '#1764C0' : '#285580')}">${e.text
+          .split(/\r?\n/)
+          .map(
+            (line, i) =>
+              `<tspan x="${e.x}" dy="${i ? (e.size ?? 20) * 1.25 : 0}">${esc(line)}</tspan>`,
+          )
+          .join('')}</text>`;
+      if (e.type === 'dimension') {
+        const len = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1,
+          nx = -(e.y2 - e.y1) / len,
+          ny = (e.x2 - e.x1) / len,
+          ox = nx * e.offset,
+          oy = ny * e.offset;
+        const a = { x: e.x1 + ox, y: e.y1 + oy },
+          b = { x: e.x2 + ox, y: e.y2 + oy };
+        body += `<path d="M${e.x1} ${e.y1}L${a.x + nx * 8} ${a.y + ny * 8} M${e.x2} ${e.y2}L${b.x + nx * 8} ${b.y + ny * 8} M${a.x} ${a.y}L${b.x} ${b.y} M${a.x - 6} ${a.y - 6}l12 12 M${b.x - 6} ${b.y - 6}l12 12" ${stroke}/>`;
+        body += `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}" text-anchor="middle" font-family="Arial" font-size="18" fill="${color}" stroke="white" stroke-width="4" paint-order="stroke">${esc(e.text)}</text>`;
+      }
+      if (e.type === 'point' || e.type === 'marker') {
+        const point =
+            e.type === 'point' ? points.find((p) => pointKey(p) === e.reportPointId) : undefined,
+          number = e.type === 'marker' ? e.number : point?.number || '?',
+          status = e.type === 'marker' ? e.acceptable : point?.data?.acceptable;
+        const { x, y, anchor } = drawingPointLabel(e, number);
+        const tone = selected
+          ? '#1764C0'
+          : status === false
+            ? '#AF302B'
+            : status === true
+              ? '#16725B'
+              : '#1764C0';
+        body += `<circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}"/><text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
       }
     }
-    if (e.type === 'polyline' && e.hatch)
-      body += triangleHatchSegments(e.points, e.hatch.spacing, e.hatch.angle)
-        .map(
-          ({ a, b }) =>
-            `<line x1="${num(a.x)}" y1="${num(a.y)}" x2="${num(b.x)}" y2="${num(b.y)}" stroke="${color}" stroke-width="${Math.max(0.5, drawingStrokeWidth(e) * 0.45)}"/>`,
-        )
-        .join('');
-    if (selected && e.type === 'polyline' && e.hatch)
+    if (selected && options.selectionFrame && !options.selectedIds?.length) body += '</g>';
+    if (options.selectionControls !== false && selected && e.type === 'polyline' && e.hatch)
       body += e.points
         .slice(0, 3)
         .map(
@@ -816,50 +863,12 @@ export function drawingSvg(
             `<circle cx="${p.x}" cy="${p.y}" r="4" fill="white" stroke="#1764C0" stroke-width="1.5"/>`,
         )
         .join('');
-    if (e.type === 'symbol') {
-      const definition = drawingSymbolDefinition(e.symbolCode);
-      const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})"`;
-      const symbolStroke = `stroke="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
-      body += `<path d="${definition.path}" ${transform} ${symbolStroke}${e.strokeStyle ? dashAttribute : definition.dash ? ` stroke-dasharray="${definition.dash}"` : ''}/>`;
-      if (definition.accentPath)
-        body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
-    }
-    if (e.type === 'text')
-      body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${e.color ?? (selected ? '#1764C0' : '#285580')}">${e.text
-        .split(/\r?\n/)
-        .map(
-          (line, i) =>
-            `<tspan x="${e.x}" dy="${i ? (e.size ?? 20) * 1.25 : 0}">${esc(line)}</tspan>`,
-        )
-        .join('')}</text>`;
-    if (e.type === 'dimension') {
-      const len = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) || 1,
-        nx = -(e.y2 - e.y1) / len,
-        ny = (e.x2 - e.x1) / len,
-        ox = nx * e.offset,
-        oy = ny * e.offset;
-      const a = { x: e.x1 + ox, y: e.y1 + oy },
-        b = { x: e.x2 + ox, y: e.y2 + oy };
-      body += `<path d="M${e.x1} ${e.y1}L${a.x + nx * 8} ${a.y + ny * 8} M${e.x2} ${e.y2}L${b.x + nx * 8} ${b.y + ny * 8} M${a.x} ${a.y}L${b.x} ${b.y} M${a.x - 6} ${a.y - 6}l12 12 M${b.x - 6} ${b.y - 6}l12 12" ${stroke}/>`;
-      body += `<text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 8}" text-anchor="middle" font-family="Arial" font-size="18" fill="${color}" stroke="white" stroke-width="4" paint-order="stroke">${esc(e.text)}</text>`;
-    }
-    if (e.type === 'point' || e.type === 'marker') {
-      const point =
-          e.type === 'point' ? points.find((p) => pointKey(p) === e.reportPointId) : undefined,
-        number = e.type === 'marker' ? e.number : point?.number || '?',
-        status = e.type === 'marker' ? e.acceptable : point?.data?.acceptable;
-      const { x, y, anchor } = drawingPointLabel(e, number);
-      const tone = selected
-        ? '#1764C0'
-        : status === false
-          ? '#AF302B'
-          : status === true
-            ? '#16725B'
-            : '#1764C0';
-      body += `<circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}"/><text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
-    }
-    if (selected && options.selectionFrame && !options.selectedIds?.length) body += '</g>';
-    if (selected && !options.selectedIds?.length && (e.type === 'line' || e.type === 'dimension'))
+    if (
+      options.selectionControls !== false &&
+      selected &&
+      !options.selectedIds?.length &&
+      (e.type === 'line' || e.type === 'dimension')
+    )
       for (const p of [
         { x: e.x1, y: e.y1 },
         { x: e.x2, y: e.y2 },

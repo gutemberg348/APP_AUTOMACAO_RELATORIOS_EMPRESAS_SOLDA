@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { apiBlob } from './api';
+let downloadSequence = 0;
 export async function downloadReportPdf(id: string, preview: boolean, share = false) {
   const blob = await apiBlob('/reports/' + id + '/pdf' + (preview ? '/preview' : ''));
   const name = `weldcosta-${id}${preview ? '-previa' : ''}.pdf`;
@@ -29,7 +30,9 @@ export async function downloadReportPdf(id: string, preview: boolean, share = fa
     reader.onerror = () => reject(new Error('Não foi possível preparar o PDF.'));
     reader.readAsDataURL(blob);
   });
-  const file = new File(Paths.cache, name);
+  // Preview/share applications can cache a document by URI even after overwriting it.
+  // Give each new response its own path so the viewer opens the new PDF bytes.
+  const file = new File(Paths.cache, `${Date.now()}-${++downloadSequence}-${name}`);
   file.create({ overwrite: true });
   file.write(Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0)));
   if (!(await Sharing.isAvailableAsync()))

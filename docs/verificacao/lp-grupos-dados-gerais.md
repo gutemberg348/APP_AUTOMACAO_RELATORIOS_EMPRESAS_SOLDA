@@ -21,7 +21,13 @@
 
 ## Publicação
 
-Atualizar API/web na VPS para aplicar o novo template e aceitar o campo de área; atualizar o APK ou recarregar o Expo para os novos campos, seletores e orientações. Não foi adicionada migração de banco nesta alteração de LP. PDFs já existentes não mudam: gere uma nova prévia.
+Atualizar API/web na VPS para aplicar o novo template e aceitar o campo de área; atualizar o APK ou recarregar o Expo para os novos campos, seletores e orientações. Não foi adicionada migração de banco nesta alteração de LP. Os mesmos relatórios salvos podem ser abertos e exportados novamente, inclusive finalizados. Arquivos já baixados precisam ser baixados de novo.
+
+### Dimensão em relatórios antigos
+
+Além da omissão no template, o serviço remove `point.data.dimension` da cópia destinada ao PDF apenas quando o tipo é LP. A regra vale para prévia, geração final e download de relatório existente, sem apagar dimensões do banco e sem modificar os demais tipos ou a espessura dos dados gerais do LP.
+
+Validação do reforço: build shared/API, lint, 52 testes unitários específicos e dois testes de integração passaram. A integração abriu/salvou o mesmo LP com dimensão antiga `2"`, preservou o ID dos pontos, a foto vinculada e os dados no banco e gerou o PDF. Um PDF com pontos 3/4 e quatro fotos foi gerado, teve seu texto extraído e foi rasterizado para inspeção: sem dimensão abaixo das fotos, com espessura geral e demais informações preservadas. Evidências locais em `artifacts/lp-old-dimensions/`. Não houve publicação na VPS nesta verificação.
 
 Teste de integração reproduzível:
 
