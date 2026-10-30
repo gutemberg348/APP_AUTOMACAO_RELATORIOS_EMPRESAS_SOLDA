@@ -163,6 +163,16 @@ O comando reconstrói API/painel, aplica a migration `202610140001_user_manageme
 
 ### Diagnóstico de build
 
+Se `npm ci` falhar com `ECONNRESET` / `network aborted`, a transferência de dependências foi interrompida. O aviso de depreciação do ESLint não é a causa dessa falha. Os Dockerfiles da API e do painel usam um cache persistente do npm compartilhado no BuildKit, preferência por pacotes já baixados, cinco novas tentativas por requisição e até cinco conexões simultâneas. A instalação mantém `npm ci` e a validação de integridade do lockfile. Uma falha prolongada de rede ainda pode interromper o build; repita o comando após a conexão normalizar, preservando o cache.
+
+Após enviar a correção ao GitHub, na VPS:
+
+```sh
+git pull origin master && npm run docker:production
+```
+
+Evite `--no-cache` e limpeza do cache durante essa recuperação. O cache do host npm não é o mesmo usado dentro do build; executar `npm install` diretamente na VPS não corrige essa etapa. Não é necessário atualizar a versão principal do npm para resolver esse erro. No fluxo sequencial, uma falha no build do painel impede a etapa de substituição dos containers existentes.
+
 Se o build apresentar `TS2307` para `../../services/storage/local-storage-provider`, confira se os arquivos `apps/api/src/services/storage/local-storage-provider.ts` e `storage-provider.ts` estão no repositório. A regra de arquivos privados deve ser `/storage/` (somente a pasta de dados da raiz). A regra `storage/` também exclui a pasta de código, fazendo o build funcionar no PC e falhar em um clone novo. Inclua os dois arquivos de código no commit, envie a correção e atualize a VPS antes de reconstruir. Os erros `TS7006` derivados desse módulo ausente são consequência da falta das declarações de tipo.
 
 Após enviar código novo para a VPS:
