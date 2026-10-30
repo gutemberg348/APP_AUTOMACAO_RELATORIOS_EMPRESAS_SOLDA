@@ -16,6 +16,8 @@ export function DrawingSelectionQuickOptions({
   onResize,
   onMore,
   onFullStyle,
+  onCrop,
+  onFillPage,
 }: {
   textColor?: string;
   onTextColor?: (color: string) => void;
@@ -24,10 +26,16 @@ export function DrawingSelectionQuickOptions({
   onResize?: (scale: number) => void;
   onMore(): void;
   onFullStyle(): void;
+  onCrop?: () => void;
+  onFillPage?: () => void;
 }) {
   const { tokens: t, styles } = useTheme();
   return (
     <View style={{ gap: 8 }}>
+      {onCrop && <Button title="Recortar imagem" icon="crop" small secondary onPress={onCrop} />}
+      {onFillPage && (
+        <Button title="Preencher folha" icon="expand" small secondary onPress={onFillPage} />
+      )}
       {textColor && onTextColor && (
         <>
           <Text style={[styles.label, { fontSize: 12 }]}>Cor do texto</Text>

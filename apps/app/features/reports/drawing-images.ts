@@ -25,6 +25,17 @@ export function drawingImageSize(asset: DocumentPickerAsset) {
   });
 }
 
+export function drawingImageAspect(uri: string) {
+  return new Promise<number>((resolve, reject) =>
+    Image.getSize(
+      uri,
+      (width, height) =>
+        width > 0 && height > 0 ? resolve(width / height) : reject(new Error('Imagem inválida.')),
+      () => reject(new Error('Aguarde a imagem carregar e tente novamente.')),
+    ),
+  );
+}
+
 const readBlob = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

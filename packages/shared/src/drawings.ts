@@ -5,6 +5,7 @@ import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
 import { freehandPath } from './drawing-sketch';
 import { drawingBrush, drawingBrushLayers } from './drawing-brushes';
+import { drawingPageBounds, drawingPageViewBox } from './drawing-image-layout';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
@@ -39,6 +40,21 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       type: z.literal('image'),
       locked: z.boolean().optional(),
       mediaKey: id,
+      fit: z.enum(['contain', 'cover']).optional(),
+      sourceAspectRatio: z.number().finite().positive().max(1000).optional(),
+      crop: z
+        .object({
+          x: z.number().finite().min(0).max(1),
+          y: z.number().finite().min(0).max(1),
+          width: z.number().finite().min(0.05).max(1),
+          height: z.number().finite().min(0.05).max(1),
+        })
+        .strict()
+        .refine(
+          (c) => c.x + c.width <= 1.000001 && c.y + c.height <= 1.000001,
+          'O recorte precisa ficar dentro da imagem.',
+        )
+        .optional(),
       ...xy,
       // Local axes can exceed a page axis after rotation; the transformed
       // footprint determines whether the image fits on the page.
@@ -139,6 +155,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
 export const drawingDataSchema = z
   .object({
     schemaVersion: z.literal(1),
+    page: z.enum(['landscape', 'portrait']).optional(),
     title: z.string().max(150).default('Croqui de inspeção'),
     revision: z.string().max(30).default('00'),
     grid: z.enum(['isometric', 'orthogonal', 'none']).default('isometric'),
@@ -765,8 +782,12 @@ export function drawingSvg(
     if (e.type === 'image') {
       const uri = options.images?.[e.mediaKey];
       const transform = `transform="rotate(${e.rotation} ${e.x} ${e.y})"`;
+      const aspect = e.sourceAspectRatio ?? e.width / e.height;
+      const crop = e.crop ?? { x: 0, y: 0, width: 1, height: 1 };
       body += uri
-        ? `<image x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} preserveAspectRatio="xMidYMid meet" href="${xml(uri)}"/>`
+        ? e.crop || e.fit === 'cover'
+          ? `<g ${transform}><svg x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" viewBox="${crop.x * aspect} ${crop.y} ${crop.width * aspect} ${crop.height}" preserveAspectRatio="xMidYMid ${e.fit === 'cover' ? 'slice' : 'meet'}" overflow="hidden"><image x="0" y="0" width="${aspect}" height="1" preserveAspectRatio="none" href="${xml(uri)}"/></svg></g>`
+          : `<image x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} preserveAspectRatio="xMidYMid meet" href="${xml(uri)}"/>`
         : `<rect x="${e.x - e.width / 2}" y="${e.y - e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
     }
     if (e.type === 'line' || e.type === 'polyline') {
@@ -896,5 +917,9 @@ export function drawingSvg(
   const anchor = options.anchor
     ? `<circle cx="${num(options.anchor.x)}" cy="${num(options.anchor.y)}" r="${num(options.anchorRadius ?? 3)}" fill="#1764C0" pointer-events="none"/>`
     : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? '0 0 1000 800'}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}${anchor}</svg>`;
+  if (data.page === 'portrait') {
+    const page = drawingPageBounds(data);
+    body = `<defs><clipPath id="drawing-portrait-page"><rect x="${page.x}" y="${page.y}" width="${page.width}" height="${page.height}"/></clipPath></defs><g clip-path="url(#drawing-portrait-page)">${body}</g>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? drawingPageViewBox(data)}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}${anchor}</svg>`;
 }

@@ -14,6 +14,9 @@ import {
   reportUpdateSchema,
   validateSpecificData,
   buildReportDefaults,
+  isVisualWeldReport,
+  reportTypeCodes,
+  type VisualInspectionRecord,
   pointKey,
   type Report,
   type ReportType,
@@ -67,6 +70,8 @@ import {
 } from './report-save-feedback';
 import { PickerSheet } from '../../components/picker-sheet';
 import { ReportSaveIssues } from './report-save-issues';
+import { VisualInspectionRecords } from './visual-inspection-records';
+import { LpTechniqueField } from './lp-technique-field';
 const resultOptions: SelectOption[] = [
   { value: '', label: 'Não informado', description: 'Definir o resultado depois.', icon: 'clock' },
   {
@@ -210,7 +215,7 @@ export function ReportForm({
     },
   ];
   type Section = ReportSection & {
-    content?: 'points' | 'discontinuities' | 'signatures' | 'drawings';
+    content?: 'points' | 'discontinuities' | 'inspectionRecords' | 'signatures' | 'drawings';
   };
   const sections: Section[] = [...baseSections];
   const beforeConclusion = sections.findIndex(
@@ -222,8 +227,11 @@ export function ReportForm({
     ...(type.code === 'LP'
       ? [{ title: 'Descontinuidades', fields: [], content: 'discontinuities' as const }]
       : []),
+    ...(type.code === 'EVD'
+      ? [{ title: 'Registros de inspeção', fields: [], content: 'inspectionRecords' as const }]
+      : []),
     { title: 'Desenho técnico', fields: [], content: 'drawings' },
-    ...(['EVS', 'LP', 'TH', 'ME', 'RDO'].includes(type.code)
+    ...(reportTypeCodes.some((code) => code === type.code)
       ? [
           {
             title: type.code === 'ME' ? 'Pontos de medição' : 'Pontos de solda',
@@ -297,6 +305,7 @@ export function ReportForm({
       specificData: withFieldDefaults(
         {
           ...(type.code === 'LP' ? { discontinuities: [] } : {}),
+          ...(type.code === 'EVD' ? { inspectionType: 'EVS DIRETO', inspectionRecords: [] } : {}),
           ...initialData,
           ...(type.code === 'RDO' ? { date: todayISO(), inspector: user.name } : {}),
         },
@@ -388,6 +397,8 @@ export function ReportForm({
     if (section.content === 'signatures') return `${watchedSignatures.length} responsáveis`;
     if (section.content === 'discontinuities')
       return 'Códigos e descrições das indicações encontradas';
+    if (section.content === 'inspectionRecords')
+      return `${Array.isArray(watchedData.inspectionRecords) ? watchedData.inspectionRecords.length : 0} registros · juntas, sinetes e laudos`;
     const filled = section.fields.filter((field) => {
       const value = field.path
         .split('.')
@@ -484,7 +495,8 @@ export function ReportForm({
     const target = sections.findIndex((section) =>
       section.content
         ? section.content === first[0] ||
-          (section.content === 'discontinuities' && first[1] === 'discontinuities')
+          (['discontinuities', 'inspectionRecords'].includes(section.content) &&
+            first[1] === section.content)
         : section.fields.some(
             (field) =>
               first[0] === 'specificData' &&
@@ -957,14 +969,18 @@ export function ReportForm({
                       control={control}
                       render={({ field }) => (
                         <Field
-                          label={type.code === 'EVS' ? 'Título da linha / equipamento' : 'Título'}
+                          label={
+                            isVisualWeldReport(type.code)
+                              ? 'Título da linha / equipamento'
+                              : 'Título'
+                          }
                           placeholder={
-                            type.code === 'EVS'
+                            isVisualWeldReport(type.code)
                               ? 'Ex.: LINHA RETORNO DE CIP'
                               : 'Identifique a inspeção de forma clara'
                           }
                           hint={
-                            type.code === 'EVS'
+                            isVisualWeldReport(type.code)
                               ? 'Este nome aparece no centro da segunda página do PDF.'
                               : undefined
                           }
@@ -1114,6 +1130,19 @@ export function ReportForm({
                       setValue={setValue}
                       previousSignatures={previousReport.data?.signatures}
                     />
+                  ) : section.content === 'inspectionRecords' ? (
+                    <Controller
+                      control={control}
+                      name="specificData.inspectionRecords"
+                      render={({ field }) => (
+                        <VisualInspectionRecords
+                          value={(field.value ?? []) as VisualInspectionRecord[]}
+                          onChange={field.onChange}
+                          editable={canEdit('specificData.inspectionRecords')}
+                          correction={correction}
+                        />
+                      )}
+                    />
                   ) : section.content === 'discontinuities' ? (
                     <Controller
                       control={control}
@@ -1179,7 +1208,23 @@ export function ReportForm({
                             control={control}
                             name={('specificData.' + item.path) as `specificData.${string}`}
                             render={({ field }) =>
-                              item.kind === 'result' ? (
+                              type.code === 'LP' &&
+                              ['penetrantType', 'removalTechnique'].includes(item.path) ? (
+                                <LpTechniqueField
+                                  kind={item.path === 'penetrantType' ? 'penetrant' : 'removal'}
+                                  value={String(field.value ?? '')}
+                                  editable={canEdit('specificData.' + item.path)}
+                                  error={
+                                    getFieldState(
+                                      ('specificData.' + item.path) as `specificData.${string}`,
+                                    ).error?.message
+                                  }
+                                  onChange={(value) => {
+                                    editedSetupPaths.current.add(item.path);
+                                    field.onChange(value);
+                                  }}
+                                />
+                              ) : item.kind === 'result' ? (
                                 <SelectField
                                   label={item.label}
                                   value={String(field.value ?? '')}

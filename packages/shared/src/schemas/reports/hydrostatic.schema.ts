@@ -27,6 +27,7 @@ export const hydrostaticDraftSchema = z
         workingTemperature: optionalText,
         manufacturer: optionalText,
         workingPressure: optionalText,
+        testPressure: optionalText,
         testDuration: optionalText,
         equipment: optionalText,
         material: optionalText,

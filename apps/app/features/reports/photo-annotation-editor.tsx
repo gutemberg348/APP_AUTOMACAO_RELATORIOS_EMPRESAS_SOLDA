@@ -7,6 +7,7 @@ import {
 } from '@weldcosta/shared';
 import { DrawingEditor } from './drawing-editor';
 import type { PhotoSource } from './photo-preview';
+import { PhotoMeasurementsEditor } from './photo-measurements-editor';
 
 export function PhotoAnnotationEditor({
   source,
@@ -14,14 +15,17 @@ export function PhotoAnnotationEditor({
   editable,
   onSave,
   onClose,
+  measurement = false,
 }: {
   source: PhotoSource;
   value: PhotoAnnotations;
   editable: boolean;
   onSave(value: PhotoAnnotations): void;
   onClose(): void;
+  measurement?: boolean;
 }) {
   const [annotations, setAnnotations] = useState(value);
+  const [painting, setPainting] = useState(false);
   const images = useMemo(() => ({ original: source.uri }), [source.uri]);
   const drawings: ReportDrawing[] = [
     {
@@ -43,6 +47,20 @@ export function PhotoAnnotationEditor({
       },
     },
   ];
+  if (measurement && !painting)
+    return (
+      <PhotoMeasurementsEditor
+        source={source}
+        value={annotations}
+        editable={editable}
+        onClose={onClose}
+        onSave={onSave}
+        onPaint={(next) => {
+          setAnnotations(next);
+          setPainting(true);
+        }}
+      />
+    );
   return (
     <DrawingEditor
       annotationMode
@@ -51,14 +69,18 @@ export function PhotoAnnotationEditor({
       points={[]}
       editable={editable}
       canEditPoints={false}
-      annotationCloseLabel={editable ? 'Salvar marcações' : 'Fechar prévia'}
+      annotationCloseLabel={
+        measurement ? 'Voltar aos pontos da foto' : editable ? 'Salvar marcações' : 'Fechar prévia'
+      }
       onCloseAnnotation={() => {
-        if (editable) onSave(annotations);
+        if (measurement) setPainting(false);
+        else if (editable) onSave(annotations);
         else onClose();
       }}
-      onCancelAnnotation={onClose}
+      onCancelAnnotation={measurement ? () => setPainting(false) : onClose}
       onChange={(next) =>
         setAnnotations({
+          ...annotations,
           elements: next[0]?.data.elements.filter((e) => e.id !== 'photo-background') ?? [],
         })
       }

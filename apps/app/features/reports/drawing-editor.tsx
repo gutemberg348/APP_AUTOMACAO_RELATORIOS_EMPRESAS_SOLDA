@@ -29,7 +29,8 @@ import {
   drawingSnap,
 } from '@weldcosta/shared';
 import { MediaSourcePicker } from '../../components/media-source-picker';
-import { useDrawingImages, drawingImageSize } from './drawing-images';
+import { useDrawingImages, drawingImageSize, drawingImageAspect } from './drawing-images';
+import { DrawingImageCrop } from './drawing-image-crop';
 import { useReportPhotoDrafts } from './report-photo-drafts';
 import type { ReportMedia } from '@weldcosta/shared';
 import { DrawingToolStrip } from './drawing-tool-strip';
@@ -47,6 +48,9 @@ import {
   constrainPosition,
   drawingId,
   drawingSvg,
+  drawingPageBounds,
+  fitDrawingPageView,
+  croppedDrawingImageSize,
   drawingSymbols,
   drawingSymbolDefinition,
   drawingSymbolPreview,
@@ -241,7 +245,7 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     id: 'annotation',
     name: 'Anotação',
     icon: 'pencil',
-    hint: 'Escreva uma anotação para aparecer abaixo deste desenho no PDF.',
+    hint: 'Escreva uma anotação para consultar neste desenho, somente no app.',
   },
   {
     id: 'dimension',
@@ -393,6 +397,8 @@ export function DrawingEditor({
       )
     : tools;
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [imageCrop, setImageCrop] = useState<{ id: string; uri: string; aspect: number }>();
+  const imageRequest = useRef(0);
   const drawingImages = useDrawingImages(reportId, media, photoDraftKey);
   const resolvedImages = useMemo(
     () => ({ ...drawingImages.images, ...imageUris }),
@@ -550,6 +556,17 @@ export function DrawingEditor({
   const activeIndex = Math.min(index, Math.max(0, value.length - 1)),
     drawing = value[activeIndex],
     data = drawing?.data;
+  const pageBounds = drawingPageBounds(data);
+  const previousPage = useRef(data?.page);
+  useEffect(() => {
+    imageRequest.current++;
+    setImageCrop(undefined);
+  }, [selected, activeIndex, savedVersion]);
+  useEffect(() => {
+    if (data?.page === 'portrait' || previousPage.current === 'portrait')
+      setView(fitDrawingPageView({ page: data?.page }, width, height));
+    previousPage.current = data?.page;
+  }, [data?.page, activeIndex, width, height]);
   const selectedElement = data?.elements.find((e) => e.id === selected);
   const editingSelection =
     !!selectedElement && drawingUnlocked(selectedElement) && (tool === 'select' || directSelection);
@@ -765,6 +782,57 @@ export function DrawingEditor({
     if (!data) return;
     const replacements = new Map(elements.map((e) => [e.id, e]));
     updateData({ ...data, elements: data.elements.map((e) => replacements.get(e.id) ?? e) });
+  };
+  const imageActionForSelection = async (action: 'crop' | 'fill') => {
+    if (!editable || !data || selectedElement?.type !== 'image') return;
+    const uri = resolvedImages[selectedElement.mediaKey];
+    if (!uri) {
+      setMessage('Aguarde a imagem carregar ou toque em Recarregar imagens.');
+      return;
+    }
+    const token = ++imageRequest.current;
+    try {
+      const aspect = selectedElement.sourceAspectRatio ?? (await drawingImageAspect(uri));
+      if (token !== imageRequest.current) return;
+      setContextOptionsOpen(false);
+      setSelectionOptionsOpen(false);
+      setShowProperties(false);
+      if (action === 'crop') setImageCrop({ id: selectedElement.id, uri, aspect });
+      else {
+        const page = drawingPageBounds({ page: 'portrait' });
+        const image = {
+          ...selectedElement,
+          x: page.x + page.width / 2,
+          y: 400,
+          width: page.width,
+          height: page.height,
+          rotation: 0,
+          fit: 'cover' as const,
+          sourceAspectRatio: aspect,
+        };
+        const next = {
+          ...data,
+          page: 'portrait' as const,
+          elements: drawingLayerChange(
+            data.elements.map((e) => (e.id === image.id ? image : e)),
+            [image.id],
+            false,
+          ),
+        };
+        updateData(next);
+        setView(fitDrawingPageView(next, width, height));
+        setMessage(
+          'Imagem preenchendo a folha até as bordas. Use Recortar para escolher a área visível.',
+        );
+      }
+    } catch (cause) {
+      if (token === imageRequest.current)
+        setMessage(
+          cause instanceof Error
+            ? cause.message
+            : 'Não foi possível preparar a imagem. Tente novamente.',
+        );
+    }
   };
   const selectionAction = (
     action: 'group' | 'ungroup' | 'duplicate' | 'front' | 'back' | 'lock',
@@ -1380,7 +1448,7 @@ export function DrawingEditor({
         !editingSelection &&
         tool !== 'pan' &&
         tool !== 'select' &&
-        (p.x < 0 || p.x > 1000 || p.y < 0 || p.y > 800)
+        (p.x < pageBounds.x || p.x > pageBounds.x + pageBounds.width || p.y < 0 || p.y > 800)
       )
         return;
       // Keep drawing objects reachable over photos. Selecting an image requires
@@ -2080,15 +2148,19 @@ export function DrawingEditor({
                   : 'Linha';
   const contextWidth = Math.min(248, width - 16);
   const contextHeight = Math.min(392, height - 80);
+  const contextMiniWidth = selectedElement?.type === 'image' ? 88 : 44;
   const selectionRight = transformBounds
     ? ((transformBounds.x + transformBounds.width - viewport.x) / viewport.w) * width + 18
     : 8;
   const selectionLeft = transformBounds
-    ? ((transformBounds.x - viewport.x) / viewport.w) * width - 62
+    ? ((transformBounds.x - viewport.x) / viewport.w) * width - contextMiniWidth - 18
     : 8;
   const contextX = Math.max(
     8,
-    Math.min(width - 52, selectionRight + 44 < width - 8 ? selectionRight : selectionLeft),
+    Math.min(
+      width - contextMiniWidth - 8,
+      selectionRight + contextMiniWidth < width - 8 ? selectionRight : selectionLeft,
+    ),
   );
   const contextY = Math.max(
     64,
@@ -2118,6 +2190,12 @@ export function DrawingEditor({
           !previous || previous.expanded !== expanded || previous.width !== screen.width;
         lastCanvasLayout.current = { expanded, width: screen.width };
         if (expanded && needsFit) {
+          if (data?.page === 'portrait') {
+            setView(
+              fitDrawingPageView(data, e.nativeEvent.layout.width, e.nativeEvent.layout.height),
+            );
+            return;
+          }
           const fitWidth =
             (800 * e.nativeEvent.layout.width) / Math.max(1, e.nativeEvent.layout.height);
           const w =
@@ -2129,7 +2207,9 @@ export function DrawingEditor({
       }}
       style={{
         width: '100%',
-        ...(expanded ? { flex: 1, minHeight: 0 } : { aspectRatio: 1.25 }),
+        ...(expanded
+          ? { flex: 1, minHeight: 0 }
+          : { aspectRatio: pageBounds.width / pageBounds.height }),
         borderRadius: 12,
         overflow: 'hidden',
         borderWidth: 1,
@@ -2320,7 +2400,7 @@ export function DrawingEditor({
               top: contextOptionsOpen
                 ? Math.max(60, Math.min(height - contextHeight - 8, contextY))
                 : contextY,
-              width: contextOptionsOpen ? contextWidth : 44,
+              width: contextOptionsOpen ? contextWidth : contextMiniWidth,
               maxHeight: contextOptionsOpen ? contextHeight : 44,
               borderRadius: 12,
               borderWidth: 1,
@@ -2335,6 +2415,13 @@ export function DrawingEditor({
             }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {!contextOptionsOpen && selectedElement?.type === 'image' && (
+                <IconButton
+                  label="Recortar imagem selecionada"
+                  icon="crop"
+                  onPress={() => void imageActionForSelection('crop')}
+                />
+              )}
               {contextOptionsOpen && (
                 <Text
                   numberOfLines={1}
@@ -2364,6 +2451,16 @@ export function DrawingEditor({
                 contentContainerStyle={{ padding: 8 }}
               >
                 <DrawingSelectionQuickOptions
+                  onCrop={
+                    selectedElement?.type === 'image'
+                      ? () => void imageActionForSelection('crop')
+                      : undefined
+                  }
+                  onFillPage={
+                    selectedElement?.type === 'image'
+                      ? () => void imageActionForSelection('fill')
+                      : undefined
+                  }
                   textColor={
                     editingSelection && selectedElement.type === 'text'
                       ? (selectedElement.color ?? '#285580')
@@ -2640,15 +2737,17 @@ export function DrawingEditor({
           />
         )}
         <Field
-          label="Anotação abaixo do desenho"
+          label="Observações internas do desenho"
           value={data.notes ?? ''}
           editable={editable}
           onChangeText={(notes) => updateData({ ...data, notes })}
           multiline
           maxLength={2000}
-          placeholder="Escreva uma observação para acompanhar este desenho no relatório"
+          placeholder="Escreva uma observação para consultar no app"
         />
-        <Text style={[styles.muted, { fontSize: 12 }]}>Aparece no PDF, abaixo deste desenho.</Text>
+        <Text style={[styles.muted, { fontSize: 12 }]}>
+          Somente no app. A folha de observações e este texto não aparecem no PDF.
+        </Text>
       </View>
     ) : null;
   const pointEntry = (
@@ -2848,6 +2947,26 @@ export function DrawingEditor({
         )}
         {editingSelection && selectedElement ? (
           <>
+            {selectedElement.type === 'image' && (
+              <View style={{ gap: 8 }}>
+                <Button
+                  title="Recortar imagem"
+                  icon="crop"
+                  secondary
+                  onPress={() => void imageActionForSelection('crop')}
+                />
+                <Button
+                  title="Preencher folha com imagem"
+                  icon="expand"
+                  secondary
+                  onPress={() => void imageActionForSelection('fill')}
+                />
+                <Text style={styles.muted}>
+                  Preencher mantém a proporção e recorta as bordas excedentes. Confira a área com a
+                  ferramenta Recortar.
+                </Text>
+              </View>
+            )}
             <SelectField
               label="Visibilidade durante a seleção"
               value={String(selectionOpacity)}
@@ -3191,6 +3310,18 @@ export function DrawingEditor({
             <Text style={styles.muted}>Selecione um elemento no desenho ou na lista abaixo.</Text>
           )
         )}
+        {!annotationMode && (advanced || expanded) && (
+          <SelectField
+            label="Formato da folha"
+            value={data.page ?? 'landscape'}
+            clearable={false}
+            options={[
+              { value: 'landscape', label: 'Horizontal · área ampla do desenho' },
+              { value: 'portrait', label: 'Vertical · igual à área do PDF' },
+            ]}
+            onChange={(page) => updateData({ ...data, page: page as DrawingData['page'] })}
+          />
+        )}
         {(advanced || expanded) && (
           <SelectField
             label="Malha do desenho"
@@ -3210,6 +3341,10 @@ export function DrawingEditor({
       </View>
     ) : null;
   const fit = () => {
+    if (data?.page === 'portrait') {
+      setView(fitDrawingPageView(data, width, height));
+      return;
+    }
     const fitWidth = (800 * width) / Math.max(1, height);
     const w = expanded
       ? annotationMode && !imageUris
@@ -4151,6 +4286,28 @@ export function DrawingEditor({
   );
   const imageDialog = (
     <>
+      {imageCrop && selectedElement?.type === 'image' && selectedElement.id === imageCrop.id && (
+        <DrawingImageCrop
+          uri={imageCrop.uri}
+          aspect={imageCrop.aspect}
+          initial={selectedElement.crop}
+          onClose={() => setImageCrop(undefined)}
+          onApply={(crop) => {
+            const size = croppedDrawingImageSize(selectedElement, crop, imageCrop.aspect);
+            if (size.width < 10 || size.height < 10) {
+              return 'O recorte ficou muito estreito. Escolha uma área maior.';
+            }
+            updateElement({
+              ...selectedElement,
+              ...size,
+              crop,
+              sourceAspectRatio: imageCrop.aspect,
+            });
+            setImageCrop(undefined);
+            setMessage('Recorte aplicado. Você pode desfazer ou restaurar a imagem inteira.');
+          }}
+        />
+      )}
       {!!drawingImages.error && (
         <View style={{ padding: 6 }}>
           <Text style={styles.muted}>Não foi possível carregar uma imagem do desenho.</Text>
@@ -4175,6 +4332,7 @@ export function DrawingEditor({
             x: 500,
             y: 400,
             ...size,
+            sourceAspectRatio: size.width / size.height,
             rotation: 0,
           };
           if (!add(element)) throw new Error('Não foi possível inserir a imagem. Tente novamente.');

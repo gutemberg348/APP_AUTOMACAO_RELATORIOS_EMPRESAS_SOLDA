@@ -45,6 +45,7 @@ export const lpDraftSchema = z
       .optional(),
     penetrantType: optionalText,
     removalTechnique: optionalText,
+    inspectionArea: optionalText,
     discontinuities: z
       .array(
         z

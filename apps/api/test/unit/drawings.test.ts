@@ -386,7 +386,7 @@ describe('Technical drawing geometry and safe rendering', () => {
       }).success,
     ).toBe(false);
   });
-  it('prints each annotation below its own drawing in the report, escaping user text', () => {
+  it('keeps typed and handwritten observations inside the app while printing each main drawing', () => {
     const report = {
       number: 'QA-01',
       reportDate: new Date('2026-10-18'),
@@ -435,16 +435,15 @@ describe('Technical drawing geometry and safe rendering', () => {
       const html = render(report, new Map());
       const sheets = html.split('<article').filter((part) => part.includes('class="evs-drawing"'));
       expect(sheets).toHaveLength(2);
-      expect(sheets[0]).toContain('NOTE_A &lt;script&gt; &amp; test');
-      expect(sheets[0]).not.toContain('NOTE_B');
-      expect(sheets[1]).toContain('NOTE_B');
-      expect(sheets[1]).not.toContain('NOTE_A');
-      expect(sheets[0]).toContain('class="drawing-notes"');
-      expect(sheets[0]).toContain('Nota &lt;segura&gt;');
-      expect(sheets[0]).toContain('fill="#16725B"');
-      expect(sheets[0]).toContain('stroke="#DC2626"');
-      expect(sheets[1]).not.toContain('class="drawing-notes"');
-      expect(sheets[0]!.indexOf('NOTE_A')).toBeGreaterThan(sheets[0]!.indexOf('</svg>'));
+      expect(sheets[0]).toContain('Drawing A');
+      expect(sheets[1]).toContain('Drawing B');
+      expect(html).not.toContain('NOTE_A');
+      expect(html).not.toContain('NOTE_B');
+      expect(html).not.toContain('drawing-notes');
+      expect(html).not.toContain('Nota &lt;segura&gt;');
+      expect(html).not.toContain('#DC2626');
+      expect(report.drawings[0]!.data.notes).toBe('NOTE_A <script> & test');
+      expect(report.drawings[0]!.data.notesDrawing?.elements).toHaveLength(2);
     }
   });
   it('persists handwritten notes and text colors while rejecting unsafe or unsupported data', () => {

@@ -23,6 +23,8 @@ export function PointPhotos({
   canRemove,
   onPickingChange,
   additional = false,
+  groupedWelds = false,
+  measurement = false,
 }: {
   draftKey: string;
   pointId: string | null;
@@ -34,6 +36,8 @@ export function PointPhotos({
   canRemove: boolean;
   onPickingChange(busy: boolean): void;
   additional?: boolean;
+  groupedWelds?: boolean;
+  measurement?: boolean;
 }) {
   const { tokens: t, styles } = useTheme();
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -78,7 +82,12 @@ export function PointPhotos({
   };
   return (
     <View style={{ gap: 12 }}>
-      {!additional && <Text style={styles.label}>Fotos do ponto {number}</Text>}
+      {!additional && (
+        <Text style={styles.label}>
+          {groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto '}
+          {number}
+        </Text>
+      )}
       {!additional && (
         <Text style={[styles.muted, { fontSize: 12 }]}>
           {count}/2 fotos sugeridas · Duas imagens por linha no PDF. Você pode finalizar mesmo sem
@@ -87,7 +96,9 @@ export function PointPhotos({
         </Text>
       )}
       <Notice error={error} />
-      {(pending.some((photo) => photo.annotations?.elements.length) ||
+      {(pending.some(
+        (photo) => photo.annotations?.elements.length || photo.annotations?.measurements?.length,
+      ) ||
         existing.some((photo) => draft.annotationEdits?.[photo.id] !== undefined)) && (
         <Text style={[styles.muted, { fontSize: 12 }]}>
           Marcações preparadas. Salve o relatório para gravá-las e incluí-las no PDF.
@@ -105,7 +116,14 @@ export function PointPhotos({
                 reportId={reportId}
                 mediaId={photo.id}
                 annotations={draft.annotationEdits?.[photo.id] ?? photo.annotations}
-                action={(editable ? 'Ver e pintar foto ' : 'Ver foto ') + (index + 1)}
+                action={
+                  (editable
+                    ? measurement
+                      ? 'Marcar pontos / valores na foto '
+                      : 'Ver e pintar foto '
+                    : 'Ver foto ') +
+                  (index + 1)
+                }
                 onOpen={(source) => openPreview(photo.id, false, source)}
               />
               {photo.sectionKey === 'drawing' && (
@@ -157,7 +175,12 @@ export function PointPhotos({
                 uri={photo.asset.uri}
                 annotations={photo.annotations}
                 action={
-                  (editable ? 'Ver e pintar foto ' : 'Ver foto ') + (existing.length + index + 1)
+                  (editable
+                    ? measurement
+                      ? 'Marcar pontos / valores na foto '
+                      : 'Ver e pintar foto '
+                    : 'Ver foto ') +
+                  (existing.length + index + 1)
                 }
                 onOpen={(source) => openPreview(photo.id, true, source)}
               />
@@ -248,7 +271,9 @@ export function PointPhotos({
         <Text style={styles.muted}>
           {additional
             ? 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
-            : 'Adicione as fotos deste ponto aqui. O vínculo acompanha o número do ponto.'}
+            : groupedWelds
+              ? 'Uma foto pode mostrar várias soldas. Informe todas na ficha; as fotos continuam vinculadas ao grupo ao editar sua identificação.'
+              : 'Adicione as fotos deste ponto aqui. O vínculo acompanha o número do ponto.'}
         </Text>
       )}
       {editable && (additional || count >= 2) && (
@@ -264,7 +289,11 @@ export function PointPhotos({
       )}
       <MediaSourcePicker
         visible={sourceOpen}
-        contextLabel={additional ? 'Adicionar imagens complementares' : 'Fotos do ponto ' + number}
+        contextLabel={
+          additional
+            ? 'Adicionar imagens complementares'
+            : (groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto ') + number
+        }
         maxSelections={additional ? 1 : Math.max(1, 2 - count)}
         onClose={closeSource}
         onSelect={async (asset, onProgress) => {
@@ -317,6 +346,7 @@ export function PointPhotos({
           key={editingPhoto.id}
           source={editingPhoto.source}
           editable={editingPhoto.editable}
+          measurement={measurement}
           value={
             (editingPhoto.pending
               ? draft.photos.find((p) => p.id === editingPhoto.id)?.annotations

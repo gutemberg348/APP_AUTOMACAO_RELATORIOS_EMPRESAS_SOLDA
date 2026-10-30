@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
-import { drawingDataSchema, drawingSvg, drawingNotesSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, type PdfReport } from './layout';
 export { chunks } from './evs';
@@ -71,17 +71,16 @@ export function identification(report: PdfReport, fields: [string, string][]) {
           .join(''),
       )
       .join('');
-  return sheet(report, titles[report.reportType.code]!, body, true, 'reference-identification');
+  return sheet(report, titles[report.reportType.code]!, body, true, 'evs-identification');
 }
 export function drawings(report: PdfReport, images: Map<string, string>) {
   let html = '';
   for (const drawing of report.drawings) {
     const cad = drawingDataSchema.parse(drawing.data);
-    const notesSvg = drawingNotesSvg(cad);
     html += sheet(
       report,
       'DESENHO',
-      `<div class="evs-drawing"${notesSvg ? ' style="height:165mm"' : ''}>${drawingSvg(
+      `<div class="evs-drawing${cad.page === 'portrait' ? ' evs-drawing-page' : ''}">${drawingSvg(
         cad,
         report.points.map((p) => ({
           id: p.id,
@@ -89,12 +88,7 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
         { images: drawingImageSources(report, images) },
-      )}</div>` +
-        annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala') +
-        (notesSvg
-          ? `<section class="drawing-notes" style="height:64mm;padding:0 3mm"><b style="font-size:11px">OBSERVAÇÕES</b><div style="height:58mm">${notesSvg}</div></section>`
-          : '') +
-        (cad.notes ? annotations(cad.notes, 'Notas') : ''),
+      )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala'),
     );
   }
   for (const media of report.media.filter(
@@ -193,14 +187,20 @@ export function conclusion(
 }
 export const acceptable = (data: Record<string, unknown>) =>
   data.acceptable === true ? 'SIM' : data.acceptable === false ? 'NÃO' : '—';
-export function pointNotes(point: PdfReport['points'][number]) {
+export function pointNotes(point: PdfReport['points'][number], includeDimensions = true) {
   const data = (point.data ?? {}) as Record<string, unknown>;
   return [
     point.label,
     data.notes,
-    data.dimension ? 'Dimensão: ' + data.dimension : '',
-    data.projectThickness ? 'Espessura de projeto: ' + data.projectThickness : '',
-    point.value != null ? 'Leitura: ' + point.value + ' ' + (point.unit || '') : point.unit,
+    includeDimensions && data.dimension ? 'Dimensão: ' + data.dimension : '',
+    includeDimensions && data.projectThickness
+      ? 'Espessura de projeto: ' + data.projectThickness
+      : '',
+    includeDimensions
+      ? point.value != null
+        ? 'Leitura: ' + point.value + ' ' + (point.unit || '')
+        : point.unit
+      : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -239,17 +239,16 @@ export function photoRows(
   let html = '';
   for (let i = 0; i < entries.length; i += 2) {
     const pair = entries.slice(i, i + 2);
-    const single = mode === 'RDO' && pair.length === 1;
-    const cells = (single ? [0] : [0, 1])
+    const cells = [0, 1]
       .map((j) => {
         const entry = pair[j];
         if (!entry || (!entry.point && !entry.image))
           return '<div class="reference-photo-cell"></div>';
         const data = (entry.point?.data ?? {}) as Record<string, unknown>;
-        return `<div class="reference-photo-cell">${entry.point ? `<div class="reference-photo-tab">${mode === 'LP' ? 'SOLDA' : 'PONTO'} Nº: <span>${escape(entry.point.number)}</span></div><div class="reference-photo-tab">DESCONT.: <span>${escape(String(data.discontinuity || '—').slice(0, 50))}</span> · ACEITÁVEL: <span>${acceptable(data)}</span></div>` : ''}<div class="reference-photo-image">${entry.image ? `<img src="${images.get(entry.image.id) || ''}">` : 'Sem foto anexada'}</div></div>`;
+        return `<div class="reference-photo-cell">${entry.point ? `<div class="reference-photo-tab">${mode === 'LP' ? 'SOLDA' : 'PONTO'} Nº: <span>${escape(entry.point.number)}</span></div><div class="reference-photo-tab">DESCONT.: <span>${escape(String(data.discontinuity || '—').slice(0, 50))}</span> · ACEITÁVEL: <span>${acceptable(data)}</span></div>` : ''}<div class="reference-photo-image report-photo-frame">${entry.image ? `<img src="${images.get(entry.image.id) || ''}">` : 'Sem foto anexada'}</div></div>`;
       })
       .join('');
-    html += `<div class="reference-photo-row">${band('IMAGENS DO ENSAIO')}<div class="reference-photo-columns ${single ? 'reference-single-photo' : ''}">${cells}</div></div>`;
+    html += `<div class="reference-photo-row">${band('IMAGENS DO ENSAIO')}<div class="reference-photo-columns">${cells}</div></div>`;
     for (const entry of pair) {
       if (entry.image?.caption)
         html += annotations(
@@ -259,8 +258,9 @@ export function photoRows(
             : 'Foto adicional ' + (i + pair.indexOf(entry) + 1),
         );
       if (entry.point) {
-        const notes = pointNotes(entry.point);
-        if (notes) html += annotations(notes, 'Ponto ' + entry.point.number);
+        const notes = pointNotes(entry.point, mode !== 'LP');
+        if (notes)
+          html += annotations(notes, (mode === 'LP' ? 'Soldas ' : 'Ponto ') + entry.point.number);
         const d = entry.point.data as Record<string, unknown>;
         if (String(d.discontinuity || '').length > 50)
           html += annotations(d.discontinuity, 'Descontinuidade · ponto ' + entry.point.number);

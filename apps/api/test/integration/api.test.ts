@@ -7,12 +7,13 @@ import { prisma } from '../../src/prisma/client';
 import {
   newDrawingData,
   removePointFromDrawings,
+  reportTypeCodes,
   type Report,
   type AuthSession,
 } from '@weldcosta/shared';
 import sharp from 'sharp';
 import { ReportsService } from '../../src/modules/reports/reports.service';
-import { convertFormDataAsync } from '../../../../node_modules/expo/src/winter/fetch/convertFormData';
+import { convertFormDataAsync } from 'expo/src/winter/fetch/convertFormData';
 const password = randomUUID();
 const sessions: Record<string, AuthSession> = {};
 let companyId = '',
@@ -422,7 +423,7 @@ describe('REST with PostgreSQL', () => {
     expect((await request(app).get(`/reports/${report.id}/pdf`)).status).toBe(401);
     expect(
       dashboard.body.data.byType.find((type: { code: string }) => type.code === 'EVS').count,
-    ).toBe(1);
+    ).toBe(await prisma.report.count({ where: { reportTypeId: typeId, deletedAt: null } }));
   }, 30000);
   it('archives without physical deletion and soft deletes draft reports', async () => {
     const created = await request(app)
@@ -492,7 +493,7 @@ describe('REST with PostgreSQL', () => {
     expect(logs.map((log) => log.action)).toContain('APPROVE_REPORT');
     expect(logs.map((log) => log.action)).toContain('FINISH_REPORT');
   });
-  it('prefills independent editable snapshots, persists collections and generates all five PDFs', async () => {
+  it('prefills independent editable snapshots, persists collections and generates every report PDF', async () => {
     const company = await createFixtureCompany({
       data: { name: 'PDF test client', corporateName: 'PDF legal client' },
     });
@@ -508,7 +509,7 @@ describe('REST with PostgreSQL', () => {
         },
       },
     });
-    for (const code of ['EVS', 'LP', 'TH', 'ME', 'RDO']) {
+    for (const code of reportTypeCodes) {
       const type = await prisma.reportType.findUniqueOrThrow({ where: { code } });
       let response = await request(app)
         .post('/reports')
@@ -556,7 +557,7 @@ describe('REST with PostgreSQL', () => {
                     data: { acceptable: false, projectThickness: '6 mm' },
                   },
                 ]
-              : code === 'EVS' || code === 'LP'
+              : code === 'EVS' || code === 'EVD' || code === 'LP'
                 ? [
                     {
                       number: '11',
@@ -592,7 +593,11 @@ describe('REST with PostgreSQL', () => {
           width: 80,
           height: 50,
           channels: 3,
-          background: { r: 20 + code.length * 30, g: code.charCodeAt(0), b: code.charCodeAt(1) },
+          background: {
+            r: 20 + code.length * 30,
+            g: code.charCodeAt(0),
+            b: code.charCodeAt(code.length - 1),
+          },
         },
       })
         .png()
@@ -1037,7 +1042,7 @@ describe('REST with PostgreSQL', () => {
     expect(discarded).toBe('reserved-test.pdf');
     expect(await prisma.reportPdf.count({ where: { reportId: copy.id } })).toBe(0);
   });
-  it('saves both form stages with point/general photos encoded by Expo SDK 57', async () => {
+  it('saves both form stages with point/general photos encoded by the installed Expo SDK', async () => {
     const company = await request(app)
       .post('/companies')
       .set(auth())
@@ -1055,6 +1060,7 @@ describe('REST with PostgreSQL', () => {
         reportTypeId: typeId,
         prefillFromProject: false,
         title: 'Inspeção no celular',
+        number: 'QA-MOBILE',
         points: [
           {
             clientId: 'local-weld',
@@ -1132,6 +1138,7 @@ describe('REST with PostgreSQL', () => {
         projectId: project.id,
         reportTypeId: typeId,
         title: 'Quick status report',
+        number: 'QA-STATUS',
         reportDate: '2026-10-13',
         points: [
           {
@@ -1230,9 +1237,9 @@ describe('REST with PostgreSQL', () => {
       data: { name: 'Numberless selector project', companyId: company.id },
     });
     const types = await prisma.reportType.findMany({
-      where: { code: { in: ['EVS', 'LP', 'TH', 'ME', 'RDO'] } },
+      where: { code: { in: [...reportTypeCodes] } },
     });
-    expect(types).toHaveLength(5);
+    expect(types).toHaveLength(reportTypeCodes.length);
     for (const type of types) {
       const created = await request(app)
         .post('/reports')

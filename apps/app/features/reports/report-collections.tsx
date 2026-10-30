@@ -18,7 +18,7 @@ import {
   removePointFromDrawings,
   type ReportDrawing,
 } from '@weldcosta/shared';
-import { pointBatch } from './report-autofill';
+import { pointBatch, nextLpWeldNumber } from './report-autofill';
 import { useAuth } from '../../stores/auth';
 import {
   Field,
@@ -147,6 +147,7 @@ export function ReportPoints({
     keyName: '_formKey',
   });
   const measurement = code === 'ME';
+  const penetrant = code === 'LP';
   const invalidPointIndexes = Object.keys(errors.points ?? {})
     .filter((key) => /^\d+$/.test(key))
     .join(',');
@@ -189,8 +190,12 @@ export function ReportPoints({
     Keyboard.dismiss();
     revealPending.current = true;
     if (index < values.length - 1) setExpandedPoint(index + 1);
-    else if (add) appendPoint(nextPointNumber(values));
-    else setExpandedPoint(null);
+    else if (add) {
+      if (penetrant) {
+        setFirstNumber(nextLpWeldNumber(values));
+        setFirstNumberOpen(true);
+      } else appendPoint(nextPointNumber(values));
+    } else setExpandedPoint(null);
   };
   const finish = (key: string, add = false) => {
     if (photoCount(key) < 2) {
@@ -249,6 +254,7 @@ export function ReportPoints({
         number,
         String(specificData.projectThickness || ''),
       )[0]!;
+      if (penetrant && point.data) delete point.data.dimension;
       setError(undefined);
       revealPending.current = true;
       setExpandedPoint(fields.length);
@@ -260,8 +266,8 @@ export function ReportPoints({
     }
   };
   const addPoint = () => {
-    if (!fields.length) {
-      setFirstNumber('1');
+    if (!fields.length || penetrant) {
+      setFirstNumber(penetrant ? nextLpWeldNumber(values) : '1');
       setFirstNumberOpen(true);
     } else appendPoint(nextPointNumber(values));
   };
@@ -269,7 +275,11 @@ export function ReportPoints({
     <View style={{ gap: 16 }}>
       <PanelHeader
         title={measurement ? 'Pontos de medição' : 'Pontos de solda'}
-        subtitle="Preencha os dados e adicione as fotos no mesmo ponto. Ao criar o próximo, o anterior fica recolhido."
+        subtitle={
+          penetrant
+            ? 'Cada ficha pode representar uma ou várias soldas na mesma foto. Informe, por exemplo, 01 - 02 - 03 e registre o resultado do grupo.'
+            : 'Preencha os dados e adicione as fotos no mesmo ponto. Ao criar o próximo, o anterior fica recolhido.'
+        }
         action={
           editable ? (
             <Button small secondary icon="plus" title="Adicionar ponto" onPress={addPoint} />
@@ -281,7 +291,9 @@ export function ReportPoints({
         <View style={{ gap: 10 }}>
           <View style={[styles.row, { justifyContent: 'space-between' }]}>
             <Text style={[styles.muted, { flex: 1 }]}>
-              Repetir identificação, dimensão e unidade do ponto anterior
+              {penetrant
+                ? 'Repetir identificação da ficha anterior'
+                : 'Repetir identificação, dimensão e unidade do ponto anterior'}
             </Text>
             <Switch
               accessibilityLabel="Repetir dados do ponto anterior"
@@ -295,7 +307,7 @@ export function ReportPoints({
             secondary
             icon="plus"
             onPress={() => {
-              setFirstNumber(nextPointNumber(values));
+              setFirstNumber(penetrant ? nextLpWeldNumber(values) : nextPointNumber(values));
               setBatchError(undefined);
               setBatchOpen(true);
             }}
@@ -344,14 +356,17 @@ export function ReportPoints({
             >
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={[styles.text, { fontFamily: t.fonts.bold }]}>
-                  {(measurement ? 'Medição ' : 'Ponto / solda ') + (value?.number || index + 1)}
+                  {(measurement ? 'Medição ' : penetrant ? 'Soldas ' : 'Ponto / solda ') +
+                    (value?.number || index + 1)}
                 </Text>
                 <Text style={[styles.muted, { fontSize: 11 }]}>
                   {[
                     value?.label,
                     measurement && value?.value != null
                       ? String(value.value) + ' ' + (value.unit ?? '')
-                      : value?.data?.dimension,
+                      : penetrant
+                        ? ''
+                        : value?.data?.dimension,
                     photos + (photos === 1 ? ' foto' : ' fotos'),
                   ]
                     .filter(Boolean)
@@ -399,7 +414,15 @@ export function ReportPoints({
                       render={({ field, fieldState }) => (
                         <Field
                           error={fieldState.error?.message}
-                          label="Número do ponto / solda"
+                          label={
+                            penetrant ? 'Soldas nesta ficha / foto' : 'Número do ponto / solda'
+                          }
+                          hint={
+                            penetrant
+                              ? 'Uma solda: 01. Várias soldas: 01 - 02 - 03. As fotos e o resultado desta ficha valem para o grupo informado.'
+                              : undefined
+                          }
+                          placeholder={penetrant ? 'Ex.: 01 - 02 - 03' : undefined}
                           value={field.value}
                           onChangeText={field.onChange}
                           editable={editable}
@@ -424,37 +447,39 @@ export function ReportPoints({
                       )}
                     />
                   </FormCell>
-                  <FormCell>
-                    {measurement ? (
-                      <Controller
-                        control={control}
-                        name={`points.${index}.value`}
-                        render={({ field, fieldState }) => (
-                          <MeasurementInput
-                            error={fieldState.error?.message}
-                            value={field.value}
-                            onChange={field.onChange}
-                            editable={editable}
-                          />
-                        )}
-                      />
-                    ) : (
-                      <Controller
-                        control={control}
-                        name={`points.${index}.data.dimension`}
-                        render={({ field, fieldState }) => (
-                          <Field
-                            error={fieldState.error?.message}
-                            label="Dimensão"
-                            value={field.value ?? ''}
-                            onChangeText={field.onChange}
-                            editable={editable}
-                            placeholder={'Ex.: 4"'}
-                          />
-                        )}
-                      />
-                    )}
-                  </FormCell>
+                  {!penetrant && (
+                    <FormCell>
+                      {measurement ? (
+                        <Controller
+                          control={control}
+                          name={`points.${index}.value`}
+                          render={({ field, fieldState }) => (
+                            <MeasurementInput
+                              error={fieldState.error?.message}
+                              value={field.value}
+                              onChange={field.onChange}
+                              editable={editable}
+                            />
+                          )}
+                        />
+                      ) : (
+                        <Controller
+                          control={control}
+                          name={`points.${index}.data.dimension`}
+                          render={({ field, fieldState }) => (
+                            <Field
+                              error={fieldState.error?.message}
+                              label="Dimensão"
+                              value={field.value ?? ''}
+                              onChangeText={field.onChange}
+                              editable={editable}
+                              placeholder={'Ex.: 4"'}
+                            />
+                          )}
+                        />
+                      )}
+                    </FormCell>
+                  )}
                   <FormCell>
                     <Controller
                       control={control}
@@ -500,6 +525,8 @@ export function ReportPoints({
                   editable={canUploadPhotos}
                   canRemove={canRemovePhotos}
                   onPickingChange={onPickingChange}
+                  groupedWelds={penetrant}
+                  measurement={measurement}
                 />
                 <Button
                   title={
@@ -666,6 +693,10 @@ export function ReportPoints({
           icon="plus"
           onPress={() => {
             try {
+              if (penetrant && /\d\s*[-,;]\s*\d/.test(firstNumber) && Number(batchCount) > 1)
+                throw new Error(
+                  'Para uma foto com várias soldas, use Adicionar ponto e informe o grupo na ficha. Para criar fichas em sequência, informe só um número inicial.',
+                );
               const created = pointBatch(
                 values,
                 measurement,
@@ -674,6 +705,8 @@ export function ReportPoints({
                 firstNumber,
                 String(specificData.projectThickness || ''),
               );
+              if (penetrant)
+                for (const point of created) if (point.data) delete point.data.dimension;
               setExpandedPoint(fields.length);
               append(created);
               setBatchOpen(false);
@@ -685,14 +718,24 @@ export function ReportPoints({
       </PickerSheet>
       <PickerSheet
         visible={firstNumberOpen}
-        title={measurement ? 'Primeiro ponto de medição' : 'Primeiro ponto de solda'}
-        subtitle="Informe o número inicial. Os próximos serão sugeridos em sequência e continuam editáveis."
+        title={
+          measurement
+            ? 'Primeiro ponto de medição'
+            : penetrant
+              ? 'Nova ficha de soldas'
+              : 'Primeiro ponto de solda'
+        }
+        subtitle={
+          penetrant
+            ? 'Informe uma solda ou o grupo visto na mesma foto. Ex.: 01 - 02 - 03. Depois você pode alterar.'
+            : 'Informe o número inicial. Os próximos serão sugeridos em sequência e continuam editáveis.'
+        }
         icon="pin"
         onClose={() => setFirstNumberOpen(false)}
       >
         <Notice error={error} />
         <Field
-          label="Número do primeiro ponto / solda"
+          label={penetrant ? 'Soldas da ficha / foto' : 'Número do primeiro ponto / solda'}
           value={firstNumber}
           onChangeText={setFirstNumber}
           maxLength={100}
@@ -700,7 +743,7 @@ export function ReportPoints({
           placeholder="Ex.: 1, 01 ou S-01"
         />
         <Button
-          title="Criar primeiro ponto"
+          title={penetrant ? 'Criar ficha de soldas' : 'Criar primeiro ponto'}
           icon="plus"
           disabled={!firstNumber.trim()}
           onPress={() => {

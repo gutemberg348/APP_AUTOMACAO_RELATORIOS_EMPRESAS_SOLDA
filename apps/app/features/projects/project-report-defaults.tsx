@@ -9,6 +9,7 @@ import { Icon } from '../../components/icon';
 
 const types = [
   { value: 'EVS', label: 'Ensaio Visual / Endoscopia', badge: 'EVS' },
+  { value: 'EVD', label: 'Ensaio Visual Direto', badge: 'EVD' },
   { value: 'LP', label: 'Líquido Penetrante', badge: 'LP' },
   { value: 'TH', label: 'Teste Hidrostático', badge: 'TH' },
   { value: 'ME', label: 'Medição de Espessura', badge: 'ME' },

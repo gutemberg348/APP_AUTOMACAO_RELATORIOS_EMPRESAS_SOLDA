@@ -42,6 +42,21 @@ export const reportSections: Record<string, ReportSection[]> = {
     { title: 'Dados do ensaio', fields: welding },
     conclusion,
   ],
+  EVD: [
+    { title: 'Identificação', fields: identity },
+    {
+      title: 'Dados do ensaio',
+      fields: [
+        field('drawingReference', 'Desenho de referência / revisão'),
+        ...welding.slice(0, 4),
+        field('fillerMetal', 'Metal de adição'),
+        ...welding.slice(4, 6),
+        field('weldingSpecification', 'EPS / revisão'),
+        ...welding.slice(6),
+      ],
+    },
+    conclusion,
+  ],
   LP: [
     { title: 'Identificação', fields: identity },
     { title: 'Dados do ensaio', fields: [...welding, field('fillerMetal', 'Metal de adição')] },
@@ -53,6 +68,7 @@ export const reportSections: Record<string, ReportSection[]> = {
         field('generalData.surfaceCondition', 'Condição superficial'),
         field('generalData.lightingIntensity', 'Intensidade de iluminação'),
         field('generalData.baseMetal', 'Metal de base'),
+        field('inspectionArea', 'Área / linha inspecionada'),
       ],
     },
     {
@@ -97,6 +113,7 @@ export const reportSections: Record<string, ReportSection[]> = {
           ['workingTemperature', 'Temperatura de trabalho'],
           ['manufacturer', 'Fabricante'],
           ['workingPressure', 'Pressão de trabalho'],
+          ['testPressure', 'Pressão do teste'],
           ['testDuration', 'Duração do teste'],
           ['equipment', 'Equipamento'],
           ['material', 'Material'],

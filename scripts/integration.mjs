@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
+import process from 'node:process';
+import { setTimeout } from 'node:timers';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -64,7 +66,19 @@ try {
   };
   npm(['run', 'db:deploy'], env);
   npm(['run', 'db:seed'], env);
-  npm(['exec', '--workspace', '@weldcosta/api', '--', 'vitest', 'run', 'test/integration'], env);
+  const targets = process.argv.slice(2);
+  npm(
+    [
+      'exec',
+      '--workspace',
+      '@weldcosta/api',
+      '--',
+      'vitest',
+      'run',
+      ...(targets.length ? targets : ['test/integration']),
+    ],
+    env,
+  );
 } finally {
   try {
     run('docker', ['stop', name], process.env, 'pipe');

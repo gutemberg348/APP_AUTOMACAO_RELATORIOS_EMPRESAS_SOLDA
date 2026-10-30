@@ -15,7 +15,7 @@ export function MediaImage({
   item: ReportMedia;
   height?: number;
 }) {
-  return item.annotations?.elements.length ? (
+  return item.annotations?.elements.length || item.annotations?.measurements?.length ? (
     <PhotoPreview
       reportId={reportId}
       mediaId={item.id}

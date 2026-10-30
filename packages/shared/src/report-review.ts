@@ -1,5 +1,6 @@
 import { ZodError } from 'zod';
 import { reportSections } from './report-fields';
+import { isVisualWeldReport } from './enums';
 import { validateSpecificData } from './schemas/reports';
 import { drawingDataSchema } from './drawings';
 import type { ReportStatus } from './enums';
@@ -65,7 +66,7 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
     (point) => point.type === 'MEASUREMENT' && point.value == null,
   );
   if (measurements.length) warnings.push('Pontos sem leitura: ' + numbered(measurements) + '.');
-  if (report.reportType.code === 'EVS') {
+  if (isVisualWeldReport(report.reportType.code)) {
     const withoutPhotos = points.filter(
       (point) => !(report.media ?? []).some((photo) => photo.reportPointId === point.id),
     );

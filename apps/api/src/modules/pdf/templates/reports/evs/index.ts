@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
-import { drawingDataSchema, drawingSvg, drawingNotesSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg, type VisualInspectionRecord } from '@weldcosta/shared';
 import { escape, displayDate, signatureImage, type PdfReport } from '../layout';
 import { referenceLogo } from './reference-logo';
 import { evsStyles } from './styles';
@@ -73,10 +73,12 @@ export function inspectionTitle(report: PdfReport) {
 
 export function render(report: PdfReport, images: Map<string, string>) {
   const data = report.specificData as Record<string, unknown>;
+  const direct = report.reportType.code === 'EVD';
+  const reportHeading = direct ? 'RELATÓRIO DE ENSAIO<br>VISUAL DIRETO' : title;
   const sheet = (heading: string, blocks: string, contact = false, className = '') =>
     `<article class="evs-sheet ${className}">${header(report, heading)}<main class="evs-flow">${blocks}</main>${contact ? footer : ''}</article>`;
   let html = sheet(
-    title,
+    reportHeading,
     ['client', 'factory']
       .map((key) =>
         chunks(data[key], 300)
@@ -90,27 +92,44 @@ export function render(report: PdfReport, images: Map<string, string>) {
     true,
     'evs-cover',
   );
-  const fields = [
-    ['PROPRIETÁRIO', 'owner'],
-    ['OBRA', 'work'],
-    ['PROJETO', 'project'],
-    ['PROCEDIMENTO / REVISÃO', 'procedureRevision'],
-    ['ENSAIO', 'inspectionType'],
-    ['PROCESSO DE SOLDAGEM', 'weldingProcess'],
-    ['METAL DE BASE', 'baseMetal'],
-    ['CHANFRO', 'bevel'],
-    ['GÁS DE PURGA', 'purgeGas'],
-    ['CRITÉRIO DE ACEITAÇÃO', 'acceptanceCriteria'],
-    ['NORMA DE REF.', 'referenceStandard'],
-  ];
+  const fields = direct
+    ? [
+        ['PROPRIETÁRIO', 'owner'],
+        ['OBRA', 'work'],
+        ['PROJETO', 'project'],
+        ['DESENHO', 'drawingReference'],
+        ['ENSAIO', 'inspectionType'],
+        ['PROCESSO DE SOLDAGEM', 'weldingProcess'],
+        ['METAL DE BASE', 'baseMetal'],
+        ['METAL DE ADIÇÃO', 'fillerMetal'],
+        ['CHANFRO', 'bevel'],
+        ['GÁS DE PURGA', 'purgeGas'],
+        ['EPS / REVISÃO', 'weldingSpecification'],
+        ['PROCEDIMENTO / REVISÃO', 'procedureRevision'],
+        ['CRITÉRIO DE ACEITAÇÃO', 'acceptanceCriteria'],
+        ['NORMA DE REF.', 'referenceStandard'],
+      ]
+    : [
+        ['PROPRIETÁRIO', 'owner'],
+        ['OBRA', 'work'],
+        ['PROJETO', 'project'],
+        ['PROCEDIMENTO / REVISÃO', 'procedureRevision'],
+        ['ENSAIO', 'inspectionType'],
+        ['PROCESSO DE SOLDAGEM', 'weldingProcess'],
+        ['METAL DE BASE', 'baseMetal'],
+        ['CHANFRO', 'bevel'],
+        ['GÁS DE PURGA', 'purgeGas'],
+        ['CRITÉRIO DE ACEITAÇÃO', 'acceptanceCriteria'],
+        ['NORMA DE REF.', 'referenceStandard'],
+      ];
   html += sheet(
-    title,
+    reportHeading,
     chunks(inspectionTitle(report))
       .map((part) => `<h1 class="evs-data-title">${escape(part)}</h1>`)
       .join('') +
       fields
         .map(([label, key]) =>
-          chunks(data[key!])
+          chunks(data[key!] || (direct && key === 'inspectionType' ? 'EVS DIRETO' : ''))
             .map(
               (part, i) =>
                 `<p class="evs-data-line"><b>${label}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
@@ -119,12 +138,66 @@ export function render(report: PdfReport, images: Map<string, string>) {
         )
         .join(''),
     true,
+    'evs-identification',
   );
+  if (direct) {
+    const records = (data.inspectionRecords ?? []) as VisualInspectionRecord[];
+    const columns: {
+      key: keyof VisualInspectionRecord;
+      label: string;
+      width: number;
+      limit: number;
+    }[] = [
+      { key: 'item', label: 'ITEM', width: 6, limit: 8 },
+      { key: 'drawingReference', label: 'DESENHOS Nº / REVISÃO', width: 30, limit: 40 },
+      { key: 'diameter', label: 'DIÂMETRO', width: 10, limit: 12 },
+      { key: 'joint', label: 'JUNTA', width: 12, limit: 14 },
+      { key: 'rootStamp', label: 'SOLDA RAIZ / SINETE', width: 14, limit: 10 },
+      { key: 'finishStamp', label: 'SOLDA ACABAM. / SINETE', width: 16, limit: 10 },
+      { key: 'result', label: 'LAUDO', width: 12, limit: 3 },
+    ];
+    const results: Record<string, string> = {
+      APPROVED: 'A',
+      REJECTED: 'R',
+      COMPLEMENTARY_EXAM: 'EC',
+    };
+    for (let offset = 0; offset < Math.max(1, records.length); offset += 20) {
+      const overflow: string[] = [];
+      const rows = Array.from({ length: 20 }, (_, index) => {
+        const record = records[offset + index];
+        return `<tr>${columns
+          .map(({ key, label, limit }) => {
+            const text = record
+              ? key === 'result'
+                ? results[record.result ?? ''] || '—'
+                : String(
+                    record[key] ||
+                      (key === 'item' ? String(offset + index + 1).padStart(2, '0') : '—'),
+                  )
+              : '';
+            if (text.length > limit)
+              overflow.push(
+                ...chunks(text).map(
+                  (part) =>
+                    `<p class="evs-annotation">REGISTRO ${offset + index + 1} · ${label}: ${escape(part)}</p>`,
+                ),
+              );
+            return `<td><div>${escape(text.length > limit ? text.slice(0, limit) + '…' : text)}</div></td>`;
+          })
+          .join('')}</tr>`;
+      }).join('');
+      html += sheet(
+        reportHeading,
+        `<section class="evs-direct-records"><h2>REGISTROS DE INSPEÇÃO${offset ? ' · CONTINUAÇÃO' : ''}</h2><table><colgroup>${columns.map((c) => `<col style="width:${c.width}%">`).join('')}</colgroup><thead><tr>${columns.map((c) => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><p>A: APROVADO · R: REPROVADO · EC: EXAME COMPLEMENTAR</p></section>${overflow.join('')}`,
+        true,
+      );
+    }
+  }
   for (const drawing of report.drawings) {
     const cad = drawingDataSchema.parse(drawing.data);
     html += sheet(
       'DESENHO',
-      `<div class="evs-drawing"${cad.notesDrawing?.elements.length ? ' style="height:165mm"' : ''}>${drawingSvg(
+      `<div class="evs-drawing${cad.page === 'portrait' ? ' evs-drawing-page' : ''}">${drawingSvg(
         cad,
         report.points.map((p) => ({
           id: p.id,
@@ -132,15 +205,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
           data: p.data as { acceptable?: boolean },
         })),
         { images: drawingImageSources(report, images) },
-      )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>` +
-        (cad.notesDrawing?.elements.length
-          ? `<section class="drawing-notes" style="height:64mm;padding:0 3mm"><b style="font-size:11px">OBSERVAÇÕES</b><div style="height:58mm">${drawingNotesSvg(cad)}</div></section>`
-          : '') +
-        (cad.notes
-          ? chunks(cad.notes)
-              .map((part) => `<p class="evs-annotation">${escape(part)}</p>`)
-              .join('')
-          : ''),
+      )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>`,
     );
   }
   for (const drawing of report.media.filter(
@@ -155,7 +220,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
     );
   const photoBlock = (point: PdfReport['points'][number] | null, pair: PdfReport['media']) => {
     const p = (point?.data ?? {}) as Record<string, unknown>;
-    return `<div class="evs-weld"><table class="evs-weld-tab"><tr><th>${point ? 'SOLDA -' : 'FOTO ADICIONAL'}</th><td>${escape(point?.number ?? '')}</td><th>DIMENSÃO</th><td>${escape(String(p.dimension || '—').slice(0, 60))}</td></tr><tr><th>DESCONT.</th><td>${escape(String(p.discontinuity || '—').slice(0, 60))}</td><th>ACEITÁVEL</th><td>${p.acceptable === true ? 'SIM' : p.acceptable === false ? 'NÃO' : '—'}</td></tr></table><div class="evs-photo-pair">${[0, 1].map((i) => `<div>${pair[i] ? `<img src="${images.get(pair[i]!.id) || ''}" alt="Foto ${i + 1}">` : `<span>${!pair.length && i === 0 ? 'Sem foto anexada' : ''}</span>`}</div>`).join('')}</div></div>`;
+    return `<div class="evs-weld"><table class="evs-weld-tab"><tr><th>${point ? 'SOLDA -' : 'FOTO ADICIONAL'}</th><td>${escape(point?.number ?? '')}</td><th>DIMENSÃO</th><td>${escape(String(p.dimension || '—').slice(0, 60))}</td></tr><tr><th>DESCONT.</th><td>${escape(String(p.discontinuity || '—').slice(0, 60))}</td><th>ACEITÁVEL</th><td>${p.acceptable === true ? 'SIM' : p.acceptable === false ? 'NÃO' : '—'}</td></tr></table><div class="evs-photo-pair">${[0, 1].map((i) => `<div class="report-photo-frame">${pair[i] ? `<img src="${images.get(pair[i]!.id) || ''}" alt="Foto ${i + 1}">` : `<span>${!pair.length && i === 0 ? 'Sem foto anexada' : ''}</span>`}</div>`).join('')}</div></div>`;
   };
   if (report.points.length) {
     let blocks = '';

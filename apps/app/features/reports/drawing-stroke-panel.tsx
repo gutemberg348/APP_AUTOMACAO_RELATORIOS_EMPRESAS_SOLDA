@@ -70,36 +70,33 @@ export function DrawingColorChoices({
 }) {
   const { tokens: t } = useTheme();
   return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2 }}>
-        {drawingStrokeColors.map(([name, color]) => (
-          <Pressable
-            key={color}
-            accessibilityRole="button"
-            accessibilityLabel={'Cor do texto ' + name.toLowerCase()}
-            accessibilityState={{ selected: value === color }}
-            onPress={() => onChange(color)}
-            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+    <DrawingCustomColor value={value} onChange={onChange}>
+      {drawingStrokeColors.map(([name, color]) => (
+        <Pressable
+          key={color}
+          accessibilityRole="button"
+          accessibilityLabel={'Cor do texto ' + name.toLowerCase()}
+          accessibilityState={{ selected: value === color }}
+          onPress={() => onChange(color)}
+          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              backgroundColor: color,
+              borderWidth: 2,
+              borderColor: value === color ? t.colors.text : t.colors.line,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
-            <View
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 14,
-                backgroundColor: color,
-                borderWidth: 2,
-                borderColor: value === color ? t.colors.text : t.colors.line,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {value === color && <Text style={{ color: 'white' }}>✓</Text>}
-            </View>
-          </Pressable>
-        ))}
-      </View>
-      <DrawingCustomColor value={value} onChange={onChange} />
-    </View>
+            {value === color && <Text style={{ color: 'white' }}>✓</Text>}
+          </View>
+        </Pressable>
+      ))}
+    </DrawingCustomColor>
   );
 }
 export function DrawingStrokePanel({
@@ -242,7 +239,10 @@ export function DrawingStrokePanel({
           ))}
         </View>
         <Text style={styles.label}>Cor da linha</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <DrawingCustomColor
+          value={value.strokeColor}
+          onChange={(strokeColor) => onChange({ strokeColor })}
+        >
           {drawingStrokeColors.map(([name, color]) => (
             <Pressable
               key={color}
@@ -271,11 +271,7 @@ export function DrawingStrokePanel({
               )}
             </Pressable>
           ))}
-        </View>
-        <DrawingCustomColor
-          value={value.strokeColor}
-          onChange={(strokeColor) => onChange({ strokeColor })}
-        />
+        </DrawingCustomColor>
       </View>
     </PickerSheet>
   );

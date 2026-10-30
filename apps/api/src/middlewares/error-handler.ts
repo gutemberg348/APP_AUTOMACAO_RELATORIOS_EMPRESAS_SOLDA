@@ -3,14 +3,13 @@ import { ZodError } from 'zod';
 import { Prisma } from '../generated/prisma/client';
 import { AppError } from '../errors/app-error';
 import { MulterError } from 'multer';
+import { isTransactionConflict } from '../errors/transaction-conflict';
 export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
   if (error instanceof MulterError) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        error: { code: 'INVALID_UPLOAD', message: 'Selecione uma imagem de até 10 MB por envio.' },
-      });
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_UPLOAD', message: 'Selecione uma imagem de até 10 MB por envio.' },
+    });
     return;
   }
   if (error instanceof AppError) {
@@ -27,6 +26,16 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _ne
         code: 'VALIDATION_ERROR',
         message: 'Confira os campos informados.',
         details: error.issues,
+      },
+    });
+    return;
+  }
+  if (isTransactionConflict(error)) {
+    res.status(409).json({
+      success: false,
+      error: {
+        code: 'VERSION_CONFLICT',
+        message: 'Outra alteração aconteceu ao mesmo tempo. Atualize os dados e tente novamente.',
       },
     });
     return;

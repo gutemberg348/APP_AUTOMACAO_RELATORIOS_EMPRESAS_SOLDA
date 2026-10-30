@@ -5,8 +5,11 @@ const mocks = vi.hoisted(() => ({
   exists: vi.fn(),
   get: vi.fn(),
   html: vi.fn(),
+  archivedPdf: vi.fn(),
 }));
-vi.mock('../../src/prisma/client', () => ({ prisma: { report: { findFirst: mocks.snapshot } } }));
+vi.mock('../../src/prisma/client', () => ({
+  prisma: { report: { findFirst: mocks.snapshot }, reportPdf: { findFirst: mocks.archivedPdf } },
+}));
 vi.mock('../../src/config/env', () => ({
   env: { STORAGE_PATH: '.', PDF_CHROME_EXECUTABLE: process.execPath },
 }));
@@ -54,7 +57,29 @@ beforeEach(() => {
   mocks.exists.mockResolvedValue(true);
 });
 describe('PDF for incomplete reports and located errors', () => {
-  it.each(['EVS', 'LP', 'TH', 'ME', 'RDO'])(
+  it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
+    'downloads an existing finalized %s through the current renderer, preserving its archive',
+    async (code) => {
+      const report = { ...fixture(code), status: 'FINISHED', version: 8 };
+      mocks.snapshot.mockResolvedValue(report);
+      mocks.archivedPdf.mockResolvedValue({ filePath: 'old-layout.pdf', version: 2 });
+      mocks.get.mockResolvedValue(Buffer.from('OLD-PDF'));
+      expect((await new PdfService().download('report')).toString()).toBe('%PDF-test');
+      expect(mocks.html).toHaveBeenCalledOnce();
+      expect(mocks.get).not.toHaveBeenCalled();
+      expect(report.version).toBe(8);
+      expect(report.status).toBe('FINISHED');
+    },
+  );
+  it('does not serve an archived final PDF after the report is reopened', async () => {
+    mocks.snapshot.mockResolvedValue(fixture());
+    mocks.archivedPdf.mockResolvedValue({ filePath: 'old-layout.pdf' });
+    await expect(new PdfService().download('report')).rejects.toMatchObject({
+      code: 'PDF_NOT_FOUND',
+    });
+    expect(mocks.html).not.toHaveBeenCalled();
+  });
+  it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
     'renders incomplete %s without requiring final fields',
     async (code) => {
       mocks.snapshot.mockResolvedValue({

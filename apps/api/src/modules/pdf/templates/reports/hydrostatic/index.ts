@@ -4,8 +4,9 @@ import {
   drawings,
   photoRows,
   sheet,
-  fieldMatrix,
-  matrix,
+  band,
+  annotations,
+  escape,
   conclusion,
   displayDate,
   value,
@@ -27,47 +28,69 @@ export function render(report: PdfReport, images: Map<string, string>) {
       ['ART Nº', 'artNumber'],
       ['NORMA DE REFERÊNCIA', 'referenceStandard'],
     ]);
-  let technical = fieldMatrix(data, [
+  const fields = (items: [string, unknown][], caption = '', joined = false) => {
+    const overflow: string[] = [];
+    const cells = items
+      .map(([label, raw]) => {
+        const text = String(raw ?? '').trim() || '—';
+        if (text.length > 110) overflow.push(annotations(text, label));
+        return `<div class="th-field"><b>${escape(label)}:</b><div>${escape(text.length > 110 ? text.slice(0, 110) + '…' : text)}</div></div>`;
+      })
+      .join('');
+    return (
+      `<div class="th-fields${joined ? ' th-fields-joined' : ''}">${caption ? band(caption) : ''}<div class="th-field-grid" style="grid-template-columns:repeat(${items.length},minmax(0,1fr))">${cells}</div></div>` +
+      overflow.join('')
+    );
+  };
+  const row = (items: [string, string][], caption = '', joined = false) =>
+    fields(
+      items.map(([label, path]) => [label, value(data, path)]),
+      caption,
+      joined,
+    );
+  let technical = row([
     ['CLIENTE', 'client'],
     ['PROCEDIMENTO / REVISÃO', 'procedureRevision'],
   ]);
-  technical += fieldMatrix(data, [
+  technical += row([
     ['PROJETO', 'project'],
     ['NORMA DE REFERÊNCIA', 'referenceStandard'],
   ]);
-  technical += fieldMatrix(data, [
+  technical += row([
     ['FLUIDO DO TESTE', 'testFluid'],
     ['ART Nº', 'artNumber'],
   ]);
   const date = value(data, 'manometer.calibrationDate');
-  technical += matrix(
-    ['FABRICANTE', 'CERTIFICADO Nº', 'DATA DA AFERIÇÃO', 'SÉRIE Nº'],
+  technical += fields(
     [
-      [
-        value(data, 'manometer.manufacturer'),
-        value(data, 'manometer.certificateNumber'),
-        date ? displayDate(String(date)) : '',
-        value(data, 'manometer.serialNumber'),
-      ],
+      ['FABRICANTE', value(data, 'manometer.manufacturer')],
+      ['CERTIFICADO Nº', value(data, 'manometer.certificateNumber')],
+      ['DATA DA AFERIÇÃO', date ? displayDate(String(date)) : ''],
+      ['SÉRIE Nº', value(data, 'manometer.serialNumber')],
     ],
     'MANÔMETRO',
   );
-  technical += fieldMatrix(
-    data,
+  technical += row(
     [
       ['TEMP. DE TRAB.', 'generalData.workingTemperature'],
-      ['FABRICANTE', 'generalData.manufacturer'],
       ['PRESSÃO DE TRAB.', 'generalData.workingPressure'],
+      ['PRESSÃO DO TESTE', 'generalData.testPressure'],
       ['DURAÇÃO DO TESTE', 'generalData.testDuration'],
     ],
     'DADOS GERAIS',
   );
-  technical += fieldMatrix(data, [
-    ['EQUIPAMENTO', 'generalData.equipment'],
-    ['MATERIAL', 'generalData.material'],
-    ['ESPESSURA', 'generalData.thickness'],
-    ['DIMENSÃO', 'generalData.dimension'],
-  ]);
+  technical += row(
+    [
+      ['EQUIPAMENTO', 'generalData.equipment'],
+      ['MATERIAL', 'generalData.material'],
+      ['ESPESSURA', 'generalData.thickness'],
+      ['DIMENSÃO', 'generalData.dimension'],
+    ],
+    '',
+    true,
+  );
+  if (value(data, 'generalData.manufacturer'))
+    technical += row([['FABRICANTE DO EQUIPAMENTO', 'generalData.manufacturer']], '', true);
   html += sheet(report, titles.TH!, technical, false, 'th-technical');
   html += drawings(report, images);
   const photos = photoRows(report, images, 'TH');

@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mock.update.mockResolvedValue({ count: 1 });
 });
-it.each(['EVS', 'LP', 'TH', 'ME', 'RDO'])(
+it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
   'changes %s status with a full database record and acknowledged missing fields',
   async (code) => {
     mock.get.mockResolvedValue({

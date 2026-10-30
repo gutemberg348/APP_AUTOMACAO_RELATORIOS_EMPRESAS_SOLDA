@@ -307,7 +307,7 @@ it('reuses people and immutable signatures, preserves reports on profile edits, 
   const saved = await request(app)
     .post('/reports')
     .set(auth())
-    .send({ companyId, projectId, reportTypeId, signatures: [signature] });
+    .send({ companyId, projectId, reportTypeId, number: 'QA-SIGNATURE', signatures: [signature] });
   expect(saved.status, JSON.stringify(saved.body)).toBe(201);
   const reportId = saved.body.data.id;
   const changed = {

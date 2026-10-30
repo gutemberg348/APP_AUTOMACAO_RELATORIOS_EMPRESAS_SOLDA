@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { evsDraftSchema, evsSubmissionSchema } from './evs.schema';
+import { evdDraftSchema, evdSubmissionSchema } from './evd.schema';
 import { lpDraftSchema, lpSubmissionSchema } from './lp.schema';
 import { hydrostaticDraftSchema, hydrostaticSubmissionSchema } from './hydrostatic.schema';
 import { thicknessDraftSchema, thicknessSubmissionSchema } from './thickness.schema';
 import { rdoDraftSchema, rdoSubmissionSchema } from './rdo.schema';
 export const reportSchemaRegistry: Record<string, { draft: z.ZodType; submission: z.ZodType }> = {
   EVS: { draft: evsDraftSchema, submission: evsSubmissionSchema },
+  EVD: { draft: evdDraftSchema, submission: evdSubmissionSchema },
   LP: { draft: lpDraftSchema, submission: lpSubmissionSchema },
   TH: { draft: hydrostaticDraftSchema, submission: hydrostaticSubmissionSchema },
   ME: { draft: thicknessDraftSchema, submission: thicknessSubmissionSchema },
@@ -70,6 +72,7 @@ export function validateSpecificData(
   return parsed;
 }
 export * from './evs.schema';
+export * from './evd.schema';
 export * from './lp.schema';
 export * from './hydrostatic.schema';
 export * from './thickness.schema';

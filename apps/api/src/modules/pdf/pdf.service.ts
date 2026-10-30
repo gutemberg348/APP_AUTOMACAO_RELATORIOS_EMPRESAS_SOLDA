@@ -11,12 +11,14 @@ import { LocalStorageProvider } from '../../services/storage/local-storage-provi
 import type { PdfReport } from './templates/reports/layout';
 import { render as evs, evsDocumentHtml } from './templates/reports/evs';
 import { paginateEvs } from './templates/reports/evs/paginate';
+import { reportPageMarginMm } from './templates/reports/page-geometry';
 import { render as lp } from './templates/reports/lp';
 import { render as hydrostatic } from './templates/reports/hydrostatic';
 import { render as thickness } from './templates/reports/thickness';
 import { render as rdo } from './templates/reports/rdo';
 const renderers: Record<string, (report: PdfReport, images: Map<string, string>) => string> = {
   EVS: evs,
+  EVD: evs,
   LP: lp,
   TH: hydrostatic,
   ME: thickness,
@@ -183,7 +185,9 @@ export class PdfService implements PdfProvider {
           printBackground: true,
           preferCSSPageSize: true,
           displayHeaderFooter: false,
-          margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+          margin: Object.fromEntries(
+            ['top', 'bottom', 'left', 'right'].map((side) => [side, `${reportPageMarginMm}mm`]),
+          ),
         }),
       );
     } finally {
@@ -216,17 +220,19 @@ export class PdfService implements PdfProvider {
     return this.storage.delete(filePath);
   }
   async download(id: string) {
-    await this.snapshot(id);
+    const report = await this.snapshot(id);
     const pdf = await prisma.reportPdf.findFirst({
       where: { reportId: id },
       orderBy: { version: 'desc' },
     });
-    if (!pdf)
+    if (!pdf || !['APPROVED', 'FINISHED'].includes(report.status))
       throw new AppError(
         404,
         'PDF_NOT_FOUND',
         'Finalize o relatório aprovado para disponibilizar o PDF final.',
       );
-    return this.storage.get(pdf.filePath);
+    // Download with the current template, including reports finalized before
+    // a layout update. Keep archived PDFs and the report's version unchanged.
+    return this.render(report, true);
   }
 }

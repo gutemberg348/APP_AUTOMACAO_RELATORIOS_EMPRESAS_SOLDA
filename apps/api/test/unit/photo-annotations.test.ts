@@ -28,6 +28,40 @@ const marks: PhotoAnnotations = {
   ],
 };
 describe('Non-destructive photo annotation and brushes', () => {
+  it('renders numbered photo circles even without brush strokes and preserves measurement values', async () => {
+    const annotations = {
+      elements: [],
+      measurements: [{ id: 'one', number: '01', x: 0.5, y: 0.5, value: 5.9 }],
+    };
+    expect(photoAnnotationsSchema.parse(annotations)).toEqual(annotations);
+    const source = await sharp({
+      create: { width: 400, height: 300, channels: 3, background: '#FF0000' },
+    })
+      .png()
+      .toBuffer();
+    const original = Buffer.from(source);
+    const result = await photoWithAnnotations(source, 'image/png', annotations);
+    expect(result).not.toBe('data:image/png;base64,' + source.toString('base64'));
+    expect(source.equals(original)).toBe(true);
+    const info = await sharp(Buffer.from(result.split(',')[1]!, 'base64')).metadata();
+    expect([info.width, info.height]).toEqual([400, 300]);
+    expect(photoAnnotationsSvg('image', 400, 300, annotations)).toContain('>01</text>');
+    expect(
+      photoAnnotationsSchema.safeParse({
+        ...annotations,
+        measurements: [
+          ...annotations.measurements,
+          { ...annotations.measurements[0], id: 'two', number: '1' },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      photoAnnotationsSchema.safeParse({
+        ...annotations,
+        measurements: [{ ...annotations.measurements[0], x: 1.1 }],
+      }).success,
+    ).toBe(false);
+  });
   it('retains brush appearance in drawing data and transparent SVG', () => {
     for (const brush of drawingBrushes) {
       const element = { ...marks.elements[0]!, brush: brush.id, strokeWidth: brush.width };

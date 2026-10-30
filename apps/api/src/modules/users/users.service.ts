@@ -10,6 +10,7 @@ import type { z } from 'zod';
 import { Prisma, type UserStatus } from '../../generated/prisma/client';
 import { prisma } from '../../prisma/client';
 import { AppError } from '../../errors/app-error';
+import { isTransactionConflict } from '../../errors/transaction-conflict';
 import { pageResult } from '../../utils/http';
 
 const select = {
@@ -35,13 +36,13 @@ export async function userWriteTransaction<T>(work: (tx: Tx) => Promise<T>) {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
   } catch (error) {
+    if (isTransactionConflict(error))
+      throw new AppError(
+        409,
+        'VERSION_CONFLICT',
+        'O cadastro mudou durante esta ação. Atualize a lista e tente novamente.',
+      );
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2034')
-        throw new AppError(
-          409,
-          'VERSION_CONFLICT',
-          'O cadastro mudou durante esta ação. Atualize a lista e tente novamente.',
-        );
       if (error.code === 'P2002')
         throw new AppError(
           409,

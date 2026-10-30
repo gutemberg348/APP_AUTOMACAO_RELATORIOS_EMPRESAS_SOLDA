@@ -20,6 +20,7 @@ export function buildReportDefaults(
     work: project.name,
     project: project.code || project.name,
     location: project.location || '',
+    ...(code === 'EVD' ? { inspectionType: 'EVS DIRETO' } : {}),
     ...defaults.common,
     ...defaults.byType?.[code],
   };

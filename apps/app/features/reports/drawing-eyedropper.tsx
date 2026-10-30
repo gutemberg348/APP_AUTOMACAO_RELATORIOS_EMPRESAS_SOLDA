@@ -1,19 +1,13 @@
 import { createContext, useContext, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 import Svg, { SvgXml } from 'react-native-svg';
-import { decode } from 'fast-png';
+import { rgbHex, sampleDrawingPng } from './drawing-sample-color';
+import { Icon } from '../../components/icon';
 import { PickerSheet } from '../../components/picker-sheet';
 import { Button } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 
 export const DrawingColorSource = createContext('');
-
-const hex = (rgb: number[]) =>
-  '#' +
-  rgb
-    .map((n) => Math.round(n).toString(16).padStart(2, '0'))
-    .join('')
-    .toUpperCase();
 
 async function webPixel(source: string, x: number, y: number) {
   // Images referenced by an SVG loaded into a browser canvas must be embedded.
@@ -49,7 +43,16 @@ async function webPixel(source: string, x: number, y: number) {
     context.fillStyle = 'white';
     context.fillRect(0, 0, 1000, 800);
     context.drawImage(image, 0, 0, 1000, 800);
-    return hex([...context.getImageData(x, y, 1, 1).data].slice(0, 3));
+    return rgbHex(
+      [
+        ...context.getImageData(
+          Math.min(999, Math.floor(x * 1000)),
+          Math.min(799, Math.floor(y * 800)),
+          1,
+          1,
+        ).data,
+      ].slice(0, 3),
+    );
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -64,7 +67,7 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
     [error, setError] = useState('');
   const [point, setPoint] = useState<{ x: number; y: number }>();
   const svg = useRef<Svg>(null),
-    width = useRef(1),
+    size = useRef({ width: 1, height: 1 }),
     request = useRef(0);
   const close = () => {
     request.current++;
@@ -73,11 +76,14 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
   };
   const pick = async (px: number, py: number) => {
     if (busy) return;
-    const x = Math.max(0, Math.min(999, Math.floor((px / width.current) * 1000)));
-    const y = Math.max(0, Math.min(799, Math.floor((py / width.current) * 1000)));
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+    const x = Math.max(0, Math.min(1, px / size.current.width));
+    const y = Math.max(0, Math.min(1, py / size.current.height));
     const token = ++request.current;
     setBusy(true);
     setError('');
+    setColor(undefined);
+    setPoint(undefined);
     try {
       let next: string;
       if (Platform.OS === 'web') next = await webPixel(source, x, y);
@@ -89,27 +95,22 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
             reject(new Error('Prévia indisponível'));
             return;
           }
-          svg.current.toDataURL(
-            (value) => {
-              clearTimeout(timeout);
-              resolve(value);
-            },
-            { width: 1000, height: 800 },
-          );
+          // Export at the displayed SVG bounds. On iOS, supplying larger bounds
+          // enlarges the bitmap but drawRect still draws at the view's own size.
+          svg.current.toDataURL((value) => {
+            clearTimeout(timeout);
+            resolve(value);
+          });
         });
-        const png = decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
-        if (png.depth !== 8 || png.channels < 3 || png.palette)
-          throw new Error('Formato de prévia inválido');
-        const offset =
-          (Math.min(png.height - 1, Math.floor((y / 800) * png.height)) * png.width +
-            Math.min(png.width - 1, Math.floor((x / 1000) * png.width))) *
-          png.channels;
-        const alpha = png.channels === 4 ? png.data[offset + 3]! / 255 : 1;
-        next = hex([0, 1, 2].map((c) => png.data[offset + c]! * alpha + 255 * (1 - alpha)));
+        next = sampleDrawingPng(
+          Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
+          x,
+          y,
+        );
       }
       if (token === request.current) {
         setColor(next);
-        setPoint({ x: x / 10, y: y / 8 });
+        setPoint({ x: x * 100, y: y * 100 });
       }
     } catch {
       if (token === request.current)
@@ -121,18 +122,28 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
   if (!source) return null;
   return (
     <>
-      <Button
-        title="Conta-gotas · pegar cor"
-        icon="eyedropper"
-        secondary
-        small
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Conta-gotas · pegar cor"
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          borderWidth: 2,
+          borderColor: t.colors.line,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: t.colors.soft,
+        }}
         onPress={() => {
           setColor(undefined);
           setPoint(undefined);
           setError('');
           setOpen(true);
         }}
-      />
+      >
+        <Icon name="eyedropper" size={22} color={t.colors.text} />
+      </Pressable>
       <PickerSheet
         visible={open}
         title="Conta-gotas"
@@ -156,7 +167,7 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
           accessibilityRole="button"
           accessibilityLabel="Capturar cor da prévia"
           onLayout={(e) => {
-            width.current = e.nativeEvent.layout.width;
+            size.current = e.nativeEvent.layout;
           }}
           onStartShouldSetResponder={() => true}
           onResponderRelease={(e) => void pick(e.nativeEvent.locationX, e.nativeEvent.locationY)}
@@ -164,14 +175,10 @@ export function DrawingEyedropper({ onChange }: { onChange(color: string): void 
             width: '100%',
             aspectRatio: 1.25,
             backgroundColor: 'white',
-            borderWidth: 1,
-            borderColor: t.colors.line,
           }}
         >
           <View pointerEvents="none" style={{ position: 'absolute', inset: 0 }}>
-            <Svg ref={svg} width="100%" height="100%" viewBox="0 0 1000 800">
-              <SvgXml xml={source} />
-            </Svg>
+            <SvgXml xml={source} override={{ ref: svg, width: '100%', height: '100%' }} />
           </View>
           {point && (
             <View

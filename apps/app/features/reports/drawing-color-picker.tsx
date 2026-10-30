@@ -1,10 +1,11 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { View, Text, type GestureResponderEvent } from 'react-native';
+import { View, Text, Pressable, type ViewInstance, type GestureResponderEvent } from 'react-native';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { Button, IconButton } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 import { colorHSV, hsvColor } from './drawing-color';
 import { DrawingEyedropper } from './drawing-eyedropper';
+import { usePageScroll } from '../../components/page-scroll';
 
 function ColorArea({
   label,
@@ -58,15 +59,19 @@ function ColorArea({
 export function DrawingCustomColor({
   value,
   onChange,
+  children,
 }: {
   value: string;
   onChange(color: string): void;
+  children?: ReactNode;
 }) {
   const { styles, tokens: t } = useTheme();
   const [open, setOpen] = useState(false),
     [hsv, setHSV] = useState(() => colorHSV(value));
   const id = useId().replace(/[^a-z0-9]/gi, '');
   const color = hsvColor(hsv);
+  const reveal = usePageScroll();
+  const panel = useRef<ViewInstance>(null);
   const adjust = (key: 'h' | 's' | 'v', amount: number) =>
     setHSV((old) => ({
       ...old,
@@ -74,19 +79,40 @@ export function DrawingCustomColor({
     }));
   return (
     <View style={{ gap: 12, width: '100%' }}>
-      <DrawingEyedropper onChange={onChange} />
-      <Button
-        title="Cor personalizada"
-        icon="edit"
-        small
-        secondary
-        onPress={() => {
-          setHSV(colorHSV(value));
-          setOpen(!open);
-        }}
-      />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {children}
+        <DrawingEyedropper onChange={onChange} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cor personalizada"
+          accessibilityState={{ expanded: open }}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            borderWidth: 2,
+            borderColor: open ? t.colors.text : t.colors.line,
+            overflow: 'hidden',
+          }}
+          onPress={() => {
+            setHSV(colorHSV(value));
+            setOpen(!open);
+          }}
+        >
+          <Svg width="100%" height="100%" viewBox="0 0 40 40" pointerEvents="none">
+            <Defs>
+              <LinearGradient id={id + 'palette'} x1="0%" y1="0%" x2="100%" y2="100%">
+                {['#FF3030', '#FFDD00', '#30DD60', '#00BBFF', '#743AFF', '#FF40AA'].map((c, i) => (
+                  <Stop key={c} offset={i / 5} stopColor={c} />
+                ))}
+              </LinearGradient>
+            </Defs>
+            <Rect width="40" height="40" fill={`url(#${id}palette)`} />
+          </Svg>
+        </Pressable>
+      </View>
       {open && (
-        <>
+        <View ref={panel} onLayout={() => reveal(panel.current)} style={{ gap: 12 }}>
           <Text style={styles.muted}>
             Arraste na faixa para escolher a cor e no quadrado para ajustar o tom.
           </Text>
@@ -210,7 +236,7 @@ export function DrawingCustomColor({
               setOpen(false);
             }}
           />
-        </>
+        </View>
       )}
     </View>
   );

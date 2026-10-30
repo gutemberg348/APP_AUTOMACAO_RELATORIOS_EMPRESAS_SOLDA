@@ -8,7 +8,8 @@ export async function photoWithAnnotations(
 ) {
   if (!annotations) return 'data:' + mimeType + ';base64,' + content.toString('base64');
   const parsed = photoAnnotationsSchema.parse(annotations);
-  if (!parsed.elements.length) return 'data:' + mimeType + ';base64,' + content.toString('base64');
+  if (!parsed.elements.length && !parsed.measurements?.length)
+    return 'data:' + mimeType + ';base64,' + content.toString('base64');
   const info = await sharp(content).metadata();
   const width = Math.min(2000, info.width ?? 1600);
   const height = Math.round((width * (info.height ?? 800)) / (info.width ?? 1000));
@@ -17,6 +18,7 @@ export async function photoWithAnnotations(
     info.width ?? 1000,
     info.height ?? 800,
     {
+      measurements: parsed.measurements,
       elements: parsed.elements.map((e) =>
         e.type === 'text' ? { ...e, text: e.text.toLocaleUpperCase('pt-BR') } : e,
       ),

@@ -1,6 +1,7 @@
 import { useTheme } from '../../utils/theme';
 import { Text, View } from 'react-native';
-import { reportConfigSchema, type Report } from '@weldcosta/shared';
+import { reportConfigSchema, type Report, type VisualInspectionRecord } from '@weldcosta/shared';
+import { VisualInspectionRecords } from './visual-inspection-records';
 import { Card, PanelHeader, FormGrid, FormCell, Badge } from '../../components/ui';
 import { reportSections } from './report-fields';
 import { formatDate } from '../../utils/format';
@@ -107,13 +108,16 @@ export function ReportSummary({ report }: { report: Report }) {
               }}
             >
               <Text style={styles.label}>
-                Ponto / solda {point.number} {point.label ? '· ' + point.label : ''}
+                {report.reportType.code === 'LP' ? 'Soldas ' : 'Ponto / solda '}
+                {point.number} {point.label ? '· ' + point.label : ''}
               </Text>
-              <Text style={styles.text}>
-                {point.type === 'MEASUREMENT'
-                  ? 'Leitura: ' + (point.value ?? 'Não informada') + ' ' + (point.unit ?? '')
-                  : 'Dimensão: ' + (point.data?.dimension || 'Não informada')}
-              </Text>
+              {report.reportType.code !== 'LP' && (
+                <Text style={styles.text}>
+                  {point.type === 'MEASUREMENT'
+                    ? 'Leitura: ' + (point.value ?? 'Não informada') + ' ' + (point.unit ?? '')
+                    : 'Dimensão: ' + (point.data?.dimension || 'Não informada')}
+                </Text>
+              )}
               <Text style={styles.muted}>
                 Descontinuidade: {point.data?.discontinuity || 'Não informada'} · Aceitável:{' '}
                 {point.data?.acceptable === true
@@ -122,7 +126,7 @@ export function ReportSummary({ report }: { report: Report }) {
                     ? 'Não'
                     : 'Não informado'}
               </Text>
-              {!!point.data?.projectThickness && (
+              {report.reportType.code !== 'LP' && !!point.data?.projectThickness && (
                 <Text style={styles.text}>Espessura de projeto: {point.data.projectThickness}</Text>
               )}
               {!!point.data?.notes && <Text style={styles.text}>{point.data.notes}</Text>}
@@ -130,6 +134,18 @@ export function ReportSummary({ report }: { report: Report }) {
           ))}
         </Card>
       )}
+      {report.reportType.code === 'EVD' &&
+        Array.isArray(report.specificData.inspectionRecords) &&
+        !!report.specificData.inspectionRecords.length && (
+          <Card>
+            <PanelHeader title="Registros de inspeção" />
+            <VisualInspectionRecords
+              value={report.specificData.inspectionRecords as VisualInspectionRecord[]}
+              onChange={() => {}}
+              editable={false}
+            />
+          </Card>
+        )}
       {Array.isArray(report.specificData.discontinuities) &&
         !!report.specificData.discontinuities.length && (
           <Card>

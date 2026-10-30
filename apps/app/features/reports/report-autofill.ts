@@ -1,5 +1,15 @@
 import { drawingId, nextPointNumber, reportSections, type ReportPoint } from '@weldcosta/shared';
 
+export function nextLpWeldNumber(points: { number: string }[]) {
+  return nextPointNumber(
+    points.flatMap((point) =>
+      /^\d+(?:\s*[-,;]\s*\d+)+$/.test(point.number.trim())
+        ? point.number.match(/\d+/g)!.map((number) => ({ number }))
+        : [point],
+    ),
+  );
+}
+
 export function pointBatch(
   points: ReportPoint[],
   measurement: boolean,

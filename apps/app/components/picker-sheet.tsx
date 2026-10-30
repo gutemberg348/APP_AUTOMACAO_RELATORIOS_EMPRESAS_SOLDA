@@ -27,6 +27,7 @@ export function PickerSheet({
   children,
   footer,
   maxWidth = 520,
+  fillHeight = false,
 }: PropsWithChildren<{
   visible: boolean;
   title: string;
@@ -35,6 +36,7 @@ export function PickerSheet({
   onClose(): void;
   footer?: ReactNode;
   maxWidth?: number;
+  fillHeight?: boolean;
 }>) {
   const { tokens: t, styles } = useTheme();
   const { width, height } = useWindowDimensions();
@@ -88,6 +90,7 @@ export function PickerSheet({
             maxWidth,
             flexShrink: 1,
             maxHeight: height - Math.max(32, insets.top + 16),
+            ...(fillHeight ? { height: height - Math.max(32, insets.top + 16) } : {}),
             backgroundColor: t.colors.surface,
             borderRadius: 22,
             borderBottomLeftRadius: mobile ? 0 : 22,

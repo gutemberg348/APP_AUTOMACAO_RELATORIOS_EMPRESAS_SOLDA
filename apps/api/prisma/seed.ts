@@ -32,6 +32,7 @@ async function seed() {
   }
   const types = {
     EVS: 'Ensaio Visual / Endoscopia',
+    EVD: 'Ensaio Visual Direto',
     LP: 'Líquido Penetrante',
     TH: 'Teste Hidrostático',
     ME: 'Medição de Espessura',

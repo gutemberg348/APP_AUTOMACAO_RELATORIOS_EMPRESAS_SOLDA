@@ -53,6 +53,14 @@ const labels: Record<string, string> = {
   revision: 'Revisão',
   photos: 'Fotos',
   mediaKey: 'Imagem',
+  inspectionRecords: 'Registros de inspeção',
+  item: 'Item',
+  drawingReference: 'Desenho nº / revisão',
+  diameter: 'Diâmetro',
+  joint: 'Junta',
+  rootStamp: 'Sinete da solda de raiz',
+  finishStamp: 'Sinete da solda de acabamento',
+  result: 'Laudo do registro',
 };
 
 export function reportCorrections(
@@ -82,7 +90,11 @@ export function reportCorrections(
             : ''
       : path[0] === 'specificData' && path[1] === 'discontinuities' && /^\d+$/.test(path[2] ?? '')
         ? `Descontinuidade ${Number(path[2]) + 1} · `
-        : '';
+        : path[0] === 'specificData' &&
+            path[1] === 'inspectionRecords' &&
+            /^\d+$/.test(path[2] ?? '')
+          ? `Registro ${Number(path[2]) + 1} · `
+          : '';
     const section = technical ? sections.find((s) => s.fields.includes(technical)) : undefined;
     const label =
       prefix + (technical?.label ?? labels[key] ?? labels[path[0] ?? ''] ?? 'Dados do relatório');
@@ -99,19 +111,21 @@ export function reportCorrections(
             ? 'Abra este desenho, confira a imagem indicada e conclua o desenho. Toque em Salvar e aguarde o envio antes de baixar o PDF.'
             : path[0] === 'specificData' && path[1] === 'discontinuities'
               ? 'Abra Descontinuidades e revise o código ou a descrição da linha indicada. O código aceita até 100 caracteres e a descrição até 10.000.'
-              : path[0] === 'drawings'
-                ? 'Abra este desenho e ajuste o item indicado nas propriedades. Depois conclua o desenho e salve o relatório.'
-                : key === 'value'
-                  ? 'Informe apenas uma leitura numérica válida, por exemplo 2,5. A unidade fica no campo Unidade.'
-                  : key === 'acceptable'
-                    ? 'Escolha Sim, Não ou Não informado na opção Aceitável do ponto.'
-                    : issue.code === 'too_big'
-                      ? 'Reduza o conteúdo ou a quantidade de itens até o limite informado acima.'
-                      : issue.code === 'invalid_value'
-                        ? 'Selecione uma das opções disponíveis neste campo.'
-                        : path[0] === 'signatures'
-                          ? 'Confira os dados deste responsável. Se a assinatura não estiver disponível, selecione a pessoa ou envie a assinatura novamente.'
-                          : `Revise o campo ${technical?.label ?? labels[key] ?? 'indicado'}${section ? ' em ' + section.title : ''} e salve novamente.`;
+              : path[0] === 'specificData' && path[1] === 'inspectionRecords'
+                ? 'Abra Registros de inspeção e revise o item indicado. Confira o desenho, a junta e os sinetes; em Laudo escolha uma das opções disponíveis.'
+                : path[0] === 'drawings'
+                  ? 'Abra este desenho e ajuste o item indicado nas propriedades. Depois conclua o desenho e salve o relatório.'
+                  : key === 'value'
+                    ? 'Informe apenas uma leitura numérica válida, por exemplo 2,5. A unidade fica no campo Unidade.'
+                    : key === 'acceptable'
+                      ? 'Escolha Sim, Não ou Não informado na opção Aceitável do ponto.'
+                      : issue.code === 'too_big'
+                        ? 'Reduza o conteúdo ou a quantidade de itens até o limite informado acima.'
+                        : issue.code === 'invalid_value'
+                          ? 'Selecione uma das opções disponíveis neste campo.'
+                          : path[0] === 'signatures'
+                            ? 'Confira os dados deste responsável. Se a assinatura não estiver disponível, selecione a pessoa ou envie a assinatura novamente.'
+                            : `Revise o campo ${technical?.label ?? labels[key] ?? 'indicado'}${section ? ' em ' + section.title : ''} e salve novamente.`;
     return { path, label, message, guidance };
   });
 }

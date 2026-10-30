@@ -89,6 +89,14 @@ export function PhotoPreview({
         )}
       </View>
       <Notice error={error} />
+      {annotations?.measurements
+        ?.filter((point) => point.value != null)
+        .map((point) => (
+          <Text key={point.id} style={styles.label}>
+            Ponto {point.number}:{' '}
+            {point.value!.toLocaleString('pt-BR', { maximumFractionDigits: 20 })} mm
+          </Text>
+        ))}
       {!!error && (
         <Button
           title="Tentar abrir foto novamente"

@@ -6,6 +6,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { View, Text, Pressable } from 'react-native';
 import {
   buildReportDefaults,
+  isVisualWeldReport,
   type ReportType,
   type Paginated,
   type Project,
@@ -35,6 +36,7 @@ import { ReportProgress } from '../../../features/reports/report-progress';
 
 const descriptions: Record<string, { icon: IconName; text: string }> = {
   EVS: { icon: 'eye', text: 'Identificação, processo e critérios de inspeção.' },
+  EVD: { icon: 'eye', text: 'Inspeção visual direta, juntas, sinetes, desenhos e fotos.' },
   LP: { icon: 'layers', text: 'Dados do ensaio e materiais utilizados.' },
   TH: { icon: 'tool', text: 'Dados do teste, equipamento e manômetro.' },
   ME: { icon: 'edit', text: 'Espessura de projeto e identificação do equipamento.' },
@@ -304,7 +306,9 @@ export default function NewReport() {
                 projectId={projectId}
                 initialData={buildReportDefaults(type.code, context.data, context.data.company)}
                 initialTitle={
-                  type.code === 'EVS' ? context.data.name : context.data.name + ' · ' + type.name
+                  isVisualWeldReport(type.code)
+                    ? context.data.name
+                    : context.data.name + ' · ' + type.name
                 }
               />
             ) : type ? (

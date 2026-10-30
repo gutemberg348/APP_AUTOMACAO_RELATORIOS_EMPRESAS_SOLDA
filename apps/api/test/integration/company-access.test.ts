@@ -45,7 +45,13 @@ beforeAll(async () => {
     expect(login.status).toBe(200);
     sessions[code] = login.body.data;
   }
-  const data = { companyId: a, projectId: projectA, reportTypeId, title: 'ACL Relatório' };
+  const data = {
+    companyId: a,
+    projectId: projectA,
+    reportTypeId,
+    number: 'QA-ACL',
+    title: 'ACL Relatório',
+  };
   const create = async (code: string) => {
     const response = await request(app).post('/reports').set(auth(code)).send(data);
     expect(response.status, JSON.stringify(response.body)).toBe(201);
@@ -178,7 +184,7 @@ it('limits operators to their own reports and prevents forged filters, direct PD
       await request(app)
         .post('/reports')
         .set(auth('OPERATOR'))
-        .send({ companyId: b, projectId: projectB, reportTypeId })
+        .send({ companyId: b, projectId: projectB, reportTypeId, number: 'QA-DENIED' })
     ).status,
   ).toBe(403);
   expect(

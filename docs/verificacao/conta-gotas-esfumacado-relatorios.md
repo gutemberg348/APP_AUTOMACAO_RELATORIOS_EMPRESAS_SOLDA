@@ -21,4 +21,12 @@
 
 ## Limites e publicação
 
+### Ajuste da paleta e captura no iPhone (29/10)
+
+- Conta-gotas e cor personalizada agora são atalhos circulares de 44 × 44 junto das cores. A cor personalizada expande o seletor e revela o painel pela rolagem do formulário.
+- Captura nativa usa o tamanho real do SVG exibido, com uma única raiz. O código iOS de `react-native-svg` desenha usando os limites da view mesmo quando `toDataURL` recebe uma imagem de saída maior; a captura anterior de 1000 × 800 podia ler transparência fora do desenho. As coordenadas agora são normalizadas pela largura/altura da prévia e convertidas usando as dimensões reais do PNG, inclusive Retina.
+- Nova captura limpa a amostra anterior para não oferecer uma cor antiga se ocorrer falha.
+- Quatro testes de pixels aprovados: densidades 1×/2×/3×, quatro regiões de cores diferentes, bordas, transparência e coordenadas inválidas.
+- Chrome em 390 × 844: atalhos compactos na mesma paleta, expansão/rolagem automática, quatro pontos capturados iguais aos pixels visíveis da foto e persistência da cor no traço. Typecheck, ESLint e exportação web aprovados. A confirmação em iPhone físico continua pendente.
+
 Testes de interação executados no navegador; conta-gotas nativo ainda precisa de conferência em dispositivo físico. Não houve deploy, alteração de dados de produção ou geração de APK nesta verificação. Publicar a API/web e atualizar o app para disponibilizar o conjunto de alterações; nenhuma migração de banco nova foi adicionada nesta etapa.
