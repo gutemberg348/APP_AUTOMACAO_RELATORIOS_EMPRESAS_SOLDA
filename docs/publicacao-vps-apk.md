@@ -129,6 +129,20 @@ As variáveis do build são passadas ao processo, preservando `apps/app/.env` us
 
 ## Atualização e diagnóstico
 
+### Atualização somente da API
+
+O build completo compila primeiro a API e depois o painel, evitando disputar CPU/memória na VPS. Os containers só são atualizados após os dois builds terminarem com sucesso. O painel usa um worker do Metro por padrão e preserva seu cache de transformações entre builds com BuildKit. Alterações apenas no app também preservam a camada de compilação do pacote shared. O primeiro build após essa mudança ainda precisa popular o cache; não há garantia de duração sem medir os recursos da VPS.
+
+Para uma instalação já funcionando, quando a mudança for somente no backend ou nos templates de PDF:
+
+```sh
+git pull origin master && npm run docker:production:api
+```
+
+Esse comando reconstrói a API usando o cache disponível, aplica migrations/seed na inicialização e aguarda sua saúde. Não reconstrói nem reinicia o painel web. O PostgreSQL continua sendo uma dependência verificada pelo Compose. A API pode ficar brevemente indisponível durante sua substituição.
+
+Quando também houver alterações na interface, em código compartilhado usado pelo painel ou na instalação inicial, use `npm run docker:production`. A atualização só da API não publica mudanças de interface. Não limpe o cache de build rotineiramente: isso força o download e a instalação das dependências novamente.
+
 ### Gestão de usuários
 
 Os perfis atuais e as regras de empresas liberadas estão em [níveis de acesso](niveis-acesso.md). Esta atualização inclui a migration `202610140003_company_access`. Depois de publicar, edite os usuários Inspetor/Operador para selecionar suas empresas; contas sem seleção ficam sem acesso a esses registros. Gerente e Administrador veem todas as empresas. Publicação de tutoriais permanece exclusiva do Administrador.
