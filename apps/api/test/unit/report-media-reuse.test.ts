@@ -8,11 +8,16 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/prisma/client';
 import { authService } from '../../src/modules/auth/auth.service';
 
+const storageMocks = vi.hoisted(() => ({
+  save: vi.fn<(key: string, content: Buffer) => Promise<void>>(async () => {}),
+  delete: vi.fn(async () => {}),
+}));
+
 vi.mock('../../src/modules/auth/auth.service', () => ({ authService: { authenticate: vi.fn() } }));
 vi.mock('../../src/services/storage/local-storage-provider', () => ({
   LocalStorageProvider: class {
-    save = vi.fn(async () => {});
-    delete = vi.fn(async () => {});
+    save = storageMocks.save;
+    delete = storageMocks.delete;
   },
 }));
 vi.mock('../../src/prisma/client', () => ({
@@ -26,6 +31,7 @@ vi.mock('../../src/prisma/client', () => ({
   },
 }));
 const reportId = randomUUID(),
+  projectId = randomUUID(),
   pointId = randomUUID(),
   otherPoint = randomUUID(),
   mediaId = randomUUID();
@@ -51,6 +57,7 @@ beforeEach(async () => {
     id: reportId,
     status: 'DRAFT',
     version: 1,
+    projectId,
   } as never);
   vi.mocked(prisma.reportPoint.findFirst).mockImplementation(async (args) =>
     args?.where?.id === pointId || args?.where?.id === otherPoint
@@ -95,6 +102,61 @@ const upload = (point = pointId) =>
     .field('version', '1')
     .field('reportPointId', point)
     .attach('file', image, 'renamed.png');
+
+it('accepts a small compressed 48MP phone photo and resizes it for storage', async () => {
+  image = await sharp({ create: { width: 8000, height: 6000, channels: 3, background: '#2081A4' } })
+    .jpeg({ quality: 75 })
+    .toBuffer();
+  expect(image.length).toBeLessThan(1024 * 1024);
+  const response = await upload();
+  expect(response.status, JSON.stringify(response.body)).toBe(201);
+  const stored = await sharp(storageMocks.save.mock.calls[0]![1] as Buffer).metadata();
+  expect([stored.width, stored.height]).toEqual([2400, 1800]);
+});
+it('does not blame small photos for invalid upload fields or oversized annotations', async () => {
+  const wrongField = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .attach('photo', image, 'small.png');
+  expect(wrongField.status).toBe(400);
+  expect(wrongField.body.error.code).toBe('INVALID_UPLOAD_FILE');
+  expect(wrongField.body.error.message).not.toContain('10 MB');
+  const fieldOverflow = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .field('annotations', ' '.repeat(4 * 1024 * 1024 + 1))
+    .attach('file', image, 'small.png');
+  expect(fieldOverflow.status).toBe(400);
+  expect(fieldOverflow.body.error.code).toBe('UPLOAD_FIELD_TOO_LARGE');
+  expect(fieldOverflow.body.error.message).not.toContain('10 MB');
+  expect(prisma.reportMedia.create).not.toHaveBeenCalled();
+});
+it('reports an actual file-size failure separately from invalid or unsupported image contents', async () => {
+  const tooLarge = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .attach('file', Buffer.alloc(10 * 1024 * 1024 + 1), 'large.jpg');
+  expect(tooLarge.status).toBe(400);
+  expect(tooLarge.body.error.code).toBe('IMAGE_TOO_LARGE');
+  const broken = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .attach('file', Buffer.from('broken'), 'small.jpg');
+  expect(broken.body.error.code).toBe('INVALID_IMAGE');
+  expect(broken.body.error.message).not.toContain('10 MB');
+  const gif = await sharp(image).gif().toBuffer();
+  const unsupported = await request(app)
+    .post(`/reports/${reportId}/media`)
+    .set(auth)
+    .field('version', '1')
+    .attach('file', gif, 'small.gif');
+  expect(unsupported.body.error.code).toBe('UNSUPPORTED_IMAGE_FORMAT');
+  expect(prisma.reportMedia.create).not.toHaveBeenCalled();
+});
 
 it('stores paint separately on upload and patch without replacing the photo hash or point', async () => {
   const annotations = {

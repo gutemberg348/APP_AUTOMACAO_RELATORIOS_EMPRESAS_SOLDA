@@ -1,9 +1,9 @@
-import { ReportPhotoSaveError } from './report-photo-error';
+import { ReportPhotoSaveError, photoSaveReason } from './report-photo-error';
 import { create } from 'zustand';
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import type { Report, ReportPoint, PhotoAnnotations } from '@weldcosta/shared';
 import { pointKey } from '@weldcosta/shared';
-import { api, jsonBody } from '../../services/api';
+import { api, ApiError, jsonBody } from '../../services/api';
 import { appendUploadFile } from '../../services/upload-file';
 import type { TransferState } from '../../components/transfer-progress';
 
@@ -17,6 +17,7 @@ export interface ReportPhotoDraft {
   sha256?: string;
 }
 export interface PhotoDrafts {
+  projectId?: string;
   photos: ReportPhotoDraft[];
   removedIds: string[];
   captionEdits?: Record<string, string>;
@@ -68,7 +69,7 @@ export async function saveReportPhotos(
   const nextKey = key.slice(0, key.indexOf(':') + 1) + saved.id;
   const store = useReportPhotoDrafts.getState();
   store.move(key, nextKey, ids);
-  store.update(nextKey, (draft) => ({ ...draft, error: undefined }));
+  store.update(nextKey, (draft) => ({ ...draft, projectId: saved.projectId, error: undefined }));
   let current = saved;
   const initial = useReportPhotoDrafts.getState().reports[nextKey]!;
   const total = initial.photos.length;
@@ -184,7 +185,7 @@ export async function saveReportPhotos(
     if (total || draft.removedIds.length || editedIds.size) progress('Concluindo o salvamento…');
   } catch (cause) {
     progress('Conferindo o envio e recuperando as fotos pendentes…');
-    const reason = cause instanceof Error ? cause.message : 'Confira sua conexão.';
+    const reason = photoSaveReason(cause);
     const refreshed = await api<Report>('/reports/' + saved.id).catch(() => undefined);
     if (refreshed) current = refreshed;
     store.update(nextKey, (draft) => {
@@ -203,6 +204,7 @@ export async function saveReportPhotos(
                   reason +
                   ' Confira a foto e toque em Salvar para tentar novamente.',
                 location,
+                cause instanceof ApiError ? cause.code : undefined,
               )
             : refreshed
               ? undefined

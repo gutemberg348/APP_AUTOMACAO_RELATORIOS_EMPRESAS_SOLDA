@@ -8,7 +8,7 @@ import {
   newDrawingData,
   type PhotoAnnotations,
 } from '@weldcosta/shared';
-import { photoWithAnnotations } from '../../src/modules/pdf/photo-annotations';
+import { photoWithAnnotations, photoForPdf } from '../../src/modules/pdf/photo-annotations';
 
 const marks: PhotoAnnotations = {
   elements: [
@@ -28,6 +28,46 @@ const marks: PhotoAnnotations = {
   ],
 };
 describe('Non-destructive photo annotation and brushes', () => {
+  it.each([
+    [150, 400],
+    [400, 150],
+    [300, 300],
+    [400, 300],
+  ])(
+    'fills every export pixel for %sx%s photos, with and without paint, without cropping',
+    async (width, height) => {
+      const source = await sharp(
+        Buffer.from(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#16725B"/><rect width="${width / 2}" height="${height / 2}" fill="#DC2626"/><rect x="${width / 2}" width="${width / 2}" height="${height / 2}" fill="#1764C0"/><rect x="${width / 2}" y="${height / 2}" width="${width / 2}" height="${height / 2}" fill="#EAB308"/></svg>`,
+        ),
+      )
+        .png()
+        .toBuffer();
+      const original = Buffer.from(source);
+      for (const annotations of [null, marks]) {
+        const result = await photoForPdf(source, 'image/png', annotations);
+        const { data, info } = await sharp(Buffer.from(result.split(',')[1]!, 'base64'))
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        expect([info.width, info.height]).toEqual([1200, 900]);
+        const pixel = (x: number, y: number) => [
+          ...data.subarray(
+            (y * info.width + x) * info.channels,
+            (y * info.width + x) * info.channels + 3,
+          ),
+        ];
+        for (const [x, y, color] of [
+          [5, 5, [220, 38, 38]],
+          [1194, 5, [23, 100, 192]],
+          [5, 894, [22, 114, 91]],
+          [1194, 894, [234, 179, 8]],
+        ] as [number, number, number[]][]) {
+          expect(pixel(x, y).every((value, i) => Math.abs(value - color[i]!) < 12)).toBe(true);
+        }
+      }
+      expect(source.equals(original)).toBe(true);
+    },
+  );
   it('renders numbered photo circles even without brush strokes and preserves measurement values', async () => {
     const annotations = {
       elements: [],

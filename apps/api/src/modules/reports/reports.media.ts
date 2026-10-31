@@ -12,7 +12,7 @@ import { requirePermission } from '../../middlewares/auth';
 import { idParam, send } from '../../utils/http';
 import { LocalStorageProvider } from '../../services/storage/local-storage-provider';
 import { assertEditable } from './reports.policy';
-import { reportScope } from '../../middlewares/access-scope';
+import { reportScope, projectScope } from '../../middlewares/access-scope';
 import { assertPhotoPoint, lockPhotoHash } from './reports.media-duplicates';
 import { photoAnnotationsSchema } from '@weldcosta/shared';
 const upload = multer({
@@ -45,19 +45,33 @@ async function prepareImage(file: Express.Multer.File | undefined) {
   if (!file) throw new AppError(400, 'FILE_REQUIRED', 'Selecione uma imagem.');
   let content: Buffer;
   try {
-    const image = sharp(file.buffer, { limitInputPixels: 40_000_000 });
-    const info = await image.metadata();
-    if (!['jpeg', 'png', 'webp'].includes(info.format ?? '')) throw new Error('Unsupported format');
+    // Inspect dimensions before decoding; small compressed phone files may be 48/108MP.
+    const info = await sharp(file.buffer, { limitInputPixels: false }).metadata();
+    if (!['jpeg', 'png', 'webp'].includes(info.format ?? ''))
+      throw new AppError(
+        400,
+        'UNSUPPORTED_IMAGE_FORMAT',
+        'Este formato de imagem não é aceito. Exporte ou selecione a foto como JPG, PNG ou WebP.',
+      );
+    if ((info.width ?? 0) * (info.height ?? 0) > 128_000_000)
+      throw new AppError(
+        400,
+        'IMAGE_RESOLUTION_TOO_LARGE',
+        'Esta foto excede 128 megapixels de resolução. Reduza a resolução ou exporte uma cópia menor antes de enviar.',
+      );
+    const image = sharp(file.buffer, { limitInputPixels: 128_000_000 });
     content = await image
       .rotate()
       .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#FFFFFF' })
       .jpeg({ quality: 88 })
       .toBuffer();
-  } catch {
+  } catch (cause) {
+    if (cause instanceof AppError) throw cause;
     throw new AppError(
       400,
       'INVALID_IMAGE',
-      'Use uma imagem JPG, PNG ou WebP válida, de até 10 MB.',
+      'Não foi possível ler este arquivo de imagem. Abra a foto na galeria e exporte ou selecione novamente como JPG, PNG ou WebP.',
     );
   }
   const sha256 = createHash('sha256').update(file.buffer).digest('hex');
@@ -72,11 +86,16 @@ reportMediaCheckRoutes.post(
   upload.single('file'),
   async (req, res) => {
     const target = z
-      .object({ reportId: z.uuid().optional(), reportPointId: z.uuid().optional() })
+      .object({
+        reportId: z.uuid().optional(),
+        reportPointId: z.uuid().optional(),
+        projectId: z.uuid().optional(),
+      })
       .strict()
       .parse(req.body);
     if (target.reportPointId && !target.reportId)
       throw new AppError(400, 'INVALID_POINT', 'Selecione o relatório deste ponto.');
+    let projectId: string | undefined;
     if (target.reportId) {
       const report = await prisma.report.findFirst({
         where: { id: target.reportId, deletedAt: null, ...reportScope(req.user!) },
@@ -84,6 +103,7 @@ reportMediaCheckRoutes.post(
       if (!report)
         throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado ou não liberado para você.');
       assertEditable(report.status, req.user!);
+      projectId = report.projectId;
       if (
         target.reportPointId &&
         !(await prisma.reportPoint.findFirst({
@@ -91,10 +111,18 @@ reportMediaCheckRoutes.post(
         }))
       )
         throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
+    } else if (target.projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: target.projectId, ...projectScope(req.user!) },
+        select: { id: true },
+      });
+      if (!project)
+        throw new AppError(404, 'NOT_FOUND', 'Obra não encontrada ou não liberada para você.');
+      projectId = project.id;
     }
     const { sha256 } = await prepareImage(req.file);
-    await assertPhotoPoint(prisma, sha256, target);
-    send(res, { sha256 });
+    await assertPhotoPoint(prisma, sha256, { ...target, projectId });
+    send(res, { sha256, projectId });
   },
 );
 export const reportMediaRoutes = Router({ mergeParams: true });
@@ -171,7 +199,11 @@ reportMediaRoutes.post(
             return { id: previous.id, reused: true };
           }
         }
-        await assertPhotoPoint(tx, sha256, { reportId, reportPointId: input.reportPointId });
+        await assertPhotoPoint(tx, sha256, {
+          projectId: report.projectId,
+          reportId,
+          reportPointId: input.reportPointId,
+        });
         const changed = await tx.report.updateMany({
           where: { id: reportId, version: input.version, status: report.status },
           data: { version: { increment: 1 } },
@@ -285,7 +317,12 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
     const targetPointId = input.sectionKey === 'drawing' ? null : input.reportPointId;
     await lockPhotoHash(tx, item.sha256);
-    await assertPhotoPoint(tx, item.sha256, { reportId, reportPointId: targetPointId }, item.id);
+    await assertPhotoPoint(
+      tx,
+      item.sha256,
+      { projectId: report.projectId, reportId, reportPointId: targetPointId },
+      item.id,
+    );
     const changed = await tx.report.updateMany({
       where: { id: reportId, version: input.version, status: report.status },
       data: { version: { increment: 1 } },

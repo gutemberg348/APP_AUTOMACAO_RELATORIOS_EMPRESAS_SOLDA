@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Report, ReportPoint } from '@weldcosta/shared';
-import { api } from '../../../app/services/api';
-import { ReportPhotoSaveError } from '../../../app/features/reports/report-photo-error';
+import { api, ApiError } from '../../../app/services/api';
+import {
+  ReportPhotoSaveError,
+  photoSaveReason,
+} from '../../../app/features/reports/report-photo-error';
 import {
   saveReportPhotos,
   useReportPhotoDrafts,
@@ -9,6 +12,15 @@ import {
 
 vi.mock('../../../app/services/api', () => ({
   api: vi.fn(),
+  ApiError: class extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
   jsonBody: (method: string, body: unknown) => ({ method, body: JSON.stringify(body) }),
 }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
@@ -37,6 +49,30 @@ beforeEach(() => {
   useReportPhotoDrafts.setState({ reports: {} });
 });
 describe('Photos selected in the point form', () => {
+  it('explains the rejected photo field instead of only repeating the generic API message', () => {
+    const reason = photoSaveReason({
+      code: 'VALIDATION_ERROR',
+      message: 'Confira os campos informados.',
+      details: [{ path: ['annotations', 'elements'], message: 'Há marcações demais nesta foto.' }],
+    });
+    expect(reason).toBe('Marcações da foto: Há marcações demais nesta foto.');
+  });
+  it('retains the exact point/photo and duplicate reason so Correct can explain the project rule', async () => {
+    useReportPhotoDrafts
+      .getState()
+      .update('user:new', () => ({ photos: [draft('pending')], removedIds: [] }));
+    apiMock
+      .mockRejectedValueOnce(new ApiError(409, 'DUPLICATE_MEDIA', 'Foto repetida nesta obra.'))
+      .mockResolvedValueOnce(saved);
+    await saveReportPhotos('user:new', saved, points);
+    const remaining = useReportPhotoDrafts.getState().reports['user:report-1']!;
+    expect(remaining.photos).toHaveLength(1);
+    expect(remaining.error).toBeInstanceOf(ReportPhotoSaveError);
+    expect(remaining.error).toMatchObject({
+      code: 'DUPLICATE_MEDIA',
+      location: { pointNumber: 'S-42', label: expect.stringContaining('foto.jpg') },
+    });
+  });
   it('includes pending paint in the same original photo upload', async () => {
     const annotations = {
       elements: [

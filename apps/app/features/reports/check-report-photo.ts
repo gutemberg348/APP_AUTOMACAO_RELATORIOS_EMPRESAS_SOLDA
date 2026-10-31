@@ -7,25 +7,36 @@ import { useReportPhotoDrafts } from './report-photo-drafts';
 export async function checkReportPhoto(
   asset: DocumentPickerAsset,
   draftKey: string,
-  target: { pointId: string | null; reportId?: string; persistedPointId?: string },
+  target: {
+    pointId: string | null;
+    reportId?: string;
+    persistedPointId?: string;
+    projectId?: string;
+  },
   onProgress?: (message: string) => void,
 ) {
   onProgress?.('Preparando imagem…');
   const form = new FormData();
   await appendUploadFile(form, asset, 10 * 1024 * 1024);
   if (target.reportId) form.append('reportId', target.reportId);
+  if (target.projectId) form.append('projectId', target.projectId);
   if (target.reportId && target.persistedPointId)
     form.append('reportPointId', target.persistedPointId);
   onProgress?.('Enviando imagem para verificação…');
-  const { sha256 } = await api<{ sha256: string }>('/reports/media/check', {
-    method: 'POST',
-    body: form,
-  });
+  const { sha256, projectId: checkedProjectId } = await api<{ sha256: string; projectId?: string }>(
+    '/reports/media/check',
+    {
+      method: 'POST',
+      body: form,
+    },
+  );
   const userPrefix = draftKey.slice(0, draftKey.indexOf(':') + 1);
+  const projectId = checkedProjectId ?? target.projectId;
   onProgress?.('Conferindo se a foto é repetida…');
   const repeated = Object.entries(useReportPhotoDrafts.getState().reports).some(
     ([key, draft]) =>
       key.startsWith(userPrefix) &&
+      (key === draftKey || (!!projectId && draft.projectId === projectId)) &&
       draft.photos.some(
         (photo) =>
           photo.sha256 === sha256 &&
@@ -34,7 +45,7 @@ export async function checkReportPhoto(
   );
   if (repeated)
     throw new Error(
-      'Esta imagem já foi selecionada em outro ponto ou relatório. Você pode repetir ao lado no mesmo ponto. Para este ponto, escolha outra foto.',
+      'Esta imagem já foi selecionada em outro ponto ou relatório desta obra. Você pode repetir ao lado no mesmo ponto ou usar em outra obra. Para este ponto, escolha outra foto.',
     );
   return sha256;
 }

@@ -5,14 +5,18 @@ type MediaReader = Pick<Prisma.TransactionClient, 'reportMedia'>;
 export async function assertPhotoPoint(
   db: MediaReader,
   sha256: string,
-  target: { reportId?: string; reportPointId?: string | null },
+  target: { projectId?: string; reportId?: string; reportPointId?: string | null },
   excludeId?: string,
 ) {
+  // Old clients may check before selecting a report. Defer that check until
+  // upload rather than guessing a project and blocking photos from other works.
+  if (!target.projectId) return;
   // An unlinked attachment is not a point and cannot grant a reuse exception.
   const samePoint = target.reportId && target.reportPointId;
   const conflict = await db.reportMedia.findFirst({
     where: {
       sha256,
+      report: { projectId: target.projectId, deletedAt: null },
       ...(excludeId ? { id: { not: excludeId } } : {}),
       ...(samePoint
         ? {
@@ -30,7 +34,7 @@ export async function assertPhotoPoint(
     throw new AppError(
       409,
       'DUPLICATE_MEDIA',
-      'Esta foto já está vinculada a outro ponto ou relatório. Você pode repetir a foto ao lado no mesmo ponto; para outro ponto, escolha uma imagem diferente.',
+      'Esta foto já está vinculada a outro ponto ou relatório desta obra. Você pode repetir ao lado no mesmo ponto ou usar em outra obra. Para outro ponto desta obra, escolha uma foto diferente.',
     );
 }
 

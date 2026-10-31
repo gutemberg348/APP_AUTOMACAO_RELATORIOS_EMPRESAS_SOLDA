@@ -101,6 +101,7 @@ export function ReportPoints({
   errors,
   correction,
   photoDraftKey,
+  projectId,
   report,
   canUploadPhotos,
   canRemovePhotos,
@@ -115,6 +116,7 @@ export function ReportPoints({
   errors: FieldErrors<ReportFormValues>;
   correction?: CorrectionRequest;
   photoDraftKey: string;
+  projectId?: string;
   report?: Report;
   canUploadPhotos: boolean;
   canRemovePhotos: boolean;
@@ -521,6 +523,7 @@ export function ReportPoints({
                   persistedPointId={value?.id}
                   number={value?.number || String(index + 1)}
                   reportId={report?.id}
+                  projectId={report?.projectId ?? projectId}
                   media={report?.media ?? []}
                   editable={canUploadPhotos}
                   canRemove={canRemovePhotos}

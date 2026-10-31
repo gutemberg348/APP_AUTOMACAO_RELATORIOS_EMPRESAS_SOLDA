@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { reportCreateSchema, drawingDataSchema } from '@weldcosta/shared';
-import { photoWithAnnotations } from './photo-annotations';
+import { photoWithAnnotations, photoForPdf } from './photo-annotations';
 import { reportForPdf } from './pdf-snapshot';
 import { access } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
@@ -143,7 +143,7 @@ export class PdfService implements PdfProvider {
       try {
         images.set(
           media.id,
-          await photoWithAnnotations(
+          await (media.sectionKey === 'drawing' ? photoWithAnnotations : photoForPdf)(
             await this.storage.get(media.filePath),
             media.mimeType,
             media.annotations,

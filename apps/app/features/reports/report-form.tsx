@@ -568,7 +568,8 @@ export function ReportForm({
           label: cause.location.label,
           message: cause.message,
           guidance:
-            'Confira a conexão e a foto indicada. Se o arquivo foi recusado, escolha uma imagem de até 10 MB. As fotos pendentes continuam na fila; toque em Salvar para repetir o envio.',
+            (cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
+            'Confira o motivo informado para a foto indicada. As fotos pendentes continuam na fila; corrija a foto ou o campo apontado e toque em Salvar para repetir o envio.',
         },
       ]);
       setIssuesOpen(true);
@@ -1110,6 +1111,7 @@ export function ReportForm({
                       errors={errors}
                       correction={correction}
                       photoDraftKey={photoDraftKey}
+                      projectId={projectId}
                       report={report}
                       canUploadPhotos={!editingBusy && user.permissions.includes('media.upload')}
                       canRemovePhotos={!editingBusy && user.permissions.includes('media.delete')}

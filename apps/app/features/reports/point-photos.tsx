@@ -18,6 +18,7 @@ export function PointPhotos({
   persistedPointId,
   number,
   reportId,
+  projectId,
   media,
   editable,
   canRemove,
@@ -31,6 +32,7 @@ export function PointPhotos({
   persistedPointId?: string;
   number?: string;
   reportId?: string;
+  projectId?: string;
   media: ReportMedia[];
   editable: boolean;
   canRemove: boolean;
@@ -303,11 +305,12 @@ export function PointPhotos({
           const sha256 = await checkReportPhoto(
             asset,
             draftKey,
-            { pointId, reportId, persistedPointId },
+            { pointId, reportId, persistedPointId, projectId },
             onProgress,
           );
           update((draft) => ({
             ...draft,
+            projectId,
             error: undefined,
             photos: [
               ...draft.photos,

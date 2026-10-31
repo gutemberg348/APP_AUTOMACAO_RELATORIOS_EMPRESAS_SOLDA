@@ -16,17 +16,30 @@ beforeEach(() => {
   vi.mocked(api).mockReset();
   useReportPhotoDrafts.setState({ reports: {} });
 });
-it('checks before the first save and blocks a photo already selected in another point or draft', async () => {
+it('checks before the first save and blocks another draft only within the same project', async () => {
   vi.mocked(api).mockResolvedValue({ sha256: 'same-bytes' });
   useReportPhotoDrafts.getState().update('user:another-report', () => ({
     photos: [{ id: '1', pointKey: 'other-point', asset, caption: '', sha256: 'same-bytes' }],
     removedIds: [],
+    projectId: 'work-a',
   }));
-  await expect(checkReportPhoto(asset, 'user:new', { pointId: 'new-point' })).rejects.toThrow(
-    'já foi selecionada',
-  );
+  await expect(
+    checkReportPhoto(asset, 'user:new', { pointId: 'new-point', projectId: 'work-a' }),
+  ).rejects.toThrow('já foi selecionada');
   expect(vi.mocked(api).mock.calls[0]?.[0]).toBe('/reports/media/check');
   expect(useReportPhotoDrafts.getState().reports['user:new']).toBeUndefined();
+});
+it('allows the same photo from another work, including drafts that have not been saved', async () => {
+  vi.mocked(api).mockResolvedValue({ sha256: 'same-bytes', projectId: 'work-b' });
+  useReportPhotoDrafts.getState().update('user:another-report', () => ({
+    projectId: 'work-a',
+    photos: [{ id: '1', pointKey: 'other', asset, caption: '', sha256: 'same-bytes' }],
+    removedIds: [],
+  }));
+  await expect(
+    checkReportPhoto(asset, 'user:new', { pointId: 'new-point', projectId: 'work-b' }),
+  ).resolves.toBe('same-bytes');
+  expect((vi.mocked(api).mock.calls[0]![1]!.body as FormData).get('projectId')).toBe('work-b');
 });
 it('returns a fingerprint for a new image and leaves the queue unchanged', async () => {
   vi.mocked(api).mockResolvedValue({ sha256: 'unique' });
@@ -45,12 +58,10 @@ it('keeps a server duplicate or failed check out of the pending queue', async ()
 
 it('allows the same file twice in one point but rejects it in a different point of the same draft', async () => {
   vi.mocked(api).mockResolvedValue({ sha256: 'same-bytes' });
-  useReportPhotoDrafts
-    .getState()
-    .update('user:new', () => ({
-      photos: [{ id: '1', pointKey: 'point-a', asset, caption: '', sha256: 'same-bytes' }],
-      removedIds: [],
-    }));
+  useReportPhotoDrafts.getState().update('user:new', () => ({
+    photos: [{ id: '1', pointKey: 'point-a', asset, caption: '', sha256: 'same-bytes' }],
+    removedIds: [],
+  }));
   await expect(checkReportPhoto(asset, 'user:new', { pointId: 'point-a' })).resolves.toBe(
     'same-bytes',
   );

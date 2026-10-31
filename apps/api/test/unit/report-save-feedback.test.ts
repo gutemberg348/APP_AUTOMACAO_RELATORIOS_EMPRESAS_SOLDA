@@ -87,6 +87,11 @@ describe('Report save corrections', () => {
     expect(() => validateSpecificData('EVS', {}, 'draft', {})).not.toThrow();
   });
   it('labels drawing errors and only offers field corrections for known business errors', () => {
+    expect(reportBusinessCorrection('DUPLICATE_MEDIA', 'Repetida')).toMatchObject({
+      path: ['points'],
+      label: 'Foto repetida nesta obra',
+      guidance: expect.stringContaining('outra obra'),
+    });
     const result = reportCorrections(
       [
         {

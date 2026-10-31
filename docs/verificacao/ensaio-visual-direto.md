@@ -30,4 +30,12 @@ A tentativa inicial da suíte geral encontrou testes antigos desatualizados. Na 
 
 ## Publicação
 
+### Pontos e fotos ausentes no APK instalado
+
+O formulário atual inclui pontos de solda para EVD independentemente da empresa/obra. Padrões da obra preenchem valores, não removem seções. Um APK anterior à inclusão do EVD pode receber o novo tipo da API e apresentar o formulário genérico (dados iniciais e desenho), sem pontos/fotos. Atualizar somente a VPS não atualiza o JavaScript empacotado no APK.
+
+Conferência no navegador em viewport de celular e API simulada: EVD novo e existente em duas empresas/obras com padrões diferentes, quatro cenários. Todos exibiram registros de inspeção, seção Pontos de solda, criação do primeiro ponto, Selecionar as duas fotos e Adicionar foto 1 ao ponto 1. Evidência local em `artifacts/evd-company-sections.png`. Não houve reprodução no APK instalado do usuário nem teste em aparelho físico.
+
+No computador, `npm run apk` recompila o shared e empacota o código atual. Instalar `artifacts/android/weldcosta-release.apk` como atualização do aplicativo existente. Os relatórios salvos permanecem no servidor e não precisam ser recriados.
+
 Atualizar API/web na VPS e gerar novo APK, ou recarregar o Expo com o código atualizado. `npm run docker:production` executa a migração e o seed antes de iniciar a API. O novo tipo aparecerá como `Ensaio Visual Direto` na escolha do modelo. Nenhum deploy, push ou APK foi executado nesta etapa.

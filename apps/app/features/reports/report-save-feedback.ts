@@ -136,6 +136,56 @@ export function reportBusinessCorrection(
   message: string,
 ): ReportCorrection | undefined {
   const cases: Record<string, [string, string, string]> = {
+    IMAGE_TOO_LARGE: [
+      'points',
+      'Arquivo maior que 10 MB',
+      'Reduza o tamanho da foto indicada para até 10 MB, selecione essa cópia no mesmo ponto e salve novamente.',
+    ],
+    IMAGE_RESOLUTION_TOO_LARGE: [
+      'points',
+      'Resolução da foto muito alta',
+      'Exporte uma cópia da foto com resolução menor que 128 megapixels. Selecione a cópia no ponto indicado e salve.',
+    ],
+    UNSUPPORTED_IMAGE_FORMAT: [
+      'points',
+      'Formato de foto não aceito',
+      'Exporte a foto indicada como JPG, PNG ou WebP e selecione essa cópia no mesmo ponto.',
+    ],
+    UPLOAD_FIELD_TOO_LARGE: [
+      'points',
+      'Legenda ou marcações muito grandes',
+      'Abra a foto indicada e reduza os traços, textos ou a legenda. Salve a edição e depois salve o relatório. O tamanho do arquivo da foto pode estar correto.',
+    ],
+    INVALID_UPLOAD_FILE: [
+      'points',
+      'Arquivo de foto não recebido',
+      'Selecione novamente a foto indicada. O envio precisa conter uma imagem por arquivo; as fotos já enviadas permanecem salvas.',
+    ],
+    INVALID_UPLOAD_FIELDS: [
+      'points',
+      'Dados do envio inválidos',
+      'Selecione novamente a foto indicada e tente salvar. Se continuar, instale o APK atualizado.',
+    ],
+    VALIDATION_ERROR: [
+      'points',
+      'Dados da foto',
+      'Abra a foto do ponto indicado. Confira a legenda e as marcações; se houver traços demais, reduza as marcações. Salve a edição da foto e depois toque em Salvar no relatório. As outras fotos enviadas continuam salvas.',
+    ],
+    INVALID_IMAGE: [
+      'points',
+      'Arquivo de imagem inválido',
+      'No ponto indicado, abra a foto na galeria e exporte uma nova cópia JPG, PNG ou WebP. Troque somente a foto recusada e salve novamente.',
+    ],
+    INVALID_UPLOAD: [
+      'points',
+      'Envio da foto recusado',
+      'Confira o motivo informado no envio. Selecione novamente apenas a foto indicada e salve; o aviso não significa necessariamente que o arquivo ultrapassou o tamanho permitido.',
+    ],
+    DUPLICATE_MEDIA: [
+      'points',
+      'Foto repetida nesta obra',
+      'No ponto indicado, remova a foto pendente repetida e escolha outra. Você pode repetir ao lado no mesmo ponto ou usar a foto em outra obra. Depois toque em Salvar; os demais dados continuam salvos.',
+    ],
     DRAWING_IMAGE_PENDING: [
       'drawings',
       'Imagem do desenho pendente',

@@ -633,6 +633,7 @@ describe('REST with PostgreSQL', () => {
       const repeated = await request(app)
         .post('/reports/media/check')
         .set(auth())
+        .field('reportId', saved.id)
         .attach('file', image, 'different-name.png');
       expect(repeated.status).toBe(409);
       expect(repeated.body.error.code).toBe('DUPLICATE_MEDIA');

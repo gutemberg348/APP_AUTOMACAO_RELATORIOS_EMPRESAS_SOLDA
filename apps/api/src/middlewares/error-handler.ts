@@ -6,9 +6,32 @@ import { MulterError } from 'multer';
 import { isTransactionConflict } from '../errors/transaction-conflict';
 export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
   if (error instanceof MulterError) {
+    const limitMb = _req.originalUrl?.startsWith('/people/') ? 5 : 10;
+    const [code, message] =
+      error.code === 'LIMIT_FILE_SIZE'
+        ? [
+            'IMAGE_TOO_LARGE',
+            `Esta imagem excede ${limitMb} MB. Reduza o tamanho do arquivo e envie novamente.`,
+          ]
+        : error.code === 'LIMIT_FIELD_VALUE'
+          ? [
+              'UPLOAD_FIELD_TOO_LARGE',
+              error.field === 'annotations'
+                ? 'As marcações desta foto excederam o limite de envio. Reduza os traços ou textos da foto e salve novamente.'
+                : 'Um campo de texto deste envio excedeu o limite. Reduza a legenda ou os dados da foto e tente novamente.',
+            ]
+          : error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE'
+            ? [
+                'INVALID_UPLOAD_FILE',
+                'Envie uma imagem por arquivo no campo correto. Selecione novamente a foto indicada.',
+              ]
+            : [
+                'INVALID_UPLOAD_FIELDS',
+                'O envio contém campos demais ou dados de formulário inválidos. Selecione novamente a foto e atualize o aplicativo se o problema continuar.',
+              ];
     res.status(400).json({
       success: false,
-      error: { code: 'INVALID_UPLOAD', message: 'Selecione uma imagem de até 10 MB por envio.' },
+      error: { code, message },
     });
     return;
   }
