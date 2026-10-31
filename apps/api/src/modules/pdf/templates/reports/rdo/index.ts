@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
-import { signatureImage } from '../layout';
+import { signatureImage, clientSignatureCell } from '../layout';
 import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import {
   sheet,
@@ -67,7 +67,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
         `<div class="rdo-observation"><b>OBS${i ? ' (continuação)' : ''}:</b><br>${escape(part || '—')}</div>`,
     )
     .join('');
-  for (const signer of report.signatures) {
+  for (const signer of report.signatures.filter((signer) => signer.role !== 'CLIENT')) {
     content +=
       `<div class="evs-signers"><div class="evs-signer"><div class="evs-signature-space">${signatureImage(report, signer)}</div>` +
       annotations(
@@ -88,6 +88,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
       ) +
       '</div></div>';
   }
+  content += `<div class="evs-signers">${clientSignatureCell(report)}</div>`;
   return (
     fullDrawingPages +
     sheet(report, 'RELATÓRIO DIÁRIO DE INSPEÇÃO', content, true, 'rdo-sheet').replace(

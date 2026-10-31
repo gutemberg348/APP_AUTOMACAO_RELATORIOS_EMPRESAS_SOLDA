@@ -392,6 +392,7 @@ describe('Technical drawing geometry and safe rendering', () => {
       reportDate: new Date('2026-10-18'),
       title: 'Inspection',
       specificData: {},
+      company: { name: 'EMPRESA QA' },
       project: { name: 'Test' },
       reportType: { name: 'EVS' },
       points: [],

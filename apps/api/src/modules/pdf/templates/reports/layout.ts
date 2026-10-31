@@ -35,6 +35,9 @@ export const escape = (value: unknown) =>
     (character) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
   );
+export function clientSignatureCell(report: PdfReport) {
+  return `<div class="evs-signer evs-client-signer"><div>CLIENTE</div><div class="evs-signature-space"></div><div class="evs-signature-name">${escape(report.company.name.toLocaleUpperCase('pt-BR'))}</div><p>DATA: </p></div>`;
+}
 export const displayDate = (value: string | Date | null) => {
   const iso = value instanceof Date ? value.toISOString() : value;
   return iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '—';

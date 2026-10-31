@@ -107,6 +107,7 @@ describe('Visual direct report', () => {
       points: [{ id: 'p', number: '01', data: { acceptable: true } }],
       drawings: [{ data: newDrawingData() }],
       signatures: [],
+      company: { name: 'EMPRESA QA' },
       media: [{ id: 'photo', reportPointId: 'p', sectionKey: 'photos' }],
     } as unknown as PdfReport;
     const html = render(report, new Map([['photo', 'data:image/png;base64,AA==']]));

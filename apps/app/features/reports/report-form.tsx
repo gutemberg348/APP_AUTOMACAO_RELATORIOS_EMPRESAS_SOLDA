@@ -15,7 +15,6 @@ import {
   validateSpecificData,
   buildReportDefaults,
   isVisualWeldReport,
-  reportTypeCodes,
   type VisualInspectionRecord,
   pointKey,
   type Report,
@@ -72,6 +71,7 @@ import { PickerSheet } from '../../components/picker-sheet';
 import { ReportSaveIssues } from './report-save-issues';
 import { VisualInspectionRecords } from './visual-inspection-records';
 import { LpTechniqueField } from './lp-technique-field';
+import { hasReportForm, reportFormSections, type ReportFormSection } from './report-form-sections';
 const resultOptions: SelectOption[] = [
   { value: '', label: 'Não informado', description: 'Definir o resultado depois.', icon: 'clock' },
   {
@@ -112,7 +112,26 @@ function withFieldDefaults(data: Record<string, unknown>, sections: ReportSectio
   }
   return result;
 }
-export function ReportForm({
+export function ReportForm(props: Parameters<typeof ReportFormContent>[0]) {
+  const config = reportConfigSchema.safeParse(props.type.config);
+  if (!config.success || !hasReportForm(props.type.code, config.data.customFields))
+    return (
+      <Card>
+        <PanelHeader title="Modelo de relatório indisponível" icon="alert" />
+        <Notice
+          error={
+            new Error(
+              `${props.type.name} (${props.type.code}) não possui um formulário compatível neste aplicativo.`,
+            )
+          }
+          guidance="Atualize o aplicativo e carregue os modelos novamente. Se continuar, informe ao administrador o nome e o código acima para conferir o cadastro do modelo. Seus relatórios salvos continuam preservados."
+        />
+      </Card>
+    );
+  return <ReportFormContent {...props} />;
+}
+
+function ReportFormContent({
   type,
   report: initialReport,
   companyId,
@@ -192,6 +211,7 @@ export function ReportForm({
   const [saveIssues, setSaveIssues] = useState<ReportCorrection[]>([]);
   const [failureOpen, setFailureOpen] = useState(false);
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
   const [correction, setCorrection] = useState<CorrectionRequest>();
   const fieldViews = useRef<Record<string, ViewInstance | null>>({});
   const reveal = usePageScroll();
@@ -214,34 +234,8 @@ export function ReportForm({
       })),
     },
   ];
-  type Section = ReportSection & {
-    content?: 'points' | 'discontinuities' | 'inspectionRecords' | 'signatures' | 'drawings';
-  };
-  const sections: Section[] = [...baseSections];
-  const beforeConclusion = sections.findIndex(
-    (section) => section.title === 'Laudo' || section.title === 'Observação',
-  );
-  sections.splice(
-    beforeConclusion < 0 ? sections.length : beforeConclusion,
-    0,
-    ...(type.code === 'LP'
-      ? [{ title: 'Descontinuidades', fields: [], content: 'discontinuities' as const }]
-      : []),
-    ...(type.code === 'EVD'
-      ? [{ title: 'Registros de inspeção', fields: [], content: 'inspectionRecords' as const }]
-      : []),
-    { title: 'Desenho técnico', fields: [], content: 'drawings' },
-    ...(reportTypeCodes.some((code) => code === type.code)
-      ? [
-          {
-            title: type.code === 'ME' ? 'Pontos de medição' : 'Pontos de solda',
-            fields: [],
-            content: 'points' as const,
-          },
-        ]
-      : []),
-  );
-  sections.push({ title: 'Responsáveis', fields: [], content: 'signatures' });
+  type Section = ReportFormSection;
+  const sections = reportFormSections(type.code, baseSections);
   const stages = [{ title: 'Inspeção' }, { title: 'Concluir' }];
   const sectionStage = (section: Section) =>
     section.content === 'signatures' || ['Laudo', 'Observação'].includes(section.title) ? 1 : 0;
@@ -828,6 +822,50 @@ export function ReportForm({
           ))}
         </View>
       </Card>
+      <View style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
+        {sections.some((section) => section.content === 'points') && (
+          <Button
+            title="Pontos e fotos"
+            icon="pin"
+            small
+            secondary
+            disabled={editingBusy}
+            onPress={() => {
+              Keyboard.dismiss();
+              openSection(sections.findIndex((section) => section.content === 'points'));
+              setSectionNavigation((value) => value + 1);
+            }}
+          />
+        )}
+        <Button
+          title="Todas as seções"
+          icon="layers"
+          small
+          secondary
+          disabled={editingBusy}
+          onPress={() => setSectionPickerOpen(true)}
+        />
+      </View>
+      <PickerSheet
+        visible={sectionPickerOpen}
+        title="Seções do relatório"
+        subtitle={type.name + ' · ' + type.code}
+        icon="report"
+        onClose={() => setSectionPickerOpen(false)}
+      >
+        {orderedSections.map((section, index) => (
+          <Button
+            key={section.title}
+            title={`${index + 1}. ${section.content === 'points' ? section.title + ' e fotos' : section.title}`}
+            secondary
+            onPress={() => {
+              setSectionPickerOpen(false);
+              openSection(sections.indexOf(section));
+              setSectionNavigation((value) => value + 1);
+            }}
+          />
+        ))}
+      </PickerSheet>
       <Notice error={error} guidance={formErrorGuidance(error)} />
       <ReportSaveIssues
         issues={saveIssues}

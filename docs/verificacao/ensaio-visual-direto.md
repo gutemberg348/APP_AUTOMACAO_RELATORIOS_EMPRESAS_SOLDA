@@ -38,4 +38,16 @@ Conferência no navegador em viewport de celular e API simulada: EVD novo e exis
 
 No computador, `npm run apk` recompila o shared e empacota o código atual. Instalar `artifacts/android/weldcosta-release.apk` como atualização do aplicativo existente. Os relatórios salvos permanecem no servidor e não precisam ser recriados.
 
+### Revisão do formulário incompleto em 31/10/2026
+
+O usuário confirmou APK atualizado e selo EVD. Portanto, a hipótese de APK anterior não explica sozinha o relato. Foi conferido o bundle Hermes do APK local (versão 13): seus bytes coincidem com o bundle gerado e o source map contém EVD nos códigos, nos campos técnicos e na inclusão de pontos/fotos e registros. Não houve acesso ao aparelho do usuário; a causa específica nele permanece sem reprodução.
+
+- A composição das seções foi isolada e verificada: EVD tem Identificação, Dados do ensaio, Registros de inspeção, Desenho técnico, Pontos de solda, Laudo e Responsáveis.
+- Atalho **Pontos e fotos** e índice **Todas as seções** permitem abrir os campos diretamente, fechando o desenho e levando a rolagem à seção escolhida. Laudo e responsáveis continuam na conclusão.
+- O scroll da página mantém os filhos nativos anexados (`removeClippedSubviews=false`) para evitar descarte visual durante mudanças de altura dos acordeões. Isso é uma proteção de apresentação; não comprova a causa no aparelho.
+- Modelos desconhecidos sem campos personalizados exibem aviso com nome/código e orientação de atualização, em vez de formulário genérico incompleto.
+- 18 testes unitários de seções/correções, typecheck e ESLint aprovados. Teste no navegador com viewport de celular: EVD novo/existente em duas empresas/obras, criação do primeiro ponto e acesso às duas fotos; atalhos para dados técnicos e fotos; modelo desconhecido com aviso explícito. Dois testes de integração do EVD aprovados em PostgreSQL isolado, incluindo salvamento, fotos, PDF e escopo por obra.
+
+Estas alterações são do aplicativo e do painel web. No APK instalado exigem nova compilação/instalação; não exigem mudança da API nem recriação dos relatórios. A exibição no aparelho físico ainda precisa ser confirmada.
+
 Atualizar API/web na VPS e gerar novo APK, ou recarregar o Expo com o código atualizado. `npm run docker:production` executa a migração e o seed antes de iniciar a API. O novo tipo aparecerá como `Ensaio Visual Direto` na escolha do modelo. Nenhum deploy, push ou APK foi executado nesta etapa.

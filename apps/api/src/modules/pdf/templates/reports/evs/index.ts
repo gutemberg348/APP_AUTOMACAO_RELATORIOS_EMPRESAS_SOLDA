@@ -1,6 +1,12 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
 import { drawingDataSchema, drawingSvg, type VisualInspectionRecord } from '@weldcosta/shared';
-import { escape, displayDate, signatureImage, type PdfReport } from '../layout';
+import {
+  escape,
+  displayDate,
+  signatureImage,
+  clientSignatureCell,
+  type PdfReport,
+} from '../layout';
 import { referenceLogo } from './reference-logo';
 import { evsStyles } from './styles';
 import { referenceStyles } from '../reference-styles';
@@ -279,6 +285,11 @@ export function render(report: PdfReport, images: Map<string, string>) {
   }
   const used = new Set<string>();
   const signatureCell = (label: string, role: string) => {
+    if (role === 'CLIENT') {
+      for (const signer of report.signatures.filter((s) => s.role === 'CLIENT'))
+        used.add(signer.id);
+      return clientSignatureCell(report);
+    }
     const signer = report.signatures.find((s) => s.role === role && !used.has(s.id));
     if (signer) used.add(signer.id);
     return `<div class="evs-signer"><div>${label}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || '')}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;

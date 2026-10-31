@@ -219,4 +219,15 @@ describe('PDF for incomplete reports and located errors', () => {
       details: [{ path: ['signatures', 0, 'signatureAssetId'] }],
     });
   });
+  it('does not require an old client signature asset for the blank printed client line', async () => {
+    mocks.exists.mockResolvedValue(false);
+    mocks.snapshot.mockResolvedValue({
+      ...fixture(),
+      signatures: [
+        { id: 's', role: 'CLIENT', name: 'Cliente antigo', signatureImagePath: 'gone.png' },
+      ],
+    });
+    expect((await new PdfService().preview('report')).toString()).toBe('%PDF-test');
+    expect(mocks.exists).not.toHaveBeenCalled();
+  });
 });

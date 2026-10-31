@@ -109,6 +109,8 @@ export class PdfService implements PdfProvider {
     }
     report.signatureImages = {};
     for (const [index, signer] of report.signatures.entries()) {
+      // The client signs the printed document; saved assets remain in the app.
+      if (signer.role === 'CLIENT') continue;
       if (signer.signatureImagePath) {
         if (!(await this.storage.exists(signer.signatureImagePath)))
           invalid(

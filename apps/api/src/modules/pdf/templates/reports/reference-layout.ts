@@ -1,7 +1,7 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
 import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
-import { escape, displayDate, signatureImage, type PdfReport } from './layout';
+import { escape, displayDate, signatureImage, clientSignatureCell, type PdfReport } from './layout';
 export { chunks } from './evs';
 export { escape, displayDate, type PdfReport } from './layout';
 
@@ -143,6 +143,7 @@ export function resultAndSignatures(
 ) {
   const data = report.specificData as Record<string, unknown>;
   const used = new Set<string>();
+  for (const signer of report.signatures.filter((s) => s.role === 'CLIENT')) used.add(signer.id);
   const cell = (label: string, signer?: PdfReport['signatures'][number]) => {
     if (signer) used.add(signer.id);
     return `<div class="evs-signer"><div>${escape(label)}</div><div class="evs-signature-space">${signatureImage(report, signer)}</div><div class="evs-signature-name">${escape(signer?.name || '')}</div><div>${escape(signer?.registrationNumber || '')}</div><p>DATA: ${signer?.signedAt ? displayDate(signer.signedAt) : ''}</p></div>`;
@@ -151,7 +152,7 @@ export function resultAndSignatures(
   const main =
     cell(labels[0]!, signer('INSPECTOR')) +
     cell(labels[1]!, signer('TECHNICAL_RESPONSIBLE') || signer('REVIEWER')) +
-    cell(labels[2]!, signer('CLIENT'));
+    clientSignatureCell(report);
   let html = `<div class="evs-signoff"><div class="evs-result">${[
     ['APPROVED', 'APROVADO'],
     ['REJECTED', 'REPROVADO'],

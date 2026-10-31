@@ -73,6 +73,9 @@ export function Page({
       <PageScrollContext.Provider value={reveal}>
         <KeyboardScrollView
           scrollRef={scroll}
+          // Report accordions change height substantially (especially the drawing).
+          // Keep native children attached while scrolling between those sections.
+          removeClippedSubviews={false}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           onScroll={(event) => {
             offset.current = event.nativeEvent.contentOffset.y;
