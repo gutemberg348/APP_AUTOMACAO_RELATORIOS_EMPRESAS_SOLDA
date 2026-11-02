@@ -5,6 +5,7 @@ import { render as renderTh } from '../../src/modules/pdf/templates/reports/hydr
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
 import { reportForPdf } from '../../src/modules/pdf/pdf-snapshot';
 import { nextLpWeldNumber, pointBatch } from '../../../app/features/reports/report-autofill';
+import { photoRows } from '../../src/modules/pdf/templates/reports/reference-layout';
 
 const report = {
   number: 'LP-001',
@@ -67,24 +68,42 @@ describe('LP grouped welds and faithful form', () => {
       expect(saved).toEqual(before);
     },
   );
-  it('retains actual photo captions and inspection notes below the photos', () => {
-    const saved = {
-      ...structuredClone(report),
-      points: [
-        {
-          ...report.points[0]!,
-          number: '3',
-          label: '3',
-          data: { notes: 'REGISTRO DE INSPEÇÃO', acceptable: true },
-        },
-      ],
-      media: [{ ...report.media[0]!, caption: 'DETALHE DA SOLDA' }],
-    } as PdfReport;
-    const html = render(saved, new Map());
-    expect(html).toContain('REGISTRO DE INSPEÇÃO');
-    expect(html).toContain('DETALHE DA SOLDA');
-    expect(html).not.toContain('<b>Soldas 3:</b> 3');
-  });
+  it.each(['LP', 'TH', 'RDO'] as const)(
+    'omits all below-photo rows only in LP, checking %s',
+    (mode) => {
+      const saved = {
+        ...structuredClone(report),
+        points: [
+          {
+            ...report.points[0]!,
+            number: '1 - 02 - 03',
+            label: '1 / |',
+            data: {
+              notes: 'REGISTRO DE INSPEÇÃO',
+              acceptable: true,
+              discontinuity: 'D'.repeat(75),
+            },
+          },
+        ],
+        media: report.media.slice(0, 2).map((media) => ({ ...media, caption: 'DETALHE DA SOLDA' })),
+      } as PdfReport;
+      const before = structuredClone(saved);
+      const html = photoRows(saved, new Map(), mode);
+      expect(html.match(/class="reference-photo-image report-photo-frame"/g)).toHaveLength(2);
+      expect(html).toContain('1 - 02 - 03');
+      expect(html).toContain('ACEITÁVEL:');
+      if (mode === 'LP') {
+        expect(html).not.toContain('evs-annotation');
+        expect(html).not.toContain('1 / |');
+        expect(html).not.toContain('REGISTRO DE INSPEÇÃO');
+        expect(html).not.toContain('DETALHE DA SOLDA');
+      } else {
+        expect(html).toContain('REGISTRO DE INSPEÇÃO');
+        expect(html).toContain('DETALHE DA SOLDA');
+      }
+      expect(saved).toEqual(before);
+    },
+  );
   it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
     'filters legacy point dimensions only for LP when printing %s',
     (code) => {

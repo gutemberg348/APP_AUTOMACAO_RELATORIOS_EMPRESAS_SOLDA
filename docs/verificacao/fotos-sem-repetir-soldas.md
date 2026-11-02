@@ -1,7 +1,7 @@
 # Fotos sem repetir a numeração — 02/11/2026
 
-O PDF não gera mais uma linha abaixo das fotos quando a identificação do ponto apenas repete sua numeração (ex.: `SOLDAS 3: 3`). A comparação ignora espaços e diferenças entre maiúsculas/minúsculas. A identificação da solda continua no cabeçalho acima da imagem. Legendas, identificações adicionais e notas com informação real continuam disponíveis.
+No Líquido Penetrante, o PDF não imprime nenhuma faixa de texto abaixo das fotos: nem identificação, notas, legendas ou complemento da descontinuidade. A página de fotos contém somente as imagens e seus cabeçalhos superiores. Isso também vale quando a identificação difere da numeração (ex.: soldas `1 - 02 - 03` com identificação antiga `1 / |`). Os dados cadastrados permanecem preservados no aplicativo e no banco. Essa regra substitui o filtro anterior que removia somente números repetidos.
 
 Vale para relatórios já salvos: gerar/baixar novamente depois de publicar a API, sem alterar dados cadastrados. Não exige novo APK.
 
-Verificação: build da API, ESLint e 51 testes unitários aprovados. PDF de LP existente com quatro fotos, soldas 3 e 4 e dimensões antigas foi gerado, reaberto e rasterizado; conferidas ausência das linhas repetidas e preservação dos cabeçalhos, imagens e dados originais. Evidência local em `artifacts/lp-no-repeated-weld-rows/`.
+Verificação: testes cobrem LP antigo com identificação diferente da numeração, notas e legendas preenchidas; verificam ausência de qualquer faixa abaixo das fotos e preservação dos cabeçalhos, imagens e dados originais. TH e RDO mantêm seus detalhes específicos. Evidência local do PDF de LP reaberto e rasterizado em `artifacts/lp-no-repeated-weld-rows/`.

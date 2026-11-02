@@ -255,6 +255,9 @@ export function photoRows(
       })
       .join('');
     html += `<div class="reference-photo-row">${band('IMAGENS DO ENSAIO')}<div class="reference-photo-columns">${cells}</div></div>`;
+    // LP photo sheets contain only the headers and images, including legacy
+    // points with labels/notes that differ from the weld numbers above them.
+    if (mode === 'LP') continue;
     for (const entry of pair) {
       if (entry.image?.caption)
         html += annotations(
@@ -264,9 +267,8 @@ export function photoRows(
             : 'Foto adicional ' + (i + pair.indexOf(entry) + 1),
         );
       if (entry.point) {
-        const notes = pointNotes(entry.point, mode !== 'LP');
-        if (notes)
-          html += annotations(notes, (mode === 'LP' ? 'Soldas ' : 'Ponto ') + entry.point.number);
+        const notes = pointNotes(entry.point);
+        if (notes) html += annotations(notes, 'Ponto ' + entry.point.number);
         const d = entry.point.data as Record<string, unknown>;
         if (String(d.discontinuity || '').length > 50)
           html += annotations(d.discontinuity, 'Descontinuidade · ponto ' + entry.point.number);
