@@ -51,6 +51,40 @@ const report = {
 } as unknown as PdfReport;
 
 describe('LP grouped welds and faithful form', () => {
+  it.each(['3', '01 - 02 - 03'])(
+    'does not add rows below the photos just to repeat weld %s',
+    (number) => {
+      const saved = {
+        ...structuredClone(report),
+        points: [{ ...report.points[0]!, number, label: '  ' + number + '  ' }],
+        media: report.media.slice(0, 2),
+      } as PdfReport;
+      const before = structuredClone(saved);
+      const html = render(saved, new Map());
+      expect(html.match(/class="reference-photo-tab">SOLDA N/g)).toHaveLength(2);
+      expect(html.match(/class="reference-photo-image report-photo-frame"/g)).toHaveLength(2);
+      expect(html).not.toContain('class="evs-annotation"><b>Soldas ');
+      expect(saved).toEqual(before);
+    },
+  );
+  it('retains actual photo captions and inspection notes below the photos', () => {
+    const saved = {
+      ...structuredClone(report),
+      points: [
+        {
+          ...report.points[0]!,
+          number: '3',
+          label: '3',
+          data: { notes: 'REGISTRO DE INSPEÇÃO', acceptable: true },
+        },
+      ],
+      media: [{ ...report.media[0]!, caption: 'DETALHE DA SOLDA' }],
+    } as PdfReport;
+    const html = render(saved, new Map());
+    expect(html).toContain('REGISTRO DE INSPEÇÃO');
+    expect(html).toContain('DETALHE DA SOLDA');
+    expect(html).not.toContain('<b>Soldas 3:</b> 3');
+  });
   it.each(['EVS', 'EVD', 'LP', 'TH', 'ME', 'RDO'])(
     'filters legacy point dimensions only for LP when printing %s',
     (code) => {

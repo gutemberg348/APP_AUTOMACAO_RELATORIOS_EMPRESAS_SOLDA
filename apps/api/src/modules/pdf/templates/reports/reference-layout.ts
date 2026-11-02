@@ -190,8 +190,13 @@ export const acceptable = (data: Record<string, unknown>) =>
   data.acceptable === true ? 'SIM' : data.acceptable === false ? 'NÃO' : '—';
 export function pointNotes(point: PdfReport['points'][number], includeDimensions = true) {
   const data = (point.data ?? {}) as Record<string, unknown>;
+  const label = String(point.label ?? '').trim();
+  const identifier = (text: string) => text.replace(/\s+/g, '').toLocaleUpperCase('pt-BR');
+  // Older points often repeat their weld number in the label. It is already
+  // printed above the photo and must not create an extra ruled row below it.
+  const additionalLabel = identifier(label) === identifier(point.number) ? '' : label;
   return [
-    point.label,
+    additionalLabel,
     data.notes,
     includeDimensions && data.dimension ? 'Dimensão: ' + data.dimension : '',
     includeDimensions && data.projectThickness
