@@ -88,6 +88,8 @@ export const reportNumberSchema = z
   .max(100);
 export const reportCreateSchema = z
   .object({
+    clientDraftId: z.uuid().optional(),
+    clientMutationId: z.uuid().optional(),
     reportTypeId: z.uuid(),
     prefillFromProject: z.boolean().default(true),
     companyId: z.uuid(),
@@ -103,6 +105,7 @@ export const reportCreateSchema = z
   .strict();
 export const reportUpdateSchema = z
   .object({
+    clientMutationId: z.uuid().optional(),
     removePointMediaIds: z.array(z.uuid()).max(2000).optional(),
     number: reportNumberSchema.optional(),
     title: z.string().max(300).optional(),

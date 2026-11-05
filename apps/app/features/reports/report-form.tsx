@@ -3,10 +3,10 @@ import { cleanReportDraft } from './report-draft-clean';
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Keyboard, type ViewInstance } from 'react-native';
+import { View, Text, Pressable, Keyboard, AppState, type ViewInstance } from 'react-native';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { ZodError } from 'zod';
 import {
   reportConfigSchema,
@@ -20,8 +20,9 @@ import {
   type Report,
   type ReportType,
   type Paginated,
+  type Project,
 } from '@weldcosta/shared';
-import { api, ApiError, jsonBody } from '../../services/api';
+import { api, ApiError } from '../../services/api';
 import { useUnsavedChanges } from '../../hooks/use-unsaved-changes';
 import {
   Card,
@@ -51,7 +52,7 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { DrawingEditor } from './drawing-editor';
 import { usePageScroll } from '../../components/page-scroll';
 import { ReportActions } from './report-actions';
-import { emptyPhotoDrafts, saveReportPhotos, useReportPhotoDrafts } from './report-photo-drafts';
+import { emptyPhotoDrafts, useReportPhotoDrafts } from './report-photo-drafts';
 import { reusableReportFields, recentReportDefaults } from './report-autofill';
 import { shouldApplyReportSnapshot } from './report-snapshot';
 import { TransferOverlay, type TransferState } from '../../components/transfer-progress';
@@ -72,6 +73,21 @@ import { ReportSaveIssues } from './report-save-issues';
 import { VisualInspectionRecords } from './visual-inspection-records';
 import { LpTechniqueField } from './lp-technique-field';
 import { hasReportForm, reportFormSections, type ReportFormSection } from './report-form-sections';
+import {
+  activeOfflineReports,
+  mountedOfflineReports,
+  flushPhotoQueue,
+  putLocalReport,
+  removeLocalReport,
+  useOfflineReports,
+  reportValues,
+  offlineValuesFingerprint,
+  type LocalReportDraft,
+} from './offline-report-store';
+import { newOfflineMutationId, syncLocalReport, syncWaitingReports } from './offline-report-sync';
+import { useConnectivity } from '../../stores/connectivity';
+import { offlineDisk } from '../../services/offline-disk';
+import { ReportSummary } from './report-summary';
 const resultOptions: SelectOption[] = [
   { value: '', label: 'Não informado', description: 'Definir o resultado depois.', icon: 'clock' },
   {
@@ -113,6 +129,13 @@ function withFieldDefaults(data: Record<string, unknown>, sections: ReportSectio
   return result;
 }
 export function ReportForm(props: Parameters<typeof ReportFormContent>[0]) {
+  const local = useOfflineReports(
+    (state) =>
+      props.offlineDraft ??
+      Object.values(state.drafts).find(
+        (draft) => !!props.report && draft.baseReport?.id === props.report.id,
+      ),
+  );
   const config = reportConfigSchema.safeParse(props.type.config);
   if (!config.success || !hasReportForm(props.type.code, config.data.customFields))
     return (
@@ -128,7 +151,7 @@ export function ReportForm(props: Parameters<typeof ReportFormContent>[0]) {
         />
       </Card>
     );
-  return <ReportFormContent {...props} />;
+  return <ReportFormContent {...props} offlineDraft={local} />;
 }
 
 function ReportFormContent({
@@ -139,6 +162,8 @@ function ReportFormContent({
   onDirtyChange,
   initialData = {},
   initialTitle = '',
+  project,
+  offlineDraft,
 }: {
   type: ReportType;
   report?: Report;
@@ -147,16 +172,31 @@ function ReportFormContent({
   onDirtyChange?(dirty: boolean): void;
   initialData?: Record<string, unknown>;
   initialTitle?: string;
+  project?: Project;
+  offlineDraft?: LocalReportDraft;
 }) {
+  const localId = useRef(offlineDraft?.id ?? newOfflineMutationId()).current;
+  const localEntry = useOfflineReports((state) => state.drafts[localId]);
+  const syncingLocally = useOfflineReports((state) => state.syncing.includes(localId));
+  const online = useConnectivity((state) => state.online);
+  const storageError = useConnectivity((state) => state.storageError);
+  const [locallySaved, setLocallySaved] = useState(!!offlineDraft);
+  const [localMessage, setLocalMessage] = useState('');
+  const [serverConflict, setServerConflict] = useState<Report>();
+  const localTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [createdReport, setCreatedReport] = useState<Report>();
-  const report = initialReport ?? createdReport;
+  const report =
+    localEntry?.baseReport ??
+    (createdReport && createdReport.version > (initialReport?.version ?? 0)
+      ? createdReport
+      : (initialReport ?? createdReport));
   const { tokens: t, styles } = useTheme();
   const { etapa } = useLocalSearchParams<{ etapa?: string }>();
   const [step, setStep] = useState(etapa === 'conclusao' || etapa === '2' ? 1 : 0),
     [error, setError] = useState<unknown>(),
     client = useQueryClient(),
     user = useAuth((state) => state.session!.user);
-  const photoDraftKey = user.id + ':' + (report?.id ?? 'new-' + projectId + '-' + type.id);
+  const photoDraftKey = user.id + ':' + (report?.id ?? 'local-' + localId);
   const photoDrafts = useReportPhotoDrafts(
     (state) => state.reports[photoDraftKey] ?? emptyPhotoDrafts,
   );
@@ -172,9 +212,13 @@ function ReportFormContent({
   const [pickingPhoto, setPickingPhoto] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferState>();
   const [autofillMessage, setAutofillMessage] = useState('');
-  const autoFilled = useRef(false);
+  const autoFilled = useRef(!!offlineDraft);
   const editedSetupPaths = useRef(new Set<string>());
-  const loadedReportVersion = useRef<string | undefined>(undefined);
+  const loadedReportVersion = useRef<string | undefined>(
+    offlineDraft?.baseReport
+      ? offlineDraft.baseReport.id + ':' + offlineDraft.baseReport.version
+      : undefined,
+  );
   const acceptedSaveVersion = useRef<string | undefined>(undefined);
   const previousReport = useQuery({
     queryKey: ['report-autofill', user.id, projectId, type.id, report?.id],
@@ -222,7 +266,7 @@ function ReportFormContent({
   const sectionViews = useRef<Record<string, ViewInstance | null>>({});
   const errorSection = useRef<string | undefined>(undefined);
   const [openSectionTitle, setOpenSectionTitle] = useState<string | null>();
-  const editingBusy = pickingPhoto || saving || acting;
+  const editingBusy = pickingPhoto || saving || acting || syncingLocally;
   const config = reportConfigSchema.parse(type.config);
   const baseSections: ReportSection[] = reportSections[type.code] ?? [
     {
@@ -289,10 +333,11 @@ function ReportFormContent({
     setError: setFieldError,
     getFieldState,
     getValues,
+    watch,
     setValue,
     formState: { isDirty, errors },
   } = useForm<Values>({
-    defaultValues: {
+    defaultValues: offlineDraft?.values ?? {
       number: '',
       title: initialTitle,
       reportDate: todayISO(),
@@ -310,7 +355,136 @@ function ReportFormContent({
       drawings: [],
     },
   });
-  const hasChanges = isDirty || hasPhotoDrafts;
+  const hasChanges = isDirty || hasPhotoDrafts || !!localEntry;
+  const localContext = useRef({ report, project, photoDraftKey, saving: saving || syncingLocally });
+  localContext.current = { report, project, photoDraftKey, saving: saving || syncingLocally };
+  const saveOnPhone = useCallback(
+    async (data: Values) => {
+      clearTimeout(localTimer.current);
+      localTimer.current = undefined;
+      const context = localContext.current;
+      const previous = useOfflineReports.getState().drafts[localId];
+      const photos =
+        useReportPhotoDrafts.getState().reports[context.photoDraftKey] ?? emptyPhotoDrafts;
+      const draft: LocalReportDraft = {
+        id: localId,
+        userId: user.id,
+        companyId,
+        projectId,
+        type,
+        project: context.project ?? context.report?.project ?? previous?.project,
+        baseReport: previous?.baseReport ?? context.report,
+        photoKey: context.photoDraftKey,
+        values: JSON.parse(JSON.stringify(data)),
+        mutationId:
+          previous && offlineValuesFingerprint(previous.values) === offlineValuesFingerprint(data)
+            ? previous.mutationId
+            : newOfflineMutationId(),
+        updatedAt: new Date().toISOString(),
+        files: [
+          ...new Set([
+            ...(previous?.files ?? []),
+            ...photos.photos.flatMap((p) => (p.asset.offlineFileId ? [p.asset.offlineFileId] : [])),
+          ]),
+        ],
+      };
+      await putLocalReport(draft);
+      await flushPhotoQueue();
+      await offlineDisk.flush();
+      useConnectivity.setState({ storageError: undefined });
+      setLocallySaved(true);
+      setLocalMessage(
+        'Salvo neste telefone. ' +
+          (useConnectivity.getState().online
+            ? 'Pronto para sincronizar.'
+            : 'Será enviado quando houver internet.'),
+      );
+      return draft;
+    },
+    [localId, user.id, companyId, projectId, type],
+  );
+  const saveOnPhoneRef = useRef(saveOnPhone);
+  saveOnPhoneRef.current = saveOnPhone;
+  const wasSyncing = useRef(false);
+  useEffect(() => {
+    if (syncingLocally) {
+      clearTimeout(localTimer.current);
+      localTimer.current = undefined;
+      wasSyncing.current = true;
+      return;
+    }
+    if (!wasSyncing.current) return;
+    wasSyncing.current = false;
+    const state = useOfflineReports.getState(),
+      checkpoint = state.drafts[localId];
+    const snapshot = checkpoint?.baseReport ?? state.syncResults[localId];
+    if (
+      snapshot &&
+      (state.syncResults[localId] ||
+        loadedReportVersion.current !== snapshot.id + ':' + snapshot.version)
+    ) {
+      loadedReportVersion.current = snapshot.id + ':' + snapshot.version;
+      setCreatedReport(snapshot);
+      const values = checkpoint?.values ?? reportValues(snapshot);
+      reset({ ...values, specificData: withFieldDefaults(values.specificData, baseSections) });
+      setLocallySaved(true);
+    }
+    if (state.syncResults[localId]) {
+      const syncResults = { ...state.syncResults };
+      delete syncResults[localId];
+      useOfflineReports.setState({ syncResults });
+    }
+  }, [syncingLocally, localId, reset]);
+  useFocusEffect(
+    useCallback(() => {
+      activeOfflineReports.add(localId);
+      return () => {
+        activeOfflineReports.delete(localId);
+        const flush = localTimer.current
+          ? saveOnPhoneRef.current(getValues()).catch(() => {})
+          : Promise.resolve();
+        void flush.then(() => syncWaitingReports());
+      };
+    }, [localId, getValues]),
+  );
+  useEffect(() => {
+    mountedOfflineReports.add(localId);
+    const subscription = watch((_values, info) => {
+      if (!info.name || localContext.current.saving) return;
+      setLocallySaved(false);
+      clearTimeout(localTimer.current);
+      localTimer.current = setTimeout(
+        () => void saveOnPhoneRef.current(getValues()).catch(showLocalError),
+        700,
+      );
+    });
+    const appState = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && !localContext.current.saving && localTimer.current)
+        void saveOnPhoneRef.current(getValues()).catch(showLocalError);
+    });
+    function showLocalError(cause: unknown) {
+      setLocallySaved(false);
+      setError(cause);
+    }
+    return () => {
+      mountedOfflineReports.delete(localId);
+      subscription.unsubscribe();
+      appState.remove();
+      if (localTimer.current) {
+        clearTimeout(localTimer.current);
+        void saveOnPhoneRef.current(getValues()).catch(() => {});
+      }
+    };
+  }, [localId, watch, getValues]);
+  const lastPhotoDrafts = useRef(photoDrafts);
+  useEffect(() => {
+    const changed = lastPhotoDrafts.current !== photoDrafts;
+    lastPhotoDrafts.current = photoDrafts;
+    if (!changed || !hasPhotoDrafts || saving || syncingLocally) return;
+    setLocallySaved(false);
+    clearTimeout(localTimer.current);
+    void saveOnPhoneRef.current(getValues()).catch((cause) => setError(cause));
+  }, [photoDrafts, hasPhotoDrafts, saving, syncingLocally, getValues]);
   const watchedPoints = useWatch({ control, name: 'points' });
   const watchedDrawings = useWatch({ control, name: 'drawings' });
   const watchedData = useWatch({ control, name: 'specificData' });
@@ -423,9 +597,12 @@ function ReportFormContent({
     setReapply(false);
   };
   const discardPhotos = useCallback(() => {
+    clearTimeout(localTimer.current);
+    localTimer.current = undefined;
+    void removeLocalReport(localId);
     useReportPhotoDrafts.getState().update(photoDraftKey, () => emptyPhotoDrafts);
-  }, [photoDraftKey]);
-  useUnsavedChanges(hasChanges || editingBusy, discardPhotos);
+  }, [photoDraftKey, localId]);
+  useUnsavedChanges((hasChanges && !locallySaved) || editingBusy, discardPhotos);
   useEffect(() => {
     onDirtyChange?.(hasChanges || editingBusy);
   }, [hasChanges, editingBusy, onDirtyChange]);
@@ -632,64 +809,34 @@ function ReportFormContent({
         });
     },
     mutationFn: async (data: Values) => {
-      const pendingPhotos =
-        useReportPhotoDrafts.getState().reports[photoDraftKey] ?? emptyPhotoDrafts;
-      const removePointMediaIds = (report?.media ?? [])
-        .filter(
-          (photo) =>
-            photo.reportPointId &&
-            pendingPhotos.removedIds.includes(photo.id) &&
-            !data.points.some((point) => point.id === photo.reportPointId),
-        )
-        .map((photo) => photo.id);
-      const saved = await api<Report>(
-        report ? '/reports/' + report.id : '/reports',
-        jsonBody(report ? 'PUT' : 'POST', {
-          ...data,
-          reportDate: data.reportDate || null,
-          specificData: cleanReportDraft(data.specificData, ['specificData']),
-          points: canEditPath('points') ? cleanReportDraft(data.points, ['points']) : undefined,
-          signatures: canEditPath('signatures')
-            ? cleanReportDraft(data.signatures, ['signatures'])
-            : undefined,
-          drawings: user.permissions.includes('drawing.edit') ? data.drawings : undefined,
-          ...(report
-            ? {
-                version: Number(loadedReportVersion.current?.split(':').at(-1) ?? report.version),
-                ...(removePointMediaIds.length ? { removePointMediaIds } : {}),
-              }
-            : { reportTypeId: type.id, companyId, projectId, prefillFromProject: false }),
-        }),
-      );
-      if (removePointMediaIds.length)
-        useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
-          ...draft,
-          removedIds: draft.removedIds.filter((id) => !removePointMediaIds.includes(id)),
-          annotationEdits: Object.fromEntries(
-            Object.entries(draft.annotationEdits ?? {}).filter(
-              ([id]) => !removePointMediaIds.includes(id),
-            ),
-          ),
-          captionEdits: Object.fromEntries(
-            Object.entries(draft.captionEdits ?? {}).filter(
-              ([id]) => !removePointMediaIds.includes(id),
-            ),
-          ),
-        }));
-      return saveReportPhotos(
-        photoDraftKey,
-        saved,
-        data.points,
-        hasPhotoDrafts ? setTransferProgress : undefined,
-      );
+      await saveOnPhone(data);
+      return syncLocalReport(localId, setTransferProgress);
     },
     onSuccess: async (saved) => {
+      setLocalMessage('Relatório e fotos sincronizados com o servidor.');
+      setLocallySaved(true);
       acceptedSaveVersion.current = saved.id + ':' + saved.version;
       if (!initialReport) setCreatedReport(saved);
       client.setQueryData(['report', saved.id], saved);
       await client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'report' });
     },
     onError: (cause) => {
+      const checkpoint = useOfflineReports.getState().drafts[localId];
+      if (checkpoint?.baseReport) {
+        loadedReportVersion.current =
+          checkpoint.baseReport.id + ':' + checkpoint.baseReport.version;
+        setCreatedReport(checkpoint.baseReport);
+        reset({
+          ...checkpoint.values,
+          specificData: withFieldDefaults(checkpoint.values.specificData, baseSections),
+        });
+      }
+      if ((cause as { code?: string })?.code === 'NETWORK_ERROR') {
+        setLocalMessage(
+          'Sem internet. Seu preenchimento e suas fotos continuam salvos no telefone.',
+        );
+        return;
+      }
       showSaveError(cause);
     },
     onSettled: () => {
@@ -698,6 +845,10 @@ function ReportFormContent({
     },
   });
   const save = async () => {
+    if (!useConnectivity.getState().online) {
+      await saveOnPhone(getValues()).catch(showSaveError);
+      return;
+    }
     let saved: Report | undefined;
     clearErrors();
     await handleSubmit(
@@ -760,6 +911,121 @@ function ReportFormContent({
         <Badge label={type.code} tone="blue" dot={false} />
       </View>
       <Notice error={photoDrafts.error} />
+      {(!online || localEntry || storageError || localMessage) && (
+        <Card style={{ padding: 14, gap: 8 }}>
+          <Text style={styles.label}>
+            {online ? 'Preenchimento no telefone' : 'Sem internet · modo offline'}
+          </Text>
+          <Text style={styles.muted} accessibilityLiveRegion="polite">
+            {localMessage ||
+              (localEntry
+                ? 'Há um rascunho salvo neste telefone aguardando sincronização.'
+                : 'As alterações e fotos serão guardadas neste telefone enquanto você preenche.')}
+          </Text>
+          {!!localEntry?.error && (
+            <View style={{ gap: 8 }}>
+              <Notice
+                error={new Error(localEntry.error.message)}
+                guidance="Seu rascunho continua salvo no telefone."
+              />
+              <Button
+                title="Corrigir pendência"
+                small
+                secondary
+                onPress={() =>
+                  showSaveError(
+                    new ApiError(
+                      422,
+                      localEntry.error!.code ?? 'OFFLINE_SYNC_ERROR',
+                      localEntry.error!.message,
+                      localEntry.error!.details,
+                    ),
+                  )
+                }
+              />
+              {localEntry.error.code === 'VERSION_CONFLICT' && localEntry.baseReport && (
+                <Button
+                  title="Conferir versão do servidor"
+                  small
+                  secondary
+                  disabled={!online || editingBusy}
+                  onPress={() =>
+                    void api<Report>('/reports/' + localEntry.baseReport!.id)
+                      .then(setServerConflict)
+                      .catch(showSaveError)
+                  }
+                />
+              )}
+            </View>
+          )}
+          <Notice error={storageError ? new Error(storageError) : undefined} />
+          <Button
+            title={online ? 'Sincronizar agora' : 'Salvar no telefone'}
+            small
+            secondary
+            icon="save"
+            disabled={editingBusy}
+            onPress={() => void save()}
+          />
+          {!online && (
+            <Text style={styles.muted}>
+              PDF, análise e aprovação ficam disponíveis após a sincronização.
+            </Text>
+          )}
+        </Card>
+      )}
+      <PickerSheet
+        visible={!!serverConflict}
+        title="Relatório alterado em outro local"
+        subtitle="Confira o que está no servidor antes de continuar."
+        icon="alert"
+        onClose={() => setServerConflict(undefined)}
+        maxWidth={900}
+      >
+        <Text style={styles.muted}>
+          Seu preenchimento está guardado no telefone. Se escolher usar esses dados, eles
+          substituirão os campos do servidor no próximo envio. A sincronização ainda verifica se
+          houve outra alteração depois desta conferência.
+        </Text>
+        {serverConflict && (
+          <>
+            <Text style={styles.label}>{serverConflict.title || 'Relatório sem título'}</Text>
+            <Text style={styles.muted}>
+              Versão {serverConflict.version} · {(serverConflict.points ?? []).length} pontos ·{' '}
+              {(serverConflict.media ?? []).length} fotos
+            </Text>
+            <ReportSummary report={serverConflict} />
+          </>
+        )}
+        <Button
+          title="Usar meu preenchimento sobre esta versão"
+          secondary
+          disabled={
+            editingBusy ||
+            !localEntry ||
+            !serverConflict ||
+            !['DRAFT', 'IN_REVIEW'].includes(serverConflict.status)
+          }
+          onPress={() => {
+            if (!localEntry || !serverConflict) return;
+            const snapshot = serverConflict;
+            void putLocalReport({
+              ...localEntry,
+              baseReport: snapshot,
+              mutationId: newOfflineMutationId(),
+              error: undefined,
+            })
+              .then(() => {
+                loadedReportVersion.current = snapshot.id + ':' + snapshot.version;
+                setServerConflict(undefined);
+                setLocalMessage(
+                  'Versão do servidor conferida. Revise seu preenchimento e toque em Sincronizar agora.',
+                );
+              })
+              .catch(showSaveError);
+          }}
+        />
+      </PickerSheet>
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <View
           style={{

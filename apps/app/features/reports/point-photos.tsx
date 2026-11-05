@@ -11,6 +11,7 @@ import { PhotoPreview, type PhotoSource } from './photo-preview';
 import { PhotoAnnotationEditor } from './photo-annotation-editor';
 import { useReportPhotoDrafts, emptyPhotoDrafts } from './report-photo-drafts';
 import { checkReportPhoto } from './check-report-photo';
+import { keepReportAsset } from '../../services/offline-files';
 
 export function PointPhotos({
   draftKey,
@@ -308,13 +309,16 @@ export function PointPhotos({
             { pointId, reportId, persistedPointId, projectId },
             onProgress,
           );
+          const id = drawingId();
+          onProgress?.('Guardando foto no telefone…');
+          const localAsset = await keepReportAsset(asset, id);
           update((draft) => ({
             ...draft,
             projectId,
             error: undefined,
             photos: [
               ...draft.photos,
-              { id: drawingId(), pointKey: pointId, asset, caption: '', sha256 },
+              { id, pointKey: pointId, asset: localAsset, caption: '', sha256 },
             ],
           }));
         }}

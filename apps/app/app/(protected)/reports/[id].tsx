@@ -10,11 +10,17 @@ import { ReportSummary } from '../../../features/reports/report-summary';
 import { ReportActions } from '../../../features/reports/report-actions';
 import { ReportProgress } from '../../../features/reports/report-progress';
 import { Page, Notice, Loading, Button, Info } from '../../../components/ui';
+import { prepareReportOffline } from '../../../features/reports/offline-prepare';
+import { useConnectivity } from '../../../stores/connectivity';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 
 export default function ReportDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [deleting, setDeleting] = useState(false);
+  const [preparing, setPreparing] = useState(false),
+    [offlineMessage, setOfflineMessage] = useState(''),
+    [offlineError, setOfflineError] = useState<unknown>();
+  const online = useConnectivity((state) => state.online);
   const user = useAuth((state) => state.session!.user),
     client = useQueryClient();
   const query = useQuery({
@@ -50,6 +56,24 @@ export default function ReportDetail() {
       {report && (
         <>
           <ReportProgress status={report.status} />
+          <Button
+            title="Guardar relatório e fotos para uso offline"
+            small
+            secondary
+            icon="save"
+            disabled={!online || preparing}
+            busy={preparing}
+            onPress={() => {
+              setPreparing(true);
+              setOfflineError(undefined);
+              void prepareReportOffline(report, setOfflineMessage)
+                .then(setOfflineMessage)
+                .catch(setOfflineError)
+                .finally(() => setPreparing(false));
+            }}
+          />
+          {!!offlineMessage && <Info text={offlineMessage} icon="save" />}
+          <Notice error={offlineError} />
           {!!report.revisionNotes && (
             <Info text={'Observações da análise: ' + report.revisionNotes} icon="edit" />
           )}

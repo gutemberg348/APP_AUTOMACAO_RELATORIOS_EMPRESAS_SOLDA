@@ -4,6 +4,9 @@ import { Platform } from 'react-native';
 import { fetch as expoFetch } from 'expo/fetch';
 import Constants from 'expo-constants';
 import { resolveApiUrl } from './resolve-api-url';
+import { cacheApiData, cachedApiData, cacheablePath, offlineScope } from './offline-cache';
+import { offlineDisk, offlineHash } from './offline-disk';
+import { useConnectivity, offlineStorageFailure } from '../stores/connectivity';
 export const apiUrl = resolveApiUrl(
   process.env.EXPO_PUBLIC_API_URL,
   typeof __DEV__ !== 'undefined' && __DEV__,
@@ -28,10 +31,17 @@ async function request<T>(
   binary = false,
 ): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    init.body instanceof FormData ? 60000 : 12000,
+  );
   try {
+    if (!useConnectivity.getState().online && path !== '/health') throw new Error('OFFLINE');
     const fetchRequest = Platform.OS === 'web' ? globalThis.fetch : expoFetch;
     response = await fetchRequest(`${apiUrl}${path}`, {
       ...init,
+      signal: init.signal ?? controller.signal,
       headers: {
         ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -39,11 +49,14 @@ async function request<T>(
       },
     });
   } catch {
+    useConnectivity.setState({ online: false });
     throw new ApiError(
       0,
       'NETWORK_ERROR',
       'Não foi possível conectar à API. Confira sua conexão e o endereço do servidor.',
     );
+  } finally {
+    clearTimeout(timeout);
   }
   if (binary && response.ok) return (await response.blob()) as T;
   let body: ApiResponse<T>;
@@ -63,14 +76,43 @@ async function request<T>(
 let refreshPending: Promise<AuthSession> | null = null;
 export async function api<T>(
   path: string,
-  init: RequestInit = {},
+  init: RequestInit & { accountId?: string } = {},
   authenticated = true,
   binary = false,
 ): Promise<T> {
   const session = useAuth.getState().session;
+  if (init.accountId && init.accountId !== session?.user.id)
+    throw new ApiError(
+      409,
+      'ACCOUNT_CHANGED',
+      'A conta mudou. Entre na conta original para continuar a sincronização.',
+    );
+  const transport = { ...init };
+  delete transport.accountId;
+  const scope = authenticated && session ? offlineScope(apiUrl, session.user.id) : undefined;
+  const cacheGet = scope && (!init.method || init.method === 'GET') && cacheablePath(path);
+  const onlineRequest = async (token?: string) => {
+    const result = await request<T>(path, transport, token, binary);
+    if (cacheGet) {
+      try {
+        if (binary)
+          await offlineDisk.putBlob(scope!, 'remote-' + offlineHash(path), result as Blob);
+        else await cacheApiData(scope!, path, result);
+      } catch (cause) {
+        offlineStorageFailure(cause);
+      }
+    }
+    return result;
+  };
   try {
-    return await request<T>(path, init, authenticated ? session?.accessToken : undefined, binary);
+    return await onlineRequest(authenticated ? session?.accessToken : undefined);
   } catch (error) {
+    if (cacheGet && error instanceof ApiError && error.code === 'NETWORK_ERROR') {
+      const cached = binary
+        ? await offlineDisk.getBlob(scope!, 'remote-' + offlineHash(path))
+        : await cachedApiData<T>(scope!, path);
+      if (cached !== undefined) return cached as T;
+    }
     if (!authenticated || !(error instanceof ApiError) || error.status !== 401 || !session)
       throw error;
     refreshPending ??= request<AuthSession>('/auth/refresh', {
@@ -91,7 +133,7 @@ export async function api<T>(
         refreshPending = null;
       });
     const refreshed = await refreshPending;
-    return request<T>(path, init, refreshed.accessToken, binary);
+    return onlineRequest(refreshed.accessToken);
   }
 }
 export const jsonBody = (method: string, data: unknown): RequestInit => ({

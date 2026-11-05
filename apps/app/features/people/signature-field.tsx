@@ -1,35 +1,47 @@
 import { useEffect, useState } from 'react';
-import { Image, View, Text, Platform, Keyboard } from 'react-native';
-import { api, apiBlob, apiUrl } from '../../services/api';
-import { useAuth } from '../../stores/auth';
-import { appendUploadFile } from '../../services/upload-file';
+import { Image, View, Text, Keyboard } from 'react-native';
+import { apiBlob } from '../../services/api';
+import { localSignature, saveLocalSignature } from './offline-signatures';
+import { signatureStrokePath, type SignaturePoint } from '@weldcosta/shared';
+import Svg, { Path } from 'react-native-svg';
 import { MediaSourcePicker } from '../../components/media-source-picker';
 import { Button, Notice } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 import { SignaturePad } from './signature-pad';
 
 export function SignaturePreview({ id }: { id: string }) {
-  const token = useAuth((state) => state.session?.accessToken);
-  const path = '/people/signatures/' + id;
+  const [strokes, setStrokes] = useState<SignaturePoint[][]>();
   const [uri, setUri] = useState('');
   const [error, setError] = useState<unknown>();
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
     let active = true;
     setUri('');
     setError(undefined);
-    void apiBlob('/people/signatures/' + id)
-      .then(
-        (blob) =>
-          new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          }),
+    setStrokes(undefined);
+    void localSignature(id)
+      .then(async (local) => {
+        if (local?.strokes) {
+          if (active) setStrokes(local.strokes);
+          return undefined;
+        }
+        if (local?.asset) {
+          if (active) setUri(local.asset.uri);
+          return undefined;
+        }
+        return apiBlob('/people/signatures/' + (local?.remoteId ?? id));
+      })
+      .then((blob) =>
+        blob
+          ? new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            })
+          : undefined,
       )
       .then((value) => {
-        if (active) setUri(value);
+        if (active && value) setUri(value);
       })
       .catch((e) => {
         if (active) setError(e);
@@ -41,13 +53,24 @@ export function SignaturePreview({ id }: { id: string }) {
   return (
     <View>
       <Notice error={error} />
-      {Platform.OS !== 'web' || uri ? (
+      {strokes ? (
+        <Svg
+          viewBox="0 0 1000 500"
+          style={{ height: 100, width: '100%', backgroundColor: 'white' }}
+        >
+          {strokes.map((stroke, index) => (
+            <Path
+              key={index}
+              d={signatureStrokePath(stroke)}
+              stroke="#14243a"
+              strokeWidth={4}
+              fill="none"
+            />
+          ))}
+        </Svg>
+      ) : uri ? (
         <Image
-          source={
-            Platform.OS === 'web'
-              ? { uri }
-              : { uri: apiUrl + path, headers: { Authorization: 'Bearer ' + token } }
-          }
+          source={{ uri }}
           accessibilityLabel="Assinatura selecionada"
           resizeMode="contain"
           style={{ height: 100, width: '100%', backgroundColor: 'white', borderRadius: 10 }}
@@ -131,14 +154,10 @@ export function SignatureField({
               setBusy(true);
               setError(undefined);
               try {
-                const form = new FormData();
                 onProgress('Preparando assinatura…');
-                await appendUploadFile(form, asset, 5 * 1024 * 1024);
-                onProgress('Enviando assinatura…');
-                const saved = await api<{ id: string }>('/people/signatures/upload', {
-                  method: 'POST',
-                  body: form,
-                });
+                if (asset.size && asset.size > 5 * 1024 * 1024)
+                  throw new Error('Escolha uma assinatura de até 5 MB.');
+                const saved = await saveLocalSignature({ asset });
                 onChange(saved.id);
                 setDraw(false);
               } finally {

@@ -6,6 +6,8 @@ import {
   drawingDataSchema,
   drawingSvg,
   drawingPointLabel,
+  drawingPointLabelRadius,
+  positionDrawingPointLabel,
   newDrawingData,
   nextPointNumber,
   snapPosition,
@@ -20,6 +22,68 @@ import {
   removePointFromDrawings,
 } from '@weldcosta/shared';
 describe('Technical drawing geometry and safe rendering', () => {
+  it('positions only the point number, persists its position and uses it in SVG/PDF without editing guides', () => {
+    const point: DrawingElement = { id: 'p', type: 'point', reportPointId: 'key', x: 500, y: 400 };
+    const above = positionDrawingPointLabel(point, { x: 500, y: 372 });
+    const data = drawingDataSchema.parse({ ...newDrawingData(), grid: 'none', elements: [above] });
+    expect(data.elements[0]).toMatchObject({
+      x: 500,
+      y: 400,
+      labelX: 500,
+      labelY: 372,
+      labelPosition: 'custom',
+      reportPointId: 'key',
+    });
+    const label = drawingPointLabel(above, '02');
+    expect(label).toMatchObject({ x: 500, y: 378, anchor: 'middle', left: 489 });
+    expect(
+      hitElement(data.elements, { x: 500, y: 371 }, 2, [{ id: 'key', number: '02' }])?.id,
+    ).toBe('p');
+    const svg = drawingSvg(data, [{ id: 'key', number: '02' }]);
+    expect(svg).toContain('<circle cx="500" cy="400" r="5"');
+    expect(svg).toContain('<text x="500" y="378" text-anchor="middle"');
+    expect(svg).not.toContain('data-point-label-guide');
+    expect(drawingSvg(data, [], { pointLabelControl: { point, label: label.center } })).toContain(
+      'data-point-label-guide',
+    );
+    const moved = moveElement(above, 10, 20);
+    expect(moved).toMatchObject({
+      x: 510,
+      y: 420,
+      labelX: 510,
+      labelY: 392,
+      labelPosition: 'custom',
+    });
+    expect(drawingPointLabel(moved as typeof above, '02').center).toEqual({ x: 510, y: 392 });
+  });
+  it('keeps the number near its dot, supports independent markers and preserves placement when retaining a removed point', () => {
+    const point: DrawingElement = { id: 'p', type: 'point', reportPointId: 'key', x: 500, y: 400 };
+    const far = positionDrawingPointLabel(point, { x: 1000, y: 0 });
+    expect(Math.hypot(far.labelX! - point.x, far.labelY! - point.y)).toBeCloseTo(
+      drawingPointLabelRadius,
+    );
+    const kept = removePointFromDrawings(
+      [{ data: { ...newDrawingData(), elements: [far] } }],
+      { id: 'key', number: '02' },
+      true,
+    )[0]!.data.elements[0]!;
+    expect(kept).toMatchObject({
+      type: 'marker',
+      number: '02',
+      labelPosition: 'custom',
+      labelX: far.labelX,
+      labelY: far.labelY,
+    });
+    if (kept.type !== 'marker') throw new Error('Expected independent marker');
+    expect(drawingPointLabel(kept, kept.number)).toEqual(drawingPointLabel(far, '02'));
+    const edge = positionDrawingPointLabel({ ...point, x: 5, y: 5 }, { x: -20, y: -20 });
+    expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: [edge] }).success).toBe(
+      true,
+    );
+    const label = drawingPointLabel(edge, '01');
+    expect(label.left).toBeGreaterThanOrEqual(4);
+    expect(label.y).toBeGreaterThanOrEqual(18);
+  });
   it('renders dense thin hatching with selectable direction and small preview-only corner handles', () => {
     const corners = [
       { x: 100, y: 100 },

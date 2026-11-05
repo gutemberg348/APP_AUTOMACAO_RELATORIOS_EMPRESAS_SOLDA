@@ -13,7 +13,7 @@ import Svg, { Path, Line } from 'react-native-svg';
 import { fitSignatureStrokes, signatureStrokePath, type SignaturePoint } from '@weldcosta/shared';
 import { Button, Notice } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
-import { api, jsonBody } from '../../services/api';
+import { saveLocalSignature } from './offline-signatures';
 
 function Pad({ onClose, onSaved }: { onClose(): void; onSaved(id: string): void }) {
   const { styles, tokens: t, mode } = useTheme();
@@ -207,10 +207,7 @@ function Pad({ onClose, onSaved }: { onClose(): void; onSaved(id: string): void 
             setError(undefined);
             Keyboard.dismiss();
             try {
-              const saved = await api<{ id: string }>(
-                '/people/signatures/draw',
-                jsonBody('POST', { strokes: fitSignatureStrokes(strokes) }),
-              );
+              const saved = await saveLocalSignature({ strokes: fitSignatureStrokes(strokes) });
               onSaved(saved.id);
             } catch (cause) {
               setError(cause);

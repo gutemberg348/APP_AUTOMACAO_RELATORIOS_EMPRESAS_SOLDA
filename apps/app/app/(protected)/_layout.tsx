@@ -7,13 +7,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { userRoleLabels, hasUserPermission, type CurrentUser } from '@weldcosta/shared';
 import { useAuth } from '../../stores/auth';
-import { api, jsonBody } from '../../services/api';
+import { api, jsonBody, apiUrl } from '../../services/api';
+import { offlineScope } from '../../services/offline-cache';
 import { Brand } from '../../components/brand';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { Icon, type IconName } from '../../components/icon';
 import { Button, IconButton, Loading, Badge, selectionState } from '../../components/ui';
 import { useKeyboardVisible } from '../../hooks/use-keyboard-visible';
 import { PickerSheet } from '../../components/picker-sheet';
+import { useOfflineReports } from '../../features/reports/offline-report-store';
+import { useConnectivity } from '../../stores/connectivity';
 
 const links = [
   {
@@ -78,6 +81,9 @@ export default function ProtectedLayout() {
     [leaving, setLeaving] = useState(false);
   const keyboardVisible = useKeyboardVisible();
   const client = useQueryClient();
+  const offlineReady = useOfflineReports((state) => state.ready);
+  const localScope = useOfflineReports((state) => state.scope);
+  const online = useConnectivity((state) => state.online);
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<CurrentUser>('/auth/me'),
@@ -92,6 +98,7 @@ export default function ProtectedLayout() {
   }, [me.data, setSession]);
   if (!ready) return <Loading />;
   if (!session) return <Redirect href="/login" />;
+  if (!offlineReady || localScope !== offlineScope(apiUrl, session.user.id)) return <Loading />;
   const operator = session.user.role.code === 'OPERATOR';
   if (
     operator &&
@@ -273,6 +280,16 @@ export default function ProtectedLayout() {
           </View>
         </View>
         <View style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+          {!online && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Sem internet. Ver rascunhos neste telefone"
+              onPress={() => requestNavigation(() => router.push('/reports'))}
+              style={{ padding: 10, backgroundColor: t.colors.blueSoft }}
+            >
+              <Text style={styles.label}>Sem internet · Ver rascunhos neste telefone</Text>
+            </Pressable>
+          )}
           <Slot />
         </View>
         {!desktop && !keyboardVisible && (

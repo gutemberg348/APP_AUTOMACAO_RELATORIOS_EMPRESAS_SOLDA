@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Report, ReportPoint } from '@weldcosta/shared';
+import { reportTypeCodes, type Report, type ReportPoint } from '@weldcosta/shared';
 import { api, ApiError } from '../../../app/services/api';
 import {
   ReportPhotoSaveError,
@@ -256,3 +256,36 @@ describe('Photos selected in the point form', () => {
     expect(useReportPhotoDrafts.getState().reports['user:report-1']?.photos).toEqual([]);
   });
 });
+
+it.each(reportTypeCodes)(
+  'resumes photo deletion after losing the server acknowledgement in %s',
+  async (code) => {
+    const photo = {
+      id: 'removed-photo',
+      reportPointId: 'persisted-point',
+      sectionKey: 'photos',
+      originalName: 'remover.jpg',
+    };
+    const report = { ...saved, reportType: { code }, media: [photo] } as Report;
+    const afterDelete = { ...report, version: 2, media: [] };
+    useReportPhotoDrafts.getState().update('user:report-1', () => ({
+      photos: [],
+      removedIds: [photo.id],
+    }));
+    // The server committed DELETE, but neither its response nor the refresh arrived.
+    apiMock.mockRejectedValue(new ApiError(0, 'NETWORK_ERROR', 'Sem conexão'));
+    await saveReportPhotos('user:report-1', report, report.points!);
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']?.removedIds).toEqual([
+      photo.id,
+    ]);
+    // Reconnection/save returned the current authoritative report without that photo.
+    apiMock.mockReset().mockImplementation(async (_path, options) => {
+      if (options?.method === 'DELETE') throw new ApiError(404, 'NOT_FOUND', 'Foto já removida');
+      return afterDelete;
+    });
+    await saveReportPhotos('user:report-1', afterDelete, report.points!);
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']?.removedIds).toEqual([]);
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']?.error).toBeUndefined();
+    expect(apiMock.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false);
+  },
+);

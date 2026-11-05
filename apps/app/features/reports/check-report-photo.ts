@@ -1,5 +1,7 @@
 import type { DocumentPickerAsset } from 'expo-document-picker';
-import { api } from '../../services/api';
+import { api, ApiError } from '../../services/api';
+import { localPhotoHash } from '../../services/offline-files';
+import { useConnectivity } from '../../stores/connectivity';
 import { appendUploadFile } from '../../services/upload-file';
 import { useReportPhotoDrafts } from './report-photo-drafts';
 
@@ -23,13 +25,21 @@ export async function checkReportPhoto(
   if (target.reportId && target.persistedPointId)
     form.append('reportPointId', target.persistedPointId);
   onProgress?.('Enviando imagem para verificação…');
-  const { sha256, projectId: checkedProjectId } = await api<{ sha256: string; projectId?: string }>(
-    '/reports/media/check',
-    {
+  let checked: { sha256: string; projectId?: string };
+  try {
+    if (!useConnectivity.getState().online) throw new ApiError(0, 'NETWORK_ERROR', 'Sem internet');
+    checked = await api<{ sha256: string; projectId?: string }>('/reports/media/check', {
       method: 'POST',
       body: form,
-    },
-  );
+    });
+  } catch (cause) {
+    if (!(cause instanceof ApiError) || cause.code !== 'NETWORK_ERROR') throw cause;
+    onProgress?.(
+      'Conferindo a foto no telefone. A verificação da obra será concluída ao sincronizar.',
+    );
+    checked = { sha256: await localPhotoHash(asset), projectId: target.projectId };
+  }
+  const { sha256, projectId: checkedProjectId } = checked;
   const userPrefix = draftKey.slice(0, draftKey.indexOf(':') + 1);
   const projectId = checkedProjectId ?? target.projectId;
   onProgress?.('Conferindo se a foto é repetida…');

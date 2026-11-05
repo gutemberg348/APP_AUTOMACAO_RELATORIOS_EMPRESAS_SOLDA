@@ -150,6 +150,8 @@ model ReportType {
 }
 model Report {
   id String @id @default(uuid()) @db.Uuid
+  clientDraftId String? @db.Uuid
+  lastClientMutationId String? @db.Uuid
   reportTypeId String @db.Uuid
   reportType ReportType @relation(fields: [reportTypeId], references: [id])
   companyId String @db.Uuid
@@ -186,6 +188,7 @@ model Report {
   @@index([status])
   @@index([reportDate])
   @@index([createdById])
+  @@unique([createdById, clientDraftId])
   @@index([deletedAt, createdAt])
   @@map("reports")
 }

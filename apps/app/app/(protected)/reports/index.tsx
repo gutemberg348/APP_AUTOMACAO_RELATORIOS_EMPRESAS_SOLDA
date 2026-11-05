@@ -32,6 +32,7 @@ import { SelectField } from '../../../components/select-field';
 import { isISODate } from '../../../utils/dates';
 import { ReportList, statusLabels } from '../../../features/reports/report-card';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { OfflineReportsPanel } from '../../../features/reports/offline-reports-panel';
 export default function ReportsScreen() {
   const { styles } = useTheme();
   const client = useQueryClient();
@@ -164,6 +165,7 @@ export default function ReportsScreen() {
         ) : undefined
       }
     >
+      <OfflineReportsPanel />
       <View style={[styles.row, { justifyContent: 'space-between' }]}>
         <View style={{ flex: 1, minWidth: 200 }}>
           <SearchField

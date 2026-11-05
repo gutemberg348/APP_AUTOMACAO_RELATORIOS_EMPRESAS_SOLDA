@@ -20,13 +20,17 @@ import { Manrope_800ExtraBold } from '@expo-google-fonts/manrope/800ExtraBold';
 import { Loading } from '../components/ui';
 import { NavigationConfirmation } from '../components/navigation-confirmation';
 import { AppThemeProvider, useTheme } from '../utils/theme';
+import { OfflineRuntime } from '../components/offline-runtime';
 const client = new QueryClient({
   defaultOptions: {
     queries: {
+      // API reads can come from the phone cache even without a network.
+      networkMode: 'always',
       staleTime: 20000,
       retry: (count, error) =>
         !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 1,
     },
+    mutations: { networkMode: 'always' },
   },
 });
 export default function RootLayout() {
@@ -76,6 +80,7 @@ function RootContent() {
   };
   return (
     <QueryClientProvider client={client}>
+      <OfflineRuntime />
       <SafeAreaProvider>
         <NavigationThemeProvider value={navigationTheme}>
           <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />

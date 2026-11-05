@@ -19,6 +19,7 @@ import { ReportWarningsDialog } from './report-warnings-dialog';
 import { PickerSheet } from '../../components/picker-sheet';
 import { SelectOptionRow } from '../../components/select-field';
 import { formErrorGuidance } from '../../utils/form-feedback';
+import { useConnectivity } from '../../stores/connectivity';
 
 export interface ReportActionControls {
   report?: Report;
@@ -41,6 +42,7 @@ export function ReportActions({
   onError,
 }: ReportActionControls) {
   const { tokens: t, styles } = useTheme();
+  const online = useConnectivity((state) => state.online);
   const user = useAuth((state) => state.session!.user),
     client = useQueryClient();
   const [pending, setPending] = useState<Pending>();
@@ -191,7 +193,7 @@ export function ReportActions({
       <View style={[styles.row, { gap: 10 }]}>
         {!!save && (
           <Button
-            title="Salvar"
+            title={online ? 'Salvar' : 'Salvar no telefone'}
             icon="save"
             secondary
             disabled={working || (!!report && !hasChanges)}
@@ -204,7 +206,7 @@ export function ReportActions({
             title="Baixar PDF"
             icon="download"
             secondary
-            disabled={working}
+            disabled={working || !online}
             busy={operation.isPending && operation.variables?.action === 'download'}
             onPress={() => operation.mutate({ action: 'download' })}
           />
@@ -214,7 +216,7 @@ export function ReportActions({
           <Button
             title="Enviar"
             icon="send"
-            disabled={working}
+            disabled={working || !online}
             busy={operation.isPending && operation.variables?.action === 'send'}
             onPress={() => setSendOptions(true)}
           />
@@ -223,7 +225,7 @@ export function ReportActions({
           <Button
             title="Aprovar relatório"
             icon="check-circle"
-            disabled={working}
+            disabled={working || !online}
             busy={operation.isPending && operation.variables?.action === 'approve'}
             onPress={() => operation.mutate({ action: 'approve' })}
           />
@@ -243,7 +245,7 @@ export function ReportActions({
             title={status === 'IN_REVIEW' ? 'Voltar para rascunho' : 'Reabrir para edição'}
             icon="edit"
             variant="ghost"
-            disabled={working}
+            disabled={working || !online}
             onPress={() => operation.mutate({ action: 'reopen' })}
           />
         </View>

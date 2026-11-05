@@ -1,4 +1,5 @@
 import { Pressable, Text, View } from 'react-native';
+import type { ReactNode } from 'react';
 import { Button, IconButton } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 import {
@@ -18,6 +19,7 @@ export function DrawingSelectionQuickOptions({
   onFullStyle,
   onCrop,
   onFillPage,
+  pointLabel,
 }: {
   textColor?: string;
   onTextColor?: (color: string) => void;
@@ -28,10 +30,12 @@ export function DrawingSelectionQuickOptions({
   onFullStyle(): void;
   onCrop?: () => void;
   onFillPage?: () => void;
+  pointLabel?: ReactNode;
 }) {
   const { tokens: t, styles } = useTheme();
   return (
     <View style={{ gap: 8 }}>
+      {pointLabel}
       {onCrop && <Button title="Recortar imagem" icon="crop" small secondary onPress={onCrop} />}
       {onFillPage && (
         <Button title="Preencher folha" icon="expand" small secondary onPress={onFillPage} />

@@ -100,6 +100,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       ...xy,
       labelX: coord.optional(),
       labelY: xy.y.optional(),
+      labelPosition: z.literal('custom').optional(),
     })
     .strict(),
   z
@@ -111,6 +112,7 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       ...xy,
       labelX: coord.optional(),
       labelY: xy.y.optional(),
+      labelPosition: z.literal('custom').optional(),
       acceptable: z.boolean().optional(),
     })
     .strict(),
@@ -251,15 +253,48 @@ export function drawingStrokeDash(style: 'solid' | 'dotted' | 'dashed', width: n
       : '';
 }
 
-// Old label coordinates remain readable, but all point numbers now sit next to their dot.
-export function drawingPointLabel(position: DrawingPosition, number = '000') {
+export const drawingPointLabelRadius = 72;
+export type DrawingNumberedPoint = Extract<DrawingElement, { type: 'point' | 'marker' }>;
+// Old detached label coordinates keep the adjacent layout until explicitly edited.
+export function drawingPointLabel(
+  position: DrawingPosition & { labelX?: number; labelY?: number; labelPosition?: 'custom' },
+  number = '000',
+) {
   const width = Math.max(12, number.length * 11);
+  if (
+    position.labelPosition === 'custom' &&
+    position.labelX !== undefined &&
+    position.labelY !== undefined
+  ) {
+    const x = Math.max(width / 2 + 4, Math.min(drawingWidth - width / 2 - 4, position.labelX));
+    const y = Math.max(18, Math.min(drawingHeight - 4, position.labelY + 6));
+    return { x, y, anchor: 'middle', width, left: x - width / 2, center: { x, y: y - 6 } };
+  }
   const onLeft = position.x + 12 + width > drawingWidth - 4;
+  const x = position.x + (onLeft ? -12 : 12);
+  const y = Math.max(18, Math.min(drawingHeight - 4, position.y + 6));
+  const left = onLeft ? x - width : x;
   return {
-    x: position.x + (onLeft ? -12 : 12),
-    y: Math.max(18, Math.min(drawingHeight - 4, position.y + 6)),
+    x,
+    y,
     anchor: onLeft ? 'end' : 'start',
     width,
+    left,
+    center: { x: left + width / 2, y: y - 6 },
+  };
+}
+export function positionDrawingPointLabel(
+  element: DrawingNumberedPoint,
+  center: DrawingPosition,
+): DrawingNumberedPoint {
+  const dx = center.x - element.x,
+    dy = center.y - element.y;
+  const scale = Math.min(1, drawingPointLabelRadius / (Math.hypot(dx, dy) || 1));
+  return {
+    ...element,
+    labelPosition: 'custom',
+    labelX: Math.max(0, Math.min(drawingWidth, element.x + dx * scale)),
+    labelY: Math.max(12, Math.min(drawingHeight - 10, element.y + dy * scale)),
   };
 }
 export type DrawingData = z.infer<typeof drawingDataSchema>;
@@ -303,6 +338,7 @@ export function removePointFromDrawings(
                 y: element.y,
                 labelX: element.labelX,
                 labelY: element.labelY,
+                labelPosition: element.labelPosition,
                 ...(typeof point.data?.acceptable === 'boolean'
                   ? { acceptable: point.data.acceptable }
                   : {}),
@@ -420,7 +456,7 @@ export function hitElement(
             ? e.number
             : points.find((point) => pointKey(point) === e.reportPointId)?.number;
         const label = drawingPointLabel(e, number);
-        const left = label.anchor === 'end' ? label.x - label.width : label.x;
+        const left = label.left;
         if (
           p.x >= left - tolerance &&
           p.x <= left + label.width + tolerance &&
@@ -670,6 +706,7 @@ export function drawingSvg(
     anchor?: DrawingPosition;
     anchorRadius?: number;
     snapGuide?: { x?: number; y?: number; anchor?: DrawingPosition };
+    pointLabelControl?: { point: DrawingPosition; label: DrawingPosition };
   } = {},
 ) {
   const grid = data.grid ?? 'isometric';
@@ -751,8 +788,8 @@ export function drawingSvg(
         positions = [
           { x: e.x - 5, y: e.y - 5 },
           { x: e.x + 5, y: e.y + 5 },
-          { x: label.anchor === 'end' ? label.x - label.width : label.x, y: label.y - 18 },
-          { x: label.anchor === 'end' ? label.x : label.x + label.width, y: label.y + 3 },
+          { x: label.left, y: label.y - 18 },
+          { x: label.left + label.width, y: label.y + 3 },
         ];
       }
       const x = Math.min(...positions.map((p) => p.x)) - 8,
@@ -926,9 +963,13 @@ export function drawingSvg(
   const anchor = options.anchor
     ? `<circle cx="${num(options.anchor.x)}" cy="${num(options.anchor.y)}" r="${num(options.anchorRadius ?? 3)}" fill="#1764C0" pointer-events="none"/>`
     : '';
+  const labelControl = options.pointLabelControl;
+  const labelGuide = labelControl
+    ? `<g data-point-label-guide="true" pointer-events="none"><circle cx="${num(labelControl.point.x)}" cy="${num(labelControl.point.y)}" r="${drawingPointLabelRadius}" fill="none" stroke="#1764C0" stroke-opacity="0.3" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"/><path d="M${num(labelControl.point.x)} ${num(labelControl.point.y)}L${num(labelControl.label.x)} ${num(labelControl.label.y)}" fill="none" stroke="#1764C0" stroke-opacity="0.35" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/></g>`
+    : '';
   if (data.page === 'portrait') {
     const page = drawingPageBounds(data);
     body = `<defs><clipPath id="drawing-portrait-page"><rect x="${page.x}" y="${page.y}" width="${page.width}" height="${page.height}"/></clipPath></defs><g clip-path="url(#drawing-portrait-page)">${body}</g>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? drawingPageViewBox(data)}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}${anchor}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${options.viewBox ?? drawingPageViewBox(data)}" width="100%" height="100%">${body}${selectionOverlay}${construction}${lasso}${rotationControl}${guideSvg}${anchor}${labelGuide}</svg>`;
 }

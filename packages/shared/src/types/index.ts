@@ -52,6 +52,8 @@ export interface ReportType {
 }
 export interface Report {
   id: string;
+  clientDraftId?: string | null;
+  lastClientMutationId?: string | null;
   reportTypeId: string;
   companyId: string;
   projectId: string;

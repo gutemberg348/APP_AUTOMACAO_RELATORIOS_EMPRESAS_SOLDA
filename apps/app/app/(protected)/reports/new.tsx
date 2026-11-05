@@ -304,6 +304,7 @@ export default function NewReport() {
                 type={type}
                 companyId={resolvedCompany}
                 projectId={projectId}
+                project={context.data}
                 initialData={buildReportDefaults(type.code, context.data, context.data.company)}
                 initialTitle={
                   isVisualWeldReport(type.code)

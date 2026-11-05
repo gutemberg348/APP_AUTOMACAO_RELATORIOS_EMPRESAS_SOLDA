@@ -148,6 +148,65 @@ it.each(reportTypeCodes)(
       expect(await storage.get(media.filePath)).toEqual(original);
     }
     expect((await new PdfService().preview(id)).subarray(0, 5).toString()).toBe('%PDF-');
+    // Retry an upload whose response was lost: same ID, even with the old version.
+    const replay = await request(app)
+      .post(`/reports/${id}/media`)
+      .set(auth())
+      .field('version', '1')
+      .field('reportPointId', saved.points[0].id)
+      .field('clientUploadId', 'first')
+      .attach('file', portrait, 'photo.jpg');
+    expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+    expect(replay.body.data.id).toBe(first.body.data.id);
+    await load();
+    expect(saved.media).toHaveLength(3);
+    // Same file on another point of this work is rejected, but removal frees it.
+    expect((await upload(1, portrait, 'wrong-point')).status).toBe(409);
+    const secondId = saved.media.find(
+      (media: { clientUploadId: string }) => media.clientUploadId === 'same-point',
+    ).id;
+    for (const mediaId of [first.body.data.id, secondId]) {
+      const removed = await request(app)
+        .delete(`/reports/${id}/media/${mediaId}`)
+        .set(auth())
+        .send({ version: saved.version });
+      expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+      await load();
+      expect(saved.media.some((media: { id: string }) => media.id === mediaId)).toBe(false);
+      expect(saved.points).toHaveLength(2);
+    }
+    expect((await upload(1, portrait, 'reused-after-removal')).status).toBe(201);
+    await load();
+    expect(saved.media).toHaveLength(2);
+    expect(
+      saved.media.every(
+        (media: { reportPointId: string }) => media.reportPointId === saved.points[1].id,
+      ),
+    ).toBe(true);
+    // The same image is also allowed in a different work.
+    const anotherProject = await prisma.project.create({
+      data: { name: 'Other photos ' + code, companyId },
+    });
+    const another = await request(app)
+      .post('/reports')
+      .set(auth())
+      .send({
+        companyId,
+        projectId: anotherProject.id,
+        reportTypeId: type.id,
+        number: 'OTHER-' + code,
+        points: [{ number: '1', type: code === 'ME' ? 'MEASUREMENT' : 'WELD' }],
+      });
+    expect(another.status, JSON.stringify(another.body)).toBe(201);
+    const anotherUpload = await request(app)
+      .post(`/reports/${another.body.data.id}/media`)
+      .set(auth())
+      .field('version', String(another.body.data.version))
+      .field('reportPointId', another.body.data.points[0].id)
+      .field('clientUploadId', 'other-work')
+      .attach('file', portrait, 'photo.jpg');
+    expect(anotherUpload.status, JSON.stringify(anotherUpload.body)).toBe(201);
+    expect((await new PdfService().preview(id)).subarray(0, 5).toString()).toBe('%PDF-');
   },
   90000,
 );

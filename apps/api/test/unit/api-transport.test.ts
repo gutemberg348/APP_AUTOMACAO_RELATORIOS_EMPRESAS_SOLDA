@@ -7,9 +7,16 @@ const state = vi.hoisted(() => ({
 vi.mock('react-native', () => ({ Platform: state.platform }));
 vi.mock('expo/fetch', () => ({ fetch: state.expoFetch }));
 vi.mock('expo-constants', () => ({ default: { expoConfig: null, expoGoConfig: null } }));
+vi.mock('../../../app/services/offline-disk', () => ({ offlineDisk: {}, offlineHash: () => 'qa' }));
+vi.mock('../../../app/services/offline-cache', () => ({
+  cacheablePath: () => false,
+  offlineScope: () => 'qa',
+}));
 vi.mock('../../../app/stores/auth', () => ({
   useAuth: {
-    getState: () => ({ session: { accessToken: 'test-access', refreshToken: 'test-refresh' } }),
+    getState: () => ({
+      session: { accessToken: 'test-access', refreshToken: 'test-refresh', user: { id: 'qa' } },
+    }),
   },
 }));
 import { api } from '../../../app/services/api';
@@ -24,6 +31,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe('API transport for the installed Expo SDK', () => {
+  it('does not send an offline queue using another account after login changes', async () => {
+    await expect(
+      api('/reports/test', { method: 'PUT', accountId: 'another-account' }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+    expect(state.expoFetch).not.toHaveBeenCalled();
+    expect(state.nativeFetch).not.toHaveBeenCalled();
+  });
   it.each(['ios', 'android'])(
     'uses Expo fetch with auth and automatic multipart boundary on %s',
     async (platform) => {

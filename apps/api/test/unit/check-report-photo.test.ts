@@ -2,8 +2,25 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../../app/services/api';
 import { checkReportPhoto } from '../../../app/features/reports/check-report-photo';
 import { useReportPhotoDrafts } from '../../../app/features/reports/report-photo-drafts';
+import { useConnectivity } from '../../../app/stores/connectivity';
+import { localPhotoHash } from '../../../app/services/offline-files';
 
-vi.mock('../../../app/services/api', () => ({ api: vi.fn(), jsonBody: vi.fn() }));
+vi.mock('../../../app/services/api', () => ({
+  api: vi.fn(),
+  jsonBody: vi.fn(),
+  ApiError: class extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
+}));
+vi.mock('../../../app/services/offline-files', () => ({
+  localPhotoHash: vi.fn().mockResolvedValue('offline-sha256'),
+}));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 vi.mock('expo-file-system', () => ({ File: vi.fn() }));
 const asset = {
@@ -14,7 +31,27 @@ const asset = {
 };
 beforeEach(() => {
   vi.mocked(api).mockReset();
+  useConnectivity.setState({ online: true });
   useReportPhotoDrafts.setState({ reports: {} });
+});
+it('accepts photos without internet and still detects local reuse in another point', async () => {
+  useConnectivity.setState({ online: false });
+  await expect(
+    checkReportPhoto(asset, 'user:new', { pointId: 'a', projectId: 'work-a' }),
+  ).resolves.toBe('offline-sha256');
+  expect(api).not.toHaveBeenCalled();
+  expect(localPhotoHash).toHaveBeenCalledWith(asset);
+  useReportPhotoDrafts.getState().update('user:new', () => ({
+    projectId: 'work-a',
+    photos: [{ id: 'photo', pointKey: 'a', asset, caption: '', sha256: 'offline-sha256' }],
+    removedIds: [],
+  }));
+  await expect(
+    checkReportPhoto(asset, 'user:new', { pointId: 'a', projectId: 'work-a' }),
+  ).resolves.toBe('offline-sha256');
+  await expect(
+    checkReportPhoto(asset, 'user:new', { pointId: 'b', projectId: 'work-a' }),
+  ).rejects.toThrow('outro ponto');
 });
 it('checks before the first save and blocks another draft only within the same project', async () => {
   vi.mocked(api).mockResolvedValue({ sha256: 'same-bytes' });

@@ -1,18 +1,18 @@
 import { ReportPhotoSaveError, photoSaveReason } from './report-photo-error';
 import { create } from 'zustand';
-import type { DocumentPickerAsset } from 'expo-document-picker';
 import type { Report, ReportPoint, PhotoAnnotations } from '@weldcosta/shared';
 import { pointKey } from '@weldcosta/shared';
-import { api, ApiError, jsonBody } from '../../services/api';
+import { api as authenticatedApi, ApiError, jsonBody } from '../../services/api';
 import { appendUploadFile } from '../../services/upload-file';
 import type { TransferState } from '../../components/transfer-progress';
+import type { LocalAsset } from '../../services/offline-files';
 
 export interface ReportPhotoDraft {
   annotations?: PhotoAnnotations;
   sectionKey?: 'photos' | 'drawing';
   id: string;
   pointKey: string | null;
-  asset: DocumentPickerAsset;
+  asset: LocalAsset;
   caption: string;
   sha256?: string;
 }
@@ -37,6 +37,7 @@ export const useReportPhotoDrafts = create<{
     })),
   move: (from, to, pointIds) =>
     set((state) => {
+      if (from === to || !state.reports[from]) return state;
       const draft = state.reports[from] ?? emptyPhotoDrafts;
       const reports = { ...state.reports };
       delete reports[from];
@@ -52,12 +53,7 @@ export const useReportPhotoDrafts = create<{
 }));
 
 // Store drafts across the creation -> edit route so a failed upload remains retryable.
-export async function saveReportPhotos(
-  key: string,
-  saved: Report,
-  inputPoints: ReportPoint[],
-  onProgress?: (progress: TransferState) => void,
-) {
+export function remapReportPhotos(key: string, saved: Report, inputPoints: ReportPoint[]) {
   const ids = new Map(
     inputPoints.flatMap((point) => {
       const persisted = point.id
@@ -70,6 +66,19 @@ export async function saveReportPhotos(
   const store = useReportPhotoDrafts.getState();
   store.move(key, nextKey, ids);
   store.update(nextKey, (draft) => ({ ...draft, projectId: saved.projectId, error: undefined }));
+  return nextKey;
+}
+export async function saveReportPhotos(
+  key: string,
+  saved: Report,
+  inputPoints: ReportPoint[],
+  onProgress?: (progress: TransferState) => void,
+) {
+  const accountId = key.slice(0, key.indexOf(':'));
+  const api = <T = unknown>(path: string, options: RequestInit = {}) =>
+    authenticatedApi<T>(path, { ...options, accountId });
+  const nextKey = remapReportPhotos(key, saved, inputPoints);
+  const store = useReportPhotoDrafts.getState();
   let current = saved;
   const initial = useReportPhotoDrafts.getState().reports[nextKey]!;
   const total = initial.photos.length;
@@ -94,6 +103,16 @@ export async function saveReportPhotos(
   try {
     const draft = useReportPhotoDrafts.getState().reports[nextKey]!;
     for (const id of draft.removedIds) {
+      // A previous DELETE may have committed before the connection dropped.
+      // A fresh server snapshot without the photo confirms that removal; retrying
+      // DELETE would return 404 forever and prevent this queue from completing.
+      if (current.media && !current.media.some((media) => media.id === id)) {
+        store.update(nextKey, (remaining) => ({
+          ...remaining,
+          removedIds: remaining.removedIds.filter((item) => item !== id),
+        }));
+        continue;
+      }
       locateMedia(id, 'Excluir foto');
       progress('Atualizando fotos do relatório…');
       await api(

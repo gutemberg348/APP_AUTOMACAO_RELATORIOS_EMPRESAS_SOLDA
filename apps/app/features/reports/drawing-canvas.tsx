@@ -1,5 +1,5 @@
 import { memo, useId, useMemo } from 'react';
-import Svg, { ClipPath, Defs, G, Image, Rect, SvgXml } from 'react-native-svg';
+import Svg, { ClipPath, Defs, G, Image, Rect, parse } from 'react-native-svg';
 import {
   drawingImageFrame,
   drawingOrderedElements,
@@ -13,6 +13,15 @@ import {
 type Options = NonNullable<Parameters<typeof drawingSvg>[2]>;
 type Points = Parameters<typeof drawingSvg>[1];
 const fixedViewBox = '0 0 1000 800';
+
+// All layers must inherit the outer canvas viewport. A nested SvgXml creates
+// another native SVG viewport; directly under Svg it can scale differently
+// from the same content under G, detaching the selection from its geometry.
+// Keep the parsed vector children, without mounting that second SVG root.
+const CanvasFragment = memo(function CanvasFragment({ xml }: { xml: string }) {
+  const children = useMemo(() => parse(xml)?.children, [xml]);
+  return <G>{children}</G>;
+});
 
 // Keep decoded image sources and parsed vector nodes mounted during gestures.
 // Only the element being edited changes; pan/zoom only changes the outer viewBox.
@@ -48,7 +57,7 @@ const CanvasElement = memo(function CanvasElement({
   if (element.type !== 'image')
     return (
       <G opacity={opacity}>
-        <SvgXml xml={xml} width={1000} height={800} />
+        <CanvasFragment xml={xml} />
       </G>
     );
   const frame = drawingImageFrame(element);
@@ -133,7 +142,7 @@ export const DrawingCanvas = memo(function DrawingCanvas({
         </ClipPath>
       </Defs>
       <G clipPath={`url(#${clipId})`}>
-        <SvgXml xml={background} width={1000} height={800} />
+        <CanvasFragment xml={background} />
         {ordered.map((element) => {
           const selected =
             element.id === options.selectedId || !!options.selectedIds?.includes(element.id);
@@ -153,7 +162,7 @@ export const DrawingCanvas = memo(function DrawingCanvas({
           );
         })}
       </G>
-      <SvgXml xml={overlay} width={1000} height={800} />
+      <CanvasFragment xml={overlay} />
     </Svg>
   );
 });

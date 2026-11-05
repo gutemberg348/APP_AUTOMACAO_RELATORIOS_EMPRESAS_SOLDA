@@ -291,6 +291,28 @@ export class ReportsService {
   async create(data: z.infer<typeof reportCreateSchema>, user: CurrentUser) {
     assertCompanyAccess(user, data.companyId);
     return prisma.$transaction(async (tx) => {
+      if (data.clientDraftId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${user.id + ':' + data.clientDraftId}, 0))`;
+        const existing = await tx.report.findUnique({
+          where: {
+            createdById_clientDraftId: { createdById: user.id, clientDraftId: data.clientDraftId },
+          },
+        });
+        if (existing) {
+          if (
+            existing.deletedAt ||
+            existing.companyId !== data.companyId ||
+            existing.projectId !== data.projectId ||
+            existing.reportTypeId !== data.reportTypeId
+          )
+            throw new AppError(
+              409,
+              'OFFLINE_DRAFT_CONFLICT',
+              'Este rascunho já foi sincronizado em outro contexto ou excluído. Abra o relatório salvo antes de continuar.',
+            );
+          return getReport(tx, existing.id);
+        }
+      }
       const project = await tx.project.findUnique({ where: { id: data.projectId } });
       const company = await tx.company.findUnique({ where: { id: data.companyId } });
       const type = await tx.reportType.findUnique({ where: { id: data.reportTypeId } });
@@ -308,7 +330,8 @@ export class ReportsService {
         );
       if (!type?.active)
         throw new AppError(422, 'INVALID_REPORT_TYPE', 'Selecione um tipo de relatório ativo.');
-      const { points, signatures, drawings, prefillFromProject, ...fields } = data;
+      const { points, signatures, drawings, prefillFromProject, clientMutationId, ...fields } =
+        data;
       if (drawings?.length && !user.permissions.includes('drawing.edit'))
         throw new AppError(403, 'FORBIDDEN', 'Você não possui permissão para editar desenhos.');
       const defaultData = buildReportDefaults(
@@ -327,6 +350,7 @@ export class ReportsService {
             type.config,
           ),
           createdById: user.id,
+          lastClientMutationId: clientMutationId,
         },
         include: reportInclude,
       });
@@ -342,8 +366,18 @@ export class ReportsService {
     const saved = await prisma.$transaction(async (tx) => {
       const report = await getReport(tx, id);
       assertEditable(report.status, user);
+      if (input.clientMutationId && report.lastClientMutationId === input.clientMutationId)
+        return report;
       if (report.version !== input.version) throw conflict();
-      const { version, points, signatures, drawings, removePointMediaIds = [], ...fields } = input;
+      const {
+        version,
+        points,
+        signatures,
+        drawings,
+        removePointMediaIds = [],
+        clientMutationId,
+        ...fields
+      } = input;
       reportNumberRequired.parse({ number: input.number ?? report.number });
       if (drawings && !user.permissions.includes('drawing.edit'))
         throw new AppError(403, 'FORBIDDEN', 'Você não possui permissão para editar desenhos.');
@@ -398,6 +432,7 @@ export class ReportsService {
         user,
       );
       const data: Prisma.ReportUpdateManyMutationInput = {
+        lastClientMutationId: clientMutationId ?? null,
         number: input.number,
         title: input.title,
         ...(input.reportDate !== undefined ? { reportDate: date(input.reportDate) } : {}),

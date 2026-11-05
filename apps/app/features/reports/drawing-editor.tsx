@@ -1,6 +1,7 @@
 import type { CorrectionRequest } from './report-save-feedback';
 import { DrawingColorSource } from './drawing-eyedropper';
 import { useTheme } from '../../utils/theme';
+import { keepReportAsset } from '../../services/offline-files';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
@@ -20,6 +21,7 @@ import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
 import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
+import { DrawingPointLabelControl } from './drawing-point-label-control';
 import { DrawingLiveInk, type LiveInkHandle } from './drawing-live-ink';
 import { DrawingCanvas } from './drawing-canvas';
 import { createDrawingFrameQueue } from './drawing-frame-queue';
@@ -51,6 +53,8 @@ import {
   drawingId,
   drawingSvg,
   drawingPageBounds,
+  drawingPointLabel,
+  positionDrawingPointLabel,
   fitDrawingPageView,
   croppedDrawingImageSize,
   drawingSymbols,
@@ -533,6 +537,7 @@ export function DrawingEditor({
         selectionOnly?: boolean;
         drawingStarted: boolean;
         corner?: number;
+        labelOrigin?: DrawingPosition;
         dx: number;
         dy: number;
       }
@@ -1507,6 +1512,27 @@ export function DrawingEditor({
         setSelected(found.id);
         setDirectSelection(true);
       }
+      const numberedFound =
+        found && (found.type === 'point' || found.type === 'marker') ? found : undefined;
+      const number =
+        numberedFound?.type === 'marker'
+          ? numberedFound.number
+          : numberedFound
+            ? points.find((point) => pointKey(point) === numberedFound.reportPointId)?.number
+            : undefined;
+      const pointLabel = numberedFound ? drawingPointLabel(numberedFound, number) : undefined;
+      const labelTolerance = (6 * viewport.w) / width;
+      const labelOrigin =
+        pointLabel &&
+        numberedFound &&
+        !numberedFound.groupId &&
+        Math.hypot(p.x - numberedFound.x, p.y - numberedFound.y) > 8 &&
+        p.x >= pointLabel.left - labelTolerance &&
+        p.x <= pointLabel.left + pointLabel.width + labelTolerance &&
+        p.y >= pointLabel.y - 18 - labelTolerance &&
+        p.y <= pointLabel.y + labelTolerance
+          ? pointLabel.center
+          : undefined;
       const corner =
         editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
           ? selectedElement.points
@@ -1518,6 +1544,7 @@ export function DrawingEditor({
         original:
           corner >= 0 ? selectedElement : selectionOnly && !imageNeedsHold ? found : undefined,
         corner: corner >= 0 ? corner : undefined,
+        labelOrigin,
         view,
         width,
         samples: [p],
@@ -1536,52 +1563,57 @@ export function DrawingEditor({
         corner < 0 &&
         !current.held
       ) {
-        holdTimer.current = setTimeout(() => {
-          if (
-            gesture.current !== current ||
-            multiTouch.current ||
-            Math.hypot(current.dx, current.dy) > 10
-          )
-            return;
-          current.original = found;
-          current.held = true;
-          const members = found.groupId ? drawingGroupMembers(data!.elements, [found.id]) : [];
-          if (members.length > 1) {
-            gesture.current = undefined;
-            setSelected('');
-            setDirectSelection(false);
-            setBlockIds(members.map((e) => e.id));
-            setBlockAngle(0);
-            blockGesture.current = {
-              mode: 'move',
-              view,
-              start: p,
-              samples: [],
-              elements: members,
-              pivot: drawingSelectionBounds(members).center,
-              angle: 0,
-              delta: 0,
-              ratio: viewport.w / width,
-            };
+        // Drawing tools need a deliberate hold so starting a segment at an
+        // existing endpoint does not switch to selection. Select stays quick.
+        holdTimer.current = setTimeout(
+          () => {
+            if (
+              gesture.current !== current ||
+              multiTouch.current ||
+              Math.hypot(current.dx, current.dy) > 10
+            )
+              return;
+            current.original = found;
+            current.held = true;
+            const members = found.groupId ? drawingGroupMembers(data!.elements, [found.id]) : [];
+            if (members.length > 1) {
+              gesture.current = undefined;
+              setSelected('');
+              setDirectSelection(false);
+              setBlockIds(members.map((e) => e.id));
+              setBlockAngle(0);
+              blockGesture.current = {
+                mode: 'move',
+                view,
+                start: p,
+                samples: [],
+                elements: members,
+                pivot: drawingSelectionBounds(members).center,
+                angle: 0,
+                delta: 0,
+                ratio: viewport.w / width,
+              };
+              setStroke([]);
+              setTraceStart(undefined);
+              setTraceEnd(undefined);
+              setStart(undefined);
+              Vibration.vibrate(20);
+              return;
+            }
+            setHatchCorners([]);
+            setSelected(found.id);
+            setNearbyIds(candidates());
+            setDirectSelection(true);
+            setStart(undefined);
             setStroke([]);
             setTraceStart(undefined);
             setTraceEnd(undefined);
-            setStart(undefined);
+            setDraftElement(found);
             Vibration.vibrate(20);
-            return;
-          }
-          setHatchCorners([]);
-          setSelected(found.id);
-          setNearbyIds(candidates());
-          setDirectSelection(true);
-          setStart(undefined);
-          setStroke([]);
-          setTraceStart(undefined);
-          setTraceEnd(undefined);
-          setDraftElement(found);
-          Vibration.vibrate(20);
-          setMessage('');
-        }, 350);
+            setMessage('');
+          },
+          tool === 'select' ? 350 : 2500,
+        );
       }
       if (
         editable &&
@@ -1772,6 +1804,15 @@ export function DrawingEditor({
       if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= penThreshold) return;
       if (g.held && g.original) {
         if (Math.hypot(state.dx, state.dy) < 6) return;
+        if (g.labelOrigin && (g.original.type === 'point' || g.original.type === 'marker')) {
+          setDraftElement(
+            positionDrawingPointLabel(g.original, {
+              x: g.labelOrigin.x + (state.dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (state.dy / g.width) * g.view.w,
+            }),
+          );
+          return;
+        }
         setDraftElement(
           moveSnapped(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
         );
@@ -1916,7 +1957,18 @@ export function DrawingEditor({
             ),
           );
       } else if (g.held && g.original) {
-        if (Math.hypot(state.dx, state.dy) >= 6)
+        if (
+          Math.hypot(state.dx, state.dy) >= 6 &&
+          g.labelOrigin &&
+          (g.original.type === 'point' || g.original.type === 'marker')
+        )
+          updateElement(
+            positionDrawingPointLabel(g.original, {
+              x: g.labelOrigin.x + (state.dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (state.dy / g.width) * g.view.w,
+            }),
+          );
+        else if (Math.hypot(state.dx, state.dy) >= 6)
           updateElement(
             moveSnapped(
               g.original,
@@ -2078,6 +2130,21 @@ export function DrawingEditor({
         });
       }
     }
+    const numbered = editingSelection
+      ? elements.find((element) => element.id === selected)
+      : undefined;
+    const pointLabelControl =
+      numbered && (numbered.type === 'point' || numbered.type === 'marker')
+        ? {
+            point: { x: numbered.x, y: numbered.y },
+            label: drawingPointLabel(
+              numbered,
+              numbered.type === 'marker'
+                ? numbered.number
+                : points.find((p) => pointKey(p) === numbered.reportPointId)?.number,
+            ).center,
+          }
+        : undefined;
     return {
       data: { ...data, elements },
       options: {
@@ -2085,6 +2152,7 @@ export function DrawingEditor({
         anchorRadius: (2.5 * viewport.w) / width,
         endpointRadius: (3 * viewport.w) / width,
         snapGuide,
+        pointLabelControl,
         images: resolvedImages,
         selectedId: traceEnd ? 'trace-preview' : editable ? selected : undefined,
         selectionFrame: editingSelection && !traceEnd,
@@ -2493,6 +2561,20 @@ export function DrawingEditor({
                     selectedElement?.type === 'image'
                       ? () => void imageActionForSelection('crop')
                       : undefined
+                  }
+                  pointLabel={
+                    selectedElement &&
+                    (selectedElement.type === 'point' || selectedElement.type === 'marker') ? (
+                      <DrawingPointLabelControl
+                        element={selectedElement}
+                        number={
+                          selectedElement.type === 'marker'
+                            ? selectedElement.number
+                            : (linkedPoint?.number ?? '?')
+                        }
+                        onChange={updateElement}
+                      />
+                    ) : undefined
                   }
                   onFillPage={
                     selectedElement?.type === 'image'
@@ -3023,7 +3105,7 @@ export function DrawingEditor({
             <Text style={styles.muted}>
               {tool === 'select'
                 ? 'Arraste o elemento para mover.'
-                : 'Para mover de novo, segure o elemento por 1 segundo e arraste. Sua ferramenta continua ativa para desenhar em seguida.'}
+                : 'Para selecionar com outra ferramenta ativa, segure o elemento por 2,5 segundos e arraste para mover.'}
             </Text>
             <Text style={[styles.label, { color: t.colors.blue }]}>
               {selectedElement.type === 'point'
@@ -3048,6 +3130,17 @@ export function DrawingEditor({
                   }}
                 />
               </>
+            )}
+            {(selectedElement.type === 'point' || selectedElement.type === 'marker') && (
+              <DrawingPointLabelControl
+                element={selectedElement}
+                number={
+                  selectedElement.type === 'marker'
+                    ? selectedElement.number
+                    : (linkedPoint?.number ?? '?')
+                }
+                onChange={updateElement}
+              />
             )}
             {linkedPoint && canEditPoints && (
               <>
@@ -4001,7 +4094,7 @@ export function DrawingEditor({
         >
           <Text style={[styles.muted, { fontSize: 11 }, screen.width >= 600 && { flex: 1 }]}>
             {selectedElement.type === 'point' || selectedElement.type === 'marker'
-              ? 'Arraste a marcação para mudar de lugar. O vínculo com o ponto é mantido.'
+              ? 'Arraste o número para posicionar ao redor. Arraste a bolinha para mover o ponto. Na chave, escolha acima, abaixo ou dos lados.'
               : 'Arraste para mover. Alça ↻: girar no lugar. Dois dedos: tamanho e rotação.'}
           </Text>
           <View
@@ -4363,6 +4456,8 @@ export function DrawingEditor({
           progress('Preparando imagem para o desenho…');
           const size = await drawingImageSize(asset);
           const mediaKey = 'drawing-image-' + drawingId();
+          progress('Guardando imagem no telefone…');
+          const localAsset = await keepReportAsset(asset, mediaKey);
           const element: DrawingElement = {
             id: drawingId(),
             type: 'image',
@@ -4378,7 +4473,13 @@ export function DrawingEditor({
             ...draft,
             photos: [
               ...draft.photos,
-              { id: mediaKey, pointKey: null, sectionKey: 'drawing', asset, caption: '' },
+              {
+                id: mediaKey,
+                pointKey: null,
+                sectionKey: 'drawing',
+                asset: localAsset,
+                caption: '',
+              },
             ],
           }));
           setTool('select');
