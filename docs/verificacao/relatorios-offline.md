@@ -4,11 +4,14 @@ Implementação de 04/11/2026. Vale para os seis tipos: EVS, EVD, LP, TH, ME e R
 
 ## Como usar no telefone
 
-1. Entre na conta com internet. Em **Relatórios → Relatórios neste telefone**, toque em **Preparar empresas e obras para uso offline** e espere a confirmação.
-2. Para levar um relatório existente com suas imagens, abra-o com internet e toque em **Guardar relatório e fotos para uso offline**.
-3. Sem conexão, escolha uma empresa/obra preparada e preencha o relatório. Dados, desenhos, fotos selecionadas e assinaturas ficam no armazenamento privado do telefone. O formulário salva as alterações localmente e também oferece **Salvar no telefone**.
-4. Os rascunhos reaparecem em **Relatórios neste telefone** ao fechar e abrir o app. Eles pertencem à conta e ao endereço da API usados no preenchimento.
-5. Com o app aberto, a reconexão sincroniza os rascunhos que não estão em edição. No formulário aberto, toque em **Sincronizar**. Se o app estiver fechado, a sincronização espera a próxima abertura.
+1. Entre na conta com internet. O aplicativo prepara automaticamente empresas, obras, modelos, relatórios e fotos acessíveis à conta, em sequência. Aguarde **Tudo sincronizado e disponível offline** antes de sair sem internet.
+2. Em **Relatórios → Sincronização**, existe apenas um botão **Sincronizar** para atualizar os dados disponíveis offline e enviar as pendências. Abrir um relatório também guarda seus dados e fotos automaticamente.
+3. Sem conexão, escolha uma empresa/obra preparada e preencha o relatório. Dados, desenhos, fotos e assinaturas ficam no armazenamento privado do telefone. O formulário salva localmente e oferece **Salvar no telefone**.
+4. Os rascunhos pendentes reaparecem em **Sincronização** ao fechar e abrir o app. Eles pertencem à conta e ao endereço da API usados no preenchimento.
+5. Com o app aberto, a reconexão envia os rascunhos fora de edição. Formulários abertos mantêm a ação de sincronizar após terminar de preencher. Conflitos ou validações continuam exigindo correção; não são sobrescritos automaticamente.
+6. A preparação automática verifica atualizações a cada cinco minutos e ao voltar ao app. Versões já preparadas e fotos já armazenadas não são baixadas novamente. O botão manual permite repetir a verificação imediatamente.
+
+Atualização de 05/11/2026: corrigidos `Blob.bytes()` indisponível no React Native e a construção incompatível de Blob a partir de ArrayBuffer. A gravação usa FileReader; a leitura usa o transporte local de arquivos, sem internet. Mensagens técnicas ficam nos diagnósticos, com orientação legível na tela. Esta atualização é no aplicativo/painel, sem nova migração ou alteração de API.
 
 PDF, envio para análise, aprovação e compartilhamento do PDF exigem conexão. Campos incompletos podem ficar salvos no telefone; na sincronização, a validação identifica as pendências e oferece acesso ao preenchimento para corrigir. Erros de foto mantêm as fotos pendentes para nova tentativa.
 

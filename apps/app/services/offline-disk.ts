@@ -125,31 +125,56 @@ export const offlineDisk = {
       ),
     ];
   },
-  async putBlob(scope: string, key: string, blob: Blob): Promise<void> {
-    if (Platform.OS === 'web') {
-      await webRequest('readwrite', (s) => s.put(blob, scope + ':blob-' + key));
-      return;
-    }
+  async hasBlob(scope: string, key: string): Promise<boolean> {
+    await writes.get(scope + ':blob-' + key)?.catch(() => {});
+    if (Platform.OS === 'web')
+      return (await webRequest('readonly', (s) => s.count(scope + ':blob-' + key))) > 0;
     const file = new File(offlineDirectory(scope), key);
-    file.create({ overwrite: true });
-    await file.write(await blob.bytes());
-    await offlineDisk.put(
-      scope,
-      'mime-' + offlineHash(key),
-      blob.type || file.type || 'image/jpeg',
+    return (
+      file.exists && file.size > 0 && !!(await offlineDisk.get(scope, 'mime-' + offlineHash(key)))
     );
   },
+  async putBlob(scope: string, key: string, blob: Blob): Promise<void> {
+    return serial(scope + ':blob-' + key, async () => {
+      if (Platform.OS === 'web') {
+        await webRequest('readwrite', (s) => s.put(blob, scope + ':blob-' + key));
+        return;
+      }
+      const file = new File(offlineDirectory(scope), key);
+      // React Native's Blob has neither bytes() nor arrayBuffer(). FileReader
+      // supports both its native blobs and Expo/browser blobs without losing bytes.
+      const encoded = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]!);
+        reader.onerror = () =>
+          reject(new Error('Não foi possível ler a foto para guardar no telefone.'));
+        reader.onabort = () =>
+          reject(new Error('A gravação da foto foi interrompida. Tente sincronizar novamente.'));
+        reader.readAsDataURL(blob);
+      });
+      file.create({ overwrite: true });
+      await file.write(Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0)));
+      await offlineDisk.put(
+        scope,
+        'mime-' + offlineHash(key),
+        blob.type || file.type || 'image/jpeg',
+      );
+    });
+  },
   async getBlob(scope: string, key: string): Promise<Blob | undefined> {
+    await writes.get(scope + ':blob-' + key)?.catch(() => {});
     if (Platform.OS === 'web') return webRequest('readonly', (s) => s.get(scope + ':blob-' + key));
     const file = new File(offlineDirectory(scope), key);
-    return file.exists
-      ? new Blob([await file.arrayBuffer()], {
-          type:
-            (await offlineDisk.get<string>(scope, 'mime-' + offlineHash(key))) ||
-            file.type ||
-            'image/jpeg',
-        })
-      : undefined;
+    if (!file.exists) return undefined;
+    // Native Blob cannot be constructed from ArrayBuffer either. Read the local
+    // file through the native file transport; this does not require internet.
+    const response = await fetch(file.uri);
+    const blob = await response.blob();
+    const mime =
+      (await offlineDisk.get<string>(scope, 'mime-' + offlineHash(key))) ||
+      file.type ||
+      'image/jpeg';
+    return blob.type === mime ? blob : blob.slice(0, blob.size, mime);
   },
   async removeBlob(scope: string, key: string) {
     if (Platform.OS === 'web') {

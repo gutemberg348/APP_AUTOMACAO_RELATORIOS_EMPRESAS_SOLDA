@@ -3,9 +3,11 @@ export const useConnectivity = create<{ online: boolean; storageError?: string }
   online: true,
 }));
 export function offlineStorageFailure(cause: unknown) {
+  console.error('Falha no armazenamento offline', cause);
   useConnectivity.setState({
     storageError:
-      'Não foi possível salvar no telefone. Confira o espaço livre e tente novamente. ' +
-      (cause instanceof Error ? cause.message : ''),
+      cause instanceof TypeError
+        ? 'Não foi possível guardar os dados neste aparelho. Atualize o aplicativo e toque em Sincronizar para tentar novamente.'
+        : 'Não foi possível guardar os dados no telefone. Confira o espaço livre e toque em Sincronizar para tentar novamente.',
   });
 }

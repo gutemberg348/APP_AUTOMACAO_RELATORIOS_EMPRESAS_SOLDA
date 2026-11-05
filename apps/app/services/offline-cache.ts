@@ -3,7 +3,7 @@ import { offlineStorageFailure } from '../stores/connectivity';
 
 export const offlineScope = (apiUrl: string, userId: string) => offlineHash(apiUrl + ':' + userId);
 const catalogRoot = (path: string) =>
-  /^\/(companies|projects|report-types)(?:\?|\/|$)/.exec(path)?.[1];
+  /^\/(companies|projects|report-types|reports)(?:\?|\/|$)/.exec(path)?.[1];
 export const cacheablePath = (path: string) =>
   /^\/(companies|projects|report-types|reports|dashboard|people)(?:\?|\/|$)/.test(path) &&
   !path.includes('/pdf');
@@ -58,7 +58,9 @@ export async function cachedApiData<T>(scope: string, path: string): Promise<T |
           .toLocaleLowerCase()
           .includes(params.get('search')!.toLocaleLowerCase())),
   );
-  items = items.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  items = items.sort((a, b) =>
+    String(a.name ?? a.title ?? a.number).localeCompare(String(b.name ?? b.title ?? b.number)),
+  );
   const page = Number(params.get('page') || 1),
     limit = Number(params.get('limit') || 100);
   return {

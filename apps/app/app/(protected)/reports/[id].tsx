@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,8 +17,7 @@ import { ConfirmDialog } from '../../../components/confirm-dialog';
 export default function ReportDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [deleting, setDeleting] = useState(false);
-  const [preparing, setPreparing] = useState(false),
-    [offlineMessage, setOfflineMessage] = useState(''),
+  const [offlineMessage, setOfflineMessage] = useState(''),
     [offlineError, setOfflineError] = useState<unknown>();
   const online = useConnectivity((state) => state.online);
   const user = useAuth((state) => state.session!.user),
@@ -41,6 +40,30 @@ export default function ReportDetail() {
     report &&
     can('reports.edit') &&
     (report.status === 'DRAFT' || (report.status === 'IN_REVIEW' && can('reports.review')));
+  useEffect(() => {
+    if (!report || !online) return;
+    let cancelled = false;
+    setOfflineError(undefined);
+    void prepareReportOffline(report, (text) => {
+      if (!cancelled) setOfflineMessage(text);
+    })
+      .then((text) => {
+        if (!cancelled) setOfflineMessage(text);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOfflineMessage('');
+          setOfflineError(
+            new Error(
+              'O preparo offline ficou pendente. Use Sincronizar na lista de relatórios para tentar novamente.',
+            ),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [report, online]);
   return (
     <Page
       title={report?.title || 'Relatório de inspeção'}
@@ -56,22 +79,6 @@ export default function ReportDetail() {
       {report && (
         <>
           <ReportProgress status={report.status} />
-          <Button
-            title="Guardar relatório e fotos para uso offline"
-            small
-            secondary
-            icon="save"
-            disabled={!online || preparing}
-            busy={preparing}
-            onPress={() => {
-              setPreparing(true);
-              setOfflineError(undefined);
-              void prepareReportOffline(report, setOfflineMessage)
-                .then(setOfflineMessage)
-                .catch(setOfflineError)
-                .finally(() => setPreparing(false));
-            }}
-          />
           {!!offlineMessage && <Info text={offlineMessage} icon="save" />}
           <Notice error={offlineError} />
           {!!report.revisionNotes && (

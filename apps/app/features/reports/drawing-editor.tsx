@@ -1612,7 +1612,7 @@ export function DrawingEditor({
             Vibration.vibrate(20);
             setMessage('');
           },
-          tool === 'select' ? 350 : 2500,
+          tool === 'select' ? 350 : 1200,
         );
       }
       if (
@@ -1620,6 +1620,7 @@ export function DrawingEditor({
         !selectionOnly &&
         !current.original &&
         tool !== 'pencil' &&
+        tool !== 'straighten' &&
         sketchTools.includes(tool)
       ) {
         setStroke([p]);
@@ -1721,7 +1722,7 @@ export function DrawingEditor({
       if (multiTouch.current) return;
       const endpoint = endpointGesture.current;
       if (endpoint) {
-        if (Math.hypot(state.dx, state.dy) < 6) return;
+        if (Math.hypot(state.dx, state.dy) < 3) return;
         const p = smartSnap(
           {
             x: endpoint.start.x + state.dx * endpoint.ratio,
@@ -1743,7 +1744,7 @@ export function DrawingEditor({
           block.samples = appendStrokePoint(block.samples, p);
           setLassoPath(block.samples);
         } else if (block.mode === 'resize') {
-          if (Math.hypot(state.dx, state.dy) < 6) return;
+          if (Math.hypot(state.dx, state.dy) < 3) return;
           const x = block.start.x - block.pivot.x,
             y = block.start.y - block.pivot.y;
           const scale = Math.max(
@@ -1762,8 +1763,8 @@ export function DrawingEditor({
           setBlockDraft(block.result);
           setRotationDelta(block.result === block.elements ? 0 : delta);
         } else if (block.elements.length) {
-          if (Math.hypot(state.dx, state.dy) < 6) return;
-          const center = drawingSelectionBounds(block.elements).center;
+          if (Math.hypot(state.dx, state.dy) < 3) return;
+          const center = block.pivot;
           const snapped = smartSnap(
             { x: center.x + state.dx * block.ratio, y: center.y + state.dy * block.ratio },
             block.elements.map((e) => e.id),
@@ -1788,7 +1789,7 @@ export function DrawingEditor({
       g.dx = state.dx;
       g.dy = state.dy;
       if (g.corner !== undefined && g.original) {
-        if (Math.hypot(state.dx, state.dy) < 6) return;
+        if (Math.hypot(state.dx, state.dy) < 3) return;
         setDraftElement(
           moveHatchCorner(
             g.original,
@@ -1803,7 +1804,7 @@ export function DrawingEditor({
       if (!g.held && Math.hypot(state.dx, state.dy) > penThreshold) cancelHold();
       if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= penThreshold) return;
       if (g.held && g.original) {
-        if (Math.hypot(state.dx, state.dy) < 6) return;
+        if (Math.hypot(state.dx, state.dy) < 3) return;
         if (g.labelOrigin && (g.original.type === 'point' || g.original.type === 'marker')) {
           setDraftElement(
             positionDrawingPointLabel(g.original, {
@@ -1833,7 +1834,7 @@ export function DrawingEditor({
         )
           g.drawingStarted = true;
         if (!g.drawingStarted) return;
-        if (tool !== 'pencil')
+        if (tool !== 'pencil' && tool !== 'straighten')
           setTraceStart(sketchTools.includes(tool) ? g.start : snapPosition(g.start, data!.grid));
       }
       if (sketchTools.includes(tool)) {
@@ -1847,19 +1848,19 @@ export function DrawingEditor({
           p,
           tool === 'pencil' ? (0.25 * g.view.w) / g.width : 0.25,
         );
-        if (tool === 'pencil' && samples === g.samples) return;
+        if ((tool === 'pencil' || tool === 'straighten') && samples === g.samples) return;
         g.samples = samples;
-        if (tool === 'pencil') {
+        if (tool === 'pencil' || tool === 'straighten') {
           liveInk.current?.draw(g.samples, {
             strokeWidth,
             strokeColor: strokeColor ?? '#263D52',
             strokeStyle: strokeStyle ?? 'solid',
-            brush,
+            brush: tool === 'pencil' ? brush : undefined,
           });
           return;
         }
         setStroke(g.samples);
-        setTraceEnd(tool === 'straighten' ? smartSnap(p) : p);
+        setTraceEnd(p);
         return;
       }
       if (data && ['pipe', 'line', 'dimension'].includes(tool)) {
@@ -1896,7 +1897,7 @@ export function DrawingEditor({
       cancelHold();
       if (endpointGesture.current && !multiTouch.current) {
         const endpoint = endpointGesture.current;
-        if (endpoint.result && Math.hypot(state.dx, state.dy) >= 6) updateElement(endpoint.result);
+        if (endpoint.result && Math.hypot(state.dx, state.dy) >= 3) updateElement(endpoint.result);
         resetGesture();
         return;
       }
@@ -1936,7 +1937,7 @@ export function DrawingEditor({
           Math.hypot(state.dx, state.dy) > 3
         ) {
           setMessage('Não há espaço para esse giro. Afaste a seleção da borda do desenho.');
-        } else if (block.result && Math.hypot(state.dx, state.dy) >= 6) {
+        } else if (block.result && Math.hypot(state.dx, state.dy) >= 3) {
           updateBlock(block.result);
           if (block.mode === 'rotate')
             setBlockAngle((old) => normalizeDrawingAngle(old + (rotationDelta ?? 0)));
@@ -1947,7 +1948,7 @@ export function DrawingEditor({
       const g = gesture.current;
       if (!g) return;
       if (g.corner !== undefined && g.original) {
-        if (Math.hypot(state.dx, state.dy) >= 6)
+        if (Math.hypot(state.dx, state.dy) >= 3)
           updateElement(
             moveHatchCorner(
               g.original,
@@ -1958,7 +1959,7 @@ export function DrawingEditor({
           );
       } else if (g.held && g.original) {
         if (
-          Math.hypot(state.dx, state.dy) >= 6 &&
+          Math.hypot(state.dx, state.dy) >= 3 &&
           g.labelOrigin &&
           (g.original.type === 'point' || g.original.type === 'marker')
         )
@@ -1968,7 +1969,7 @@ export function DrawingEditor({
               y: g.labelOrigin.y + (state.dy / g.width) * g.view.w,
             }),
           );
-        else if (Math.hypot(state.dx, state.dy) >= 6)
+        else if (Math.hypot(state.dx, state.dy) >= 3)
           updateElement(
             moveSnapped(
               g.original,
@@ -2000,7 +2001,7 @@ export function DrawingEditor({
           } else add(element);
         }
         setStroke([]);
-      } else if (tool === 'select' && g.original && Math.hypot(state.dx, state.dy) >= 6)
+      } else if (tool === 'select' && g.original && Math.hypot(state.dx, state.dy) >= 3)
         updateElement(
           moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
         );
@@ -2053,7 +2054,7 @@ export function DrawingEditor({
         },
         onPanResponderMove: (event, state) => {
           if (
-            currentTool.current === 'pencil' &&
+            (currentTool.current === 'pencil' || currentTool.current === 'straighten') &&
             !gesture.current?.original &&
             event.nativeEvent.touches.length < 2 &&
             !multiTouch.current
@@ -3105,7 +3106,7 @@ export function DrawingEditor({
             <Text style={styles.muted}>
               {tool === 'select'
                 ? 'Arraste o elemento para mover.'
-                : 'Para selecionar com outra ferramenta ativa, segure o elemento por 2,5 segundos e arraste para mover.'}
+                : 'Para selecionar com outra ferramenta ativa, segure o elemento por 1,2 segundos e arraste para mover.'}
             </Text>
             <Text style={[styles.label, { color: t.colors.blue }]}>
               {selectedElement.type === 'point'

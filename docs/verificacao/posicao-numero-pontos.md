@@ -3,7 +3,7 @@
 Alteração de 05/11/2026.
 
 - Com **Selecionar**, arraste o número para mudar somente sua posição. Arrastar pela bolinha continua movendo o ponto junto com o número.
-- Nas demais ferramentas que oferecem seleção por pressão, é necessário segurar por 2,5 segundos antes de mover. Começar um traço sobre outro objeto continua desenhando normalmente.
+- Nas demais ferramentas que oferecem seleção por pressão, é necessário segurar por 1,2 segundo antes de mover. Começar um traço sobre outro objeto continua desenhando normalmente.
 - Na chave junto do ponto selecionado, **Posição do número** oferece uma prévia para tocar/arrastar e os atalhos **Acima**, **Abaixo**, **Esquerda** e **Direita**. **Posição automática** restaura a disposição anterior.
 - O deslocamento fica limitado a uma área de 72 unidades do desenho ao redor da bolinha. Essa medida acompanha o zoom. O número continua ligado ao mesmo ponto de inspeção, fotos e resultados.
 - Os ajustes participam de desfazer/refazer e são gravados em `labelX`, `labelY` e `labelPosition: 'custom'`. Desenhos antigos conservam a apresentação anterior até o ajuste explícito.

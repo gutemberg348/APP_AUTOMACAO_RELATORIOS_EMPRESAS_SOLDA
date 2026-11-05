@@ -9,8 +9,8 @@ import {
   type LocalReportDraft,
 } from './offline-report-store';
 import { useConnectivity } from '../../stores/connectivity';
-import { syncLocalReport } from './offline-report-sync';
-import { prepareOfflineCatalog } from './offline-prepare';
+import { synchronizeOffline, useOfflineSynchronization } from './offline-synchronization';
+import { useAuth } from '../../stores/auth';
 import { requestNavigation } from '../../stores/navigation';
 import { useTheme } from '../../utils/theme';
 import { ConfirmDialog } from '../../components/confirm-dialog';
@@ -20,50 +20,49 @@ export function OfflineReportsPanel() {
   const { drafts, syncing } = useOfflineReports();
   const online = useConnectivity((state) => state.online);
   const storageError = useConnectivity((state) => state.storageError);
-  const [preparing, setPreparing] = useState(false),
-    [message, setMessage] = useState(''),
-    [error, setError] = useState<unknown>();
+  const [error, setError] = useState<unknown>();
+  const userId = useAuth((state) => state.session?.user.id);
+  const sync = useOfflineSynchronization();
+  const preparing = sync.accountId === userId && sync.busy;
+  const message = sync.accountId === userId ? sync.message : '';
+  const syncError = sync.accountId === userId ? sync.error : undefined;
   const client = useQueryClient();
   const [discarding, setDiscarding] = useState<LocalReportDraft>();
   const entries = Object.values(drafts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return (
     <Card>
       <PanelHeader
-        title="Relatórios neste telefone"
+        title="Sincronização"
         subtitle={
           online
-            ? 'Preencha sem internet e sincronize quando voltar.'
+            ? 'Automática com internet. Preencha offline quando precisar.'
             : 'Sem internet · os rascunhos continuam disponíveis aqui.'
         }
         icon="save"
       />
-      <Notice error={storageError ? new Error(storageError) : error} />
+      <Notice error={storageError || syncError ? new Error(storageError || syncError) : error} />
       {!!message && (
         <Text style={styles.muted} accessibilityLiveRegion="polite">
           {message}
         </Text>
       )}
       <Button
-        title="Preparar empresas e obras para uso offline"
+        title="Sincronizar"
         secondary
         small
         disabled={!online || preparing}
         busy={preparing}
         onPress={() => {
-          setPreparing(true);
           setError(undefined);
-          void prepareOfflineCatalog(setMessage)
-            .then(setMessage)
-            .catch(setError)
-            .finally(() => setPreparing(false));
+          void synchronizeOffline(true).then(() =>
+            client.invalidateQueries({ queryKey: ['reports'] }),
+          );
         }}
       />
-      <Text style={styles.muted}>
-        Prepare com internet antes de sair. Para continuar um relatório existente, abra-o e toque em
-        “Guardar relatório e fotos para uso offline”.
-      </Text>
-      {!entries.length && (
-        <Text style={styles.muted}>Nenhum rascunho aguardando envio neste telefone.</Text>
+      {!online && (
+        <Text style={styles.muted}>
+          As pendências serão enviadas quando a internet voltar, com o aplicativo aberto.
+        </Text>
       )}
       {entries.map((draft) => (
         <View key={draft.id} style={{ gap: 8, paddingVertical: 12 }}>
@@ -89,20 +88,6 @@ export function OfflineReportsPanel() {
               secondary
               disabled={syncing.includes(draft.id)}
               onPress={() => requestNavigation(() => router.push('/reports/offline/' + draft.id))}
-            />
-            <Button
-              title="Sincronizar"
-              small
-              disabled={!online || syncing.includes(draft.id)}
-              busy={syncing.includes(draft.id)}
-              onPress={() => {
-                void syncLocalReport(draft.id)
-                  .then((report) => {
-                    client.setQueryData(['report', report.id], report);
-                    void client.invalidateQueries({ queryKey: ['reports'] });
-                  })
-                  .catch(setError);
-              }}
             />
             <Button
               title="Excluir do telefone"

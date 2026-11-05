@@ -11,12 +11,14 @@ import {
   persistPhotoQueue,
   useOfflineReports,
 } from '../features/reports/offline-report-store';
+import { synchronizeOffline } from '../features/reports/offline-synchronization';
 import { syncWaitingReports } from '../features/reports/offline-report-sync';
 
 export function OfflineRuntime() {
   const userId = useAuth((state) => state.session?.user.id);
   const online = useConnectivity((state) => state.online);
   const drafts = useOfflineReports((state) => state.drafts);
+  const ready = useOfflineReports((state) => state.ready);
   const client = useQueryClient();
   useEffect(() => {
     let cancelled = false;
@@ -85,5 +87,21 @@ export function OfflineRuntime() {
     );
     return () => clearTimeout(timer);
   }, [online, userId, drafts, client]);
+  useEffect(() => {
+    if (!online || !userId || !ready) return;
+    const run = () => {
+      if (AppState.currentState === 'active') void synchronizeOffline();
+    };
+    const timer = setTimeout(run, 1500);
+    const interval = setInterval(run, 5 * 60 * 1000);
+    const app = AppState.addEventListener('change', (state) => {
+      if (state === 'active') run();
+    });
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      app.remove();
+    };
+  }, [online, userId, ready]);
   return null;
 }
