@@ -232,3 +232,60 @@ it.each(reportTypeCodes)(
     );
   },
 );
+
+it.each(reportTypeCodes)(
+  'synchronizes a new local point and both photos into an existing %s report after restoring the phone queue',
+  async (code) => {
+    const entry = initial();
+    entry.type = { ...entry.type, code };
+    entry.photoKey = 'user-a:' + id(10);
+    entry.baseReport = {
+      ...entry.values,
+      id: id(10),
+      version: 1,
+      projectId: entry.projectId,
+      companyId: entry.companyId,
+      reportType: entry.type,
+      media: [],
+      points: [],
+    } as unknown as Report;
+    await putLocalReport(entry);
+    useReportPhotoDrafts.getState().update(entry.photoKey, () => ({
+      photos: ['a', 'b'].map((photo) => ({
+        id: photo,
+        pointKey: 'local-point',
+        caption: '',
+        asset: { uri: 'file://photo', name: photo + '.jpg' },
+      })),
+      removedIds: [],
+    }));
+    await flushPhotoQueue();
+    unsubscribe?.();
+    unsubscribe = undefined;
+    useOfflineReports.setState({ drafts: {} });
+    useReportPhotoDrafts.setState({ reports: {} });
+    await hydrateOfflineReports('qa', 'user-a');
+    unsubscribe = persistPhotoQueue('qa', 'user-a');
+    let server = {
+      ...entry.baseReport,
+      version: 2,
+      points: [{ id: id(11), number: '1', type: 'WELD' }],
+      media: [],
+    } as Report;
+    const uploaded: string[] = [];
+    mocks.api.mockImplementation(async (path, options) => {
+      if (options?.method === 'PUT') return structuredClone(server);
+      if (path.endsWith('/media') && options?.method === 'POST') {
+        const form = options.body as FormData;
+        uploaded.push(String(form.get('reportPointId')));
+        server = { ...server, version: server.version + 1 };
+        return {};
+      }
+      return structuredClone(server);
+    });
+    await syncLocalReport(entry.id);
+    expect(uploaded).toEqual([id(11), id(11)]);
+    expect(useOfflineReports.getState().drafts[entry.id]).toBeUndefined();
+    expect(useReportPhotoDrafts.getState().reports[entry.photoKey]).toBeUndefined();
+  },
+);

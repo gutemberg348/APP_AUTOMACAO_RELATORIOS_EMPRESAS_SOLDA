@@ -136,6 +136,11 @@ export function reportBusinessCorrection(
   message: string,
 ): ReportCorrection | undefined {
   const cases: Record<string, [string, string, string]> = {
+    PHOTO_POINT_PENDING: [
+      'points',
+      'Vínculo da foto com o ponto',
+      'Abra Pontos e fotos. Em “Fotos aguardando vínculo”, escolha o ponto correto para a foto indicada e salve novamente. Você também pode retirar somente essa foto pendente.',
+    ],
     IMAGE_TOO_LARGE: [
       'points',
       'Arquivo maior que 10 MB',

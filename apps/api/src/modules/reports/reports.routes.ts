@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requirePermission } from '../../middlewares/auth';
 import { reportsController as c } from './reports.controller';
+import { pdfAsIsRoutes } from '../pdf/pdf-as-is.routes';
 import { PdfService } from '../pdf/pdf.service';
 import { idParam } from '../../utils/http';
 import { reportMediaRoutes, reportMediaCheckRoutes } from './reports.media';
@@ -10,6 +11,7 @@ export const reportsRoutes = Router();
 reportsRoutes.use(reportMediaCheckRoutes);
 reportsRoutes.use('/:id', requireReportAccess);
 reportsRoutes.use('/:id/media', reportMediaRoutes);
+reportsRoutes.use('/:id/pdf/as-is', pdfAsIsRoutes);
 reportsRoutes.get('/', requirePermission('reports.view'), c.list);
 reportsRoutes.get('/:id', requirePermission('reports.view'), c.get);
 reportsRoutes.get('/:id/pdf/preview', requirePermission('pdf.download'), async (req, res) => {

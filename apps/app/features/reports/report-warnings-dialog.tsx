@@ -6,6 +6,7 @@ import { useTheme } from '../../utils/theme';
 export function ReportWarningsDialog({
   visible,
   warnings,
+  description,
   title = 'Enviar com pendências?',
   confirmLabel = 'Enviar assim mesmo',
   busy,
@@ -14,6 +15,7 @@ export function ReportWarningsDialog({
 }: {
   visible: boolean;
   warnings: string[];
+  description?: string;
   title?: string;
   confirmLabel?: string;
   busy?: boolean;
@@ -38,8 +40,8 @@ export function ReportWarningsDialog({
     >
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 12 }}>
         <Text style={styles.text}>
-          O relatório tem informações incompletas. Se a inspeção terminou antes, você pode
-          prosseguir com os dados já registrados.
+          {description ??
+            'O relatório tem informações incompletas. Se a inspeção terminou antes, você pode prosseguir com os dados já registrados.'}
         </Text>
         {warnings.map((warning) => (
           <Text key={warning} style={styles.muted}>

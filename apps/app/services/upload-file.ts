@@ -7,13 +7,14 @@ export async function appendUploadFile(
   form: FormData,
   asset: DocumentPickerAsset,
   maxBytes: number,
+  fieldName = 'file',
 ) {
   if (asset.size && asset.size > maxBytes) throw new Error('O arquivo excede o tamanho permitido.');
   if (Platform.OS === 'web') {
     const file = asset.file ?? (await (await fetch(asset.uri)).blob());
     if (!file.size) throw new Error('O arquivo está vazio. Selecione a imagem novamente.');
     if (file.size > maxBytes) throw new Error('O arquivo excede o tamanho permitido.');
-    form.append('file', file, asset.name);
+    form.append(fieldName, file, asset.name);
     return;
   }
   try {
@@ -31,7 +32,7 @@ export async function appendUploadFile(
       slice: (start, end, type) => file.slice(start, end, type),
       stream: () => file.stream(),
     };
-    form.append('file', part);
+    form.append(fieldName, part);
   } catch (cause) {
     if (cause instanceof Error && cause.message === 'FILE_TOO_LARGE')
       throw new Error('O arquivo excede o tamanho permitido.');

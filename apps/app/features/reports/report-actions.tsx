@@ -9,6 +9,12 @@ import {
   type ReportStatus,
 } from '@weldcosta/shared';
 import { api, ApiError, jsonBody } from '../../services/api';
+import {
+  prepareCurrentReportPdf,
+  type CurrentPdf,
+  type CurrentPdfOptions,
+} from './report-current-pdf';
+import { reportValues } from './offline-report-store';
 import { downloadReportPdf } from '../../services/report-pdf';
 import { requestNavigation } from '../../stores/navigation';
 import { useAuth } from '../../stores/auth';
@@ -23,28 +29,44 @@ import { useConnectivity } from '../../stores/connectivity';
 
 export interface ReportActionControls {
   report?: Report;
+  prepareCurrentPdf?(options: CurrentPdfOptions): Promise<CurrentPdf>;
   save?(): Promise<Report | 'local' | undefined>;
   hasChanges?: boolean;
   busy?: boolean;
   creating?: boolean;
   onBusyChange?(busy: boolean): void;
   onError?(error: unknown): void;
+  allowDownloadAsIs?: boolean;
+  downloadAsIsRequest?: number;
+  onDownloadAsIsHandled?(): void;
 }
 type Action = 'save' | 'download' | 'share' | 'send' | 'approve' | 'reopen';
-type Pending = { action: Action; report: Report; warnings: string[] };
+type Pending = {
+  action: Action;
+  report: Report;
+  warnings: string[];
+  asIs?: boolean;
+  exportToken?: string;
+};
 export function ReportActions({
   report,
   save,
+  prepareCurrentPdf,
   hasChanges = false,
   busy = false,
   creating = false,
   onBusyChange,
   onError,
+  allowDownloadAsIs = false,
+  downloadAsIsRequest = 0,
+  onDownloadAsIsHandled,
 }: ReportActionControls) {
   const { tokens: t, styles } = useTheme();
   const online = useConnectivity((state) => state.online);
   const user = useAuth((state) => state.session!.user),
     client = useQueryClient();
+  const [saveBlocked, setSaveBlocked] = useState(false);
+  const handledAsIs = useRef(0);
   const [pending, setPending] = useState<Pending>();
   const [notes, setNotes] = useState('');
   const [message, setMessage] = useState('');
@@ -90,20 +112,62 @@ export function ReportActions({
         void client.invalidateQueries({ queryKey: ['dashboard'] });
       }
     },
-    mutationFn: async ({ action, confirmed }: { action: Action; confirmed?: Report }) => {
+    mutationFn: async ({
+      action,
+      confirmed,
+      asIs = false,
+      exportToken,
+    }: {
+      action: Action;
+      confirmed?: Report;
+      asIs?: boolean;
+      exportToken?: string;
+    }) => {
       setMessage('');
       if (action === 'download' || action === 'share')
-        setPdfStage('Salvando e preparando o relatório…');
+        setPdfStage(
+          asIs
+            ? 'Preparando o PDF com o preenchimento atual…'
+            : 'Salvando e preparando o relatório…',
+        );
+      if (asIs && !exportToken && report) {
+        pdfController.current = new AbortController();
+        setCanCancelPdf(true);
+        const options = { signal: pdfController.current.signal, onProgress: setPdfStage };
+        const prepared = prepareCurrentPdf
+          ? await prepareCurrentPdf(options)
+          : await prepareCurrentReportPdf(
+              report.id,
+              reportValues(report),
+              user.id + ':' + report.id,
+              options,
+            );
+        setPending({
+          action,
+          report,
+          asIs: true,
+          exportToken: prepared.token,
+          warnings: [
+            'O PDF foi preparado com o preenchimento atual e as fotos disponíveis, incluindo as que ainda estavam no telefone. Os erros abaixo não bloqueiam o download. Confira o que ficará em branco ou fora do arquivo.',
+            ...prepared.warnings,
+          ],
+        });
+        return;
+      }
       let saved =
         confirmed ??
-        (save && (action === 'save' || hasChanges || !report || !report.number.trim())
+        (save && !asIs && (action === 'save' || hasChanges || !report || !report.number.trim())
           ? await save()
           : report);
       if (saved === 'local') {
         setMessage('Salvo no telefone. Será sincronizado quando a internet voltar.');
         return;
       }
-      if (!saved) return;
+      if (!saved) {
+        setSaveBlocked(true);
+        return;
+      }
+      setSaveBlocked(false);
       if (!confirmed && ['download', 'share', 'send', 'approve'].includes(action)) {
         const warnings = reportReviewWarnings(saved);
         const draft =
@@ -118,7 +182,7 @@ export function ReportActions({
             'Há fotos, legendas ou marcações aguardando envio. Elas continuam na fila para tentar novamente.',
           );
         if (warnings.length) {
-          setPending({ action, report: saved, warnings });
+          setPending({ action, report: saved, warnings, asIs });
           return;
         }
       }
@@ -139,7 +203,7 @@ export function ReportActions({
       }
       if (action === 'download' || action === 'share') {
         setPdfStage('Preparando o PDF… Relatórios com muitas fotos podem levar mais tempo.');
-        if (saved.status === 'APPROVED') {
+        if (!asIs && saved.status === 'APPROVED') {
           saved = await api<Report>(
             '/reports/' + saved.id + '/pdf',
             jsonBody('POST', { version: saved.version }),
@@ -150,10 +214,11 @@ export function ReportActions({
         setCanCancelPdf(true);
         const file = await downloadReportPdf(
           saved.id,
-          saved.status !== 'APPROVED' && saved.status !== 'FINISHED',
+          !asIs && saved.status !== 'APPROVED' && saved.status !== 'FINISHED',
           action === 'share',
           {
             signal: pdfController.current.signal,
+            exportToken,
             onProgress: (stage) => {
               setPdfStage(
                 stage === 'download'
@@ -193,7 +258,7 @@ export function ReportActions({
         router.replace('/reports/' + saved.id + '?etapa=conclusao');
     },
   });
-  const queue = (action: Action, confirmed?: Report) => {
+  const queue = (action: Action, confirmed?: Report, asIs = false, exportToken?: string) => {
     setSendOptions(false);
     setPending(undefined);
     setScheduled(true);
@@ -202,9 +267,15 @@ export function ReportActions({
     actionTimer.current = setTimeout(() => {
       actionTimer.current = undefined;
       setScheduled(false);
-      operation.mutate({ action, confirmed });
+      operation.mutate({ action, confirmed, asIs, exportToken });
     }, 300);
   };
+  useEffect(() => {
+    if (!downloadAsIsRequest || handledAsIs.current === downloadAsIsRequest) return;
+    handledAsIs.current = downloadAsIsRequest;
+    onDownloadAsIsHandled?.();
+    queue('download', undefined, true);
+  }, [downloadAsIsRequest]);
   const working = busy || operation.isPending || sharing || scheduled;
   const status = report ? displayReportStatus(report.status) : 'DRAFT';
   return (
@@ -281,6 +352,23 @@ export function ReportActions({
           />
         )}
       </View>
+      {!!report &&
+        can('pdf.download') &&
+        (allowDownloadAsIs || saveBlocked || !!operation.error) && (
+          <View style={{ gap: 8 }}>
+            <Text style={styles.muted}>
+              Baixe o PDF com os dados atuais e as fotos do telefone, mesmo com pendências. Vamos
+              mostrar exatamente o que apresentou problema antes de baixar.
+            </Text>
+            <Button
+              title="Baixar como está"
+              icon="download"
+              secondary
+              disabled={working || !online}
+              onPress={() => operation.mutate({ action: 'download', asIs: true })}
+            />
+          </View>
+        )}
       {status !== 'DRAFT' && can('reports.review') && (
         <View style={{ gap: 10 }}>
           {status === 'IN_REVIEW' && (
@@ -310,28 +398,37 @@ export function ReportActions({
       <ReportWarningsDialog
         visible={!!pending}
         warnings={pending?.warnings ?? []}
+        description={
+          pending?.asIs
+            ? 'Você pode baixar o PDF mesmo com erro em um ponto. Os avisos abaixo explicam o que foi incluído e o que precisou ficar em branco ou fora do arquivo.'
+            : undefined
+        }
         title={
-          pending?.action === 'download'
-            ? 'Baixar com pendências?'
-            : pending?.action === 'share'
-              ? 'Compartilhar com pendências?'
-              : pending?.action === 'approve'
-                ? 'Aprovar com pendências?'
-                : 'Enviar com pendências?'
+          pending?.asIs
+            ? 'PDF pronto · confira as pendências'
+            : pending?.action === 'download'
+              ? 'Baixar com pendências?'
+              : pending?.action === 'share'
+                ? 'Compartilhar com pendências?'
+                : pending?.action === 'approve'
+                  ? 'Aprovar com pendências?'
+                  : 'Enviar com pendências?'
         }
         confirmLabel={
-          pending?.action === 'download'
-            ? 'Baixar assim mesmo'
-            : pending?.action === 'share'
-              ? 'Compartilhar assim mesmo'
-              : pending?.action === 'approve'
-                ? 'Aprovar assim mesmo'
-                : 'Enviar assim mesmo'
+          pending?.asIs
+            ? 'Baixar como está'
+            : pending?.action === 'download'
+              ? 'Baixar assim mesmo'
+              : pending?.action === 'share'
+                ? 'Compartilhar assim mesmo'
+                : pending?.action === 'approve'
+                  ? 'Aprovar assim mesmo'
+                  : 'Enviar assim mesmo'
         }
         busy={operation.isPending}
         onClose={() => setPending(undefined)}
         onConfirm={() => {
-          if (pending) queue(pending.action, pending.report);
+          if (pending) queue(pending.action, pending.report, pending.asIs, pending.exportToken);
         }}
       />
       <PickerSheet

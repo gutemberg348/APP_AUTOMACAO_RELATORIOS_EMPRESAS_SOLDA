@@ -12,12 +12,22 @@ export async function downloadReportPdf(
   id: string,
   preview: boolean,
   share = false,
-  options: { signal?: AbortSignal; onProgress?(stage: PdfProgress): void } = {},
+  options: {
+    signal?: AbortSignal;
+    onProgress?(stage: PdfProgress): void;
+    exportToken?: string;
+  } = {},
 ) {
   options.onProgress?.('download');
-  const blob = await apiBlob('/reports/' + id + '/pdf' + (preview ? '/preview' : ''), {
-    signal: options.signal,
-  });
+  const blob = await apiBlob(
+    '/reports/' +
+      id +
+      '/pdf' +
+      (options.exportToken ? '/as-is/' + options.exportToken : preview ? '/preview' : ''),
+    {
+      signal: options.signal,
+    },
+  );
   checkCancelled(options.signal);
   options.onProgress?.('prepare');
   if (!blob.size) throw new Error('O PDF recebido está vazio. Tente baixar novamente.');

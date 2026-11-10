@@ -12,6 +12,7 @@ export interface ReportPhotoDraft {
   sectionKey?: 'photos' | 'drawing';
   id: string;
   pointKey: string | null;
+  pointNumber?: string;
   asset: LocalAsset;
   caption: string;
   sha256?: string;
@@ -37,7 +38,7 @@ export const useReportPhotoDrafts = create<{
     })),
   move: (from, to, pointIds) =>
     set((state) => {
-      if (from === to || !state.reports[from]) return state;
+      if (!state.reports[from]) return state;
       const draft = state.reports[from] ?? emptyPhotoDrafts;
       const reports = { ...state.reports };
       delete reports[from];
@@ -45,7 +46,11 @@ export const useReportPhotoDrafts = create<{
         ...draft,
         photos: draft.photos.map((photo) => ({
           ...photo,
-          pointKey: photo.pointKey ? (pointIds.get(photo.pointKey) ?? photo.pointKey) : null,
+          pointKey: photo.pointKey
+            ? (pointIds.get(photo.pointKey) ??
+              (photo.pointNumber ? pointIds.get('number:' + photo.pointNumber) : undefined) ??
+              photo.pointKey)
+            : null,
         })),
       };
       return { reports };
@@ -62,6 +67,9 @@ export function remapReportPhotos(key: string, saved: Report, inputPoints: Repor
       return persisted?.id ? [[pointKey(point), persisted.id] as const] : [];
     }),
   );
+  for (const point of saved.points ?? [])
+    if (point.id && saved.points?.filter((p) => p.number === point.number).length === 1)
+      ids.set('number:' + point.number, point.id);
   const nextKey = key.slice(0, key.indexOf(':') + 1) + saved.id;
   const store = useReportPhotoDrafts.getState();
   store.move(key, nextKey, ids);
@@ -83,7 +91,7 @@ export async function saveReportPhotos(
   const initial = useReportPhotoDrafts.getState().reports[nextKey]!;
   const total = initial.photos.length;
   let completed = 0;
-  let location: { pointNumber?: string; drawing?: boolean; label: string } = {
+  let location: { pointNumber?: string; photoId?: string; drawing?: boolean; label: string } = {
     label: 'Fotos do relatório',
   };
   const locateMedia = (id: string, action: string) => {
@@ -159,7 +167,8 @@ export async function saveReportPhotos(
     for (const photo of draft.photos) {
       const pointNumber = current.points?.find((point) => point.id === photo.pointKey)?.number;
       location = {
-        pointNumber,
+        pointNumber: pointNumber ?? photo.pointNumber,
+        photoId: photo.id,
         drawing: photo.sectionKey === 'drawing',
         label:
           'Enviar foto' + (pointNumber ? ' · Ponto ' + pointNumber : '') + ' · ' + photo.asset.name,
@@ -177,8 +186,10 @@ export async function saveReportPhotos(
         continue;
       }
       if (photo.pointKey && !current.points?.some((p) => p.id === photo.pointKey))
-        throw new Error(
-          'A foto não pôde ser vinculada ao ponto. Confira o cadastro e tente salvar novamente.',
+        throw new ApiError(
+          422,
+          'PHOTO_POINT_PENDING',
+          'Esta foto ficou sem vínculo com um ponto. Abra Pontos e fotos, escolha o ponto em “Fotos aguardando vínculo” e salve novamente.',
         );
       const form = new FormData();
       const number = current.points?.find((point) => point.id === photo.pointKey)?.number;

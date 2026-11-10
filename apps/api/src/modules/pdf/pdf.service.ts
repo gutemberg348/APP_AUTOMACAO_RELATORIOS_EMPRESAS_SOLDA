@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { preparePdfAsIs, type PdfAsIsInput } from './pdf-as-is';
+import type { CurrentUser } from '@weldcosta/shared';
 import { pdfRenderCache, pdfRenderKey } from './pdf-render-cache';
 import { reportCreateSchema, drawingDataSchema } from '@weldcosta/shared';
 import { photoWithAnnotations, photoForPdf } from './photo-annotations';
@@ -72,42 +74,51 @@ export class PdfService implements PdfProvider {
       'Chrome/Chromium não está disponível no servidor para gerar o PDF.',
     );
   }
-  private render(report: PdfReport, final: boolean) {
+  private render(report: PdfReport, final: boolean, preparedImages?: Map<string, string>) {
     const printable = reportForPdf(report);
-    return pdfRenderCache.run(pdfRenderKey(printable, final), async () => {
-      const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(
-            new AppError(
+    return pdfRenderCache.run(
+      preparedImages ? 'current-' + randomUUID() : pdfRenderKey(printable, final),
+      async () => {
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new AppError(
+                503,
+                'PDF_TIMEOUT',
+                'O PDF demorou mais que o esperado. Tente novamente; o relatório continua salvo.',
+              ),
+            );
+            controller.abort();
+          }, 120000);
+        });
+        try {
+          return await Promise.race([
+            deadline,
+            this.renderDocument(printable, final, controller.signal, preparedImages),
+          ]);
+        } catch (cause) {
+          if (cause instanceof Error && cause.name === 'TimeoutError')
+            throw new AppError(
               503,
               'PDF_TIMEOUT',
-              'O PDF demorou mais que o esperado. Tente novamente; o relatório continua salvo.',
-            ),
-          );
-          controller.abort();
-        }, 120000);
-      });
-      try {
-        return await Promise.race([
-          deadline,
-          this.renderDocument(printable, final, controller.signal),
-        ]);
-      } catch (cause) {
-        if (cause instanceof Error && cause.name === 'TimeoutError')
-          throw new AppError(
-            503,
-            'PDF_TIMEOUT',
-            'Não foi possível concluir o PDF a tempo. Tente novamente; o relatório continua salvo.',
-          );
-        throw cause;
-      } finally {
-        clearTimeout(timer);
-      }
-    });
+              'Não foi possível concluir o PDF a tempo. Tente novamente; o relatório continua salvo.',
+            );
+          throw cause;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    );
   }
-  private async renderDocument(report: PdfReport, final: boolean, signal: AbortSignal) {
+  private async renderDocument(
+    report: PdfReport,
+    final: boolean,
+    signal: AbortSignal,
+    preparedImages?: Map<string, string>,
+  ) {
+    if (preparedImages) return this.printDocument(report, final, signal, preparedImages);
     reportCreateSchema.pick({ number: true }).parse({ number: report.number });
     const template = renderers[report.reportType.code];
     if (!template)
@@ -197,6 +208,17 @@ export class PdfService implements PdfProvider {
         );
       }
     }
+    return this.printDocument(report, final, signal, images);
+  }
+  private async printDocument(
+    report: PdfReport,
+    final: boolean,
+    signal: AbortSignal,
+    images: Map<string, string>,
+  ) {
+    const template = renderers[report.reportType.code];
+    if (!template)
+      throw new AppError(422, 'PDF_TEMPLATE_MISSING', 'Este tipo ainda não possui modelo de PDF.');
     signal.throwIfAborted();
     const browser = await puppeteer.launch({
       signal,
@@ -243,6 +265,12 @@ export class PdfService implements PdfProvider {
         clearTimeout(kill);
       }
     }
+  }
+  async exportCurrent(id: string, input: PdfAsIsInput, files: Buffer[], user: CurrentUser) {
+    const snapshot = await this.snapshot(id);
+    const prepared = await preparePdfAsIs(snapshot, input, files, user);
+    const bytes = await this.render(prepared.report, true, prepared.images);
+    return { bytes, warnings: prepared.warnings };
   }
   async preview(id: string) {
     return this.render(await this.snapshot(id), false);

@@ -289,3 +289,64 @@ it.each(reportTypeCodes)(
     expect(apiMock.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false);
   },
 );
+
+// Regression from the tablet recording: the report route/key stays identical
+// when a new local point receives its server ID during an edit.
+it.each(reportTypeCodes)(
+  'uploads a new point on an existing %s report and retries without duplicating completed photos',
+  async (code) => {
+    const report = { ...saved, reportType: { code } } as Report;
+    useReportPhotoDrafts
+      .getState()
+      .update('user:report-1', () => ({ photos: [draft('a'), draft('b')], removedIds: [] }));
+    apiMock
+      .mockResolvedValueOnce({ id: 'a' })
+      .mockResolvedValueOnce({ ...report, version: 2 })
+      .mockRejectedValueOnce(new ApiError(503, 'SERVER_BUSY', 'Tente novamente.'))
+      .mockResolvedValueOnce({ ...report, version: 2 });
+    await saveReportPhotos('user:report-1', report, points);
+    const remaining = useReportPhotoDrafts.getState().reports['user:report-1']!;
+    expect(remaining.photos.map((p) => [p.id, p.pointKey])).toEqual([['b', 'persisted-point']]);
+    expect((apiMock.mock.calls[0]![1]!.body as FormData).get('reportPointId')).toBe(
+      'persisted-point',
+    );
+    apiMock
+      .mockReset()
+      .mockResolvedValueOnce({ id: 'b' })
+      .mockResolvedValueOnce({ ...report, version: 3 });
+    await saveReportPhotos('user:report-1', { ...report, version: 2 }, report.points!);
+    expect(apiMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']?.photos).toEqual([]);
+  },
+);
+
+it('recovers a restored local point using its saved number when its client ID is no longer in the form', async () => {
+  useReportPhotoDrafts
+    .getState()
+    .update('user:report-1', () => ({
+      photos: [{ ...draft('restored'), pointNumber: 'S-42' }],
+      removedIds: [],
+    }));
+  apiMock.mockResolvedValueOnce({ id: 'restored' }).mockResolvedValueOnce(saved);
+  await saveReportPhotos('user:report-1', saved, saved.points!);
+  expect((apiMock.mock.calls[0]![1]!.body as FormData).get('reportPointId')).toBe(
+    'persisted-point',
+  );
+  expect(useReportPhotoDrafts.getState().reports['user:report-1']?.photos).toEqual([]);
+});
+
+it('preserves an unknown orphan photo and provides a located, actionable error rather than a generic failure', async () => {
+  useReportPhotoDrafts
+    .getState()
+    .update('user:report-1', () => ({ photos: [draft('orphan')], removedIds: [] }));
+  apiMock.mockResolvedValue(saved);
+  await saveReportPhotos('user:report-1', saved, saved.points!);
+  const remaining = useReportPhotoDrafts.getState().reports['user:report-1']!;
+  expect(remaining.photos).toHaveLength(1);
+  expect(remaining.error).toMatchObject({
+    code: 'PHOTO_POINT_PENDING',
+    location: { photoId: 'orphan' },
+  });
+  expect((remaining.error as Error).message).toContain('Fotos aguardando vínculo');
+  expect(apiMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});

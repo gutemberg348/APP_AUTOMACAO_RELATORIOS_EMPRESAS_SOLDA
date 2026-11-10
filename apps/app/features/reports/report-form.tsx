@@ -51,6 +51,7 @@ import { todayISO } from '../../utils/dates';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { DrawingEditor } from './drawing-editor';
 import { usePageScroll } from '../../components/page-scroll';
+import { prepareCurrentReportPdf } from './report-current-pdf';
 import { ReportActions } from './report-actions';
 import { emptyPhotoDrafts, useReportPhotoDrafts } from './report-photo-drafts';
 import { reusableReportFields, recentReportDefaults } from './report-autofill';
@@ -182,6 +183,7 @@ function ReportFormContent({
   const storageError = useConnectivity((state) => state.storageError);
   const [locallySaved, setLocallySaved] = useState(!!offlineDraft);
   const [localMessage, setLocalMessage] = useState('');
+  const [downloadAsIsRequest, setDownloadAsIsRequest] = useState(0);
   const [serverConflict, setServerConflict] = useState<Report>();
   const localTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [createdReport, setCreatedReport] = useState<Report>();
@@ -720,6 +722,29 @@ function ReportFormContent({
     setIssuesOpen(true);
   };
   const showSaveError = (cause: unknown) => {
+    if (cause instanceof ReportPhotoSaveError) {
+      const pointIndex = getValues('points').findIndex(
+        (point) => point.number === cause.location.pointNumber,
+      );
+      setSaveIssues([
+        {
+          path: cause.location.drawing
+            ? ['drawings']
+            : pointIndex >= 0
+              ? ['points', String(pointIndex)]
+              : ['points'],
+          label: cause.location.label,
+          message: cause.message,
+          guidance:
+            (cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
+            'Abra o ponto e a foto indicados. As fotos pendentes continuam no telefone; confira o motivo acima e toque em Salvar para tentar o envio novamente.',
+        },
+      ]);
+      setError(undefined);
+      setFailureOpen(false);
+      setIssuesOpen(true);
+      return;
+    }
     if (cause instanceof ZodError) return showIssues(cause.issues);
     const issues = apiValidationIssues(cause);
     if (issues.length) return showIssues(issues);
@@ -738,29 +763,7 @@ function ReportFormContent({
   useEffect(() => {
     const cause = photoDrafts.error;
     if (!cause) return;
-    if (cause instanceof ReportPhotoSaveError) {
-      const pointIndex = getValues('points').findIndex(
-        (point) => point.number === cause.location.pointNumber,
-      );
-      setSaveIssues([
-        {
-          path: cause.location.drawing
-            ? ['drawings']
-            : pointIndex >= 0
-              ? ['points', String(pointIndex)]
-              : ['points'],
-          label: cause.location.label,
-          message: cause.message,
-          guidance:
-            (cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
-            'Confira o motivo informado para a foto indicada. As fotos pendentes continuam na fila; corrija a foto ou o campo apontado e toque em Salvar para repetir o envio.',
-        },
-      ]);
-      setIssuesOpen(true);
-    } else {
-      setError(cause);
-      setFailureOpen(true);
-    }
+    showSaveError(cause);
   }, [photoDrafts.error, getValues]);
   const removeDrawingPoints = (keys: string[], clearDrawingIndex?: number) => {
     const removedKeys = new Set(keys);
@@ -935,6 +938,14 @@ function ReportFormContent({
     )();
     return saved;
   };
+  const requestDownloadAsIs = () => {
+    setFailureOpen(false);
+    setIssuesOpen(false);
+    setStep(1);
+    setDownloadAsIsRequest(Date.now());
+    setTimeout(() => reveal(conclusionActions.current), 200);
+  };
+  const canDownloadAsIs = !!report && online && user.permissions.includes('pdf.download');
   return (
     <View ref={formTop} style={{ gap: 20 }}>
       <TransferOverlay progress={transferProgress} />
@@ -1177,6 +1188,7 @@ function ReportFormContent({
         onClose={() => setIssuesOpen(false)}
         onOpen={() => setIssuesOpen(true)}
         onCorrect={correctIssue}
+        onDownloadAsIs={canDownloadAsIs ? requestDownloadAsIs : undefined}
       />
       <PickerSheet
         visible={failureOpen}
@@ -1188,6 +1200,21 @@ function ReportFormContent({
         <Text style={styles.muted}>
           Seu preenchimento continua nesta tela. Depois de resolver o aviso, tente a ação novamente.
         </Text>
+        {canDownloadAsIs && (
+          <>
+            <Text style={styles.muted}>
+              Você pode baixar o PDF com o preenchimento atual e as fotos do telefone. Antes de
+              baixar, mostraremos qual ponto, campo ou foto apresentou problema e o que será
+              incluído.
+            </Text>
+            <Button
+              title="Baixar como está"
+              icon="download"
+              secondary
+              onPress={requestDownloadAsIs}
+            />
+          </>
+        )}
         <Button title="Voltar ao relatório" secondary onPress={() => setFailureOpen(false)} />
       </PickerSheet>
       {step === 0 && (reusable.length > 0 || autofillMessage) && (
@@ -1703,11 +1730,21 @@ function ReportFormContent({
           <ReportActions
             report={report}
             save={save}
+            prepareCurrentPdf={async (options) => {
+              const values = getValues();
+              await saveOnPhone(values).catch(offlineStorageFailure);
+              return prepareCurrentReportPdf(report!.id, values, photoDraftKey, options);
+            }}
             hasChanges={hasChanges}
             busy={pickingPhoto || saving}
             creating={!initialReport}
             onBusyChange={setActing}
             onError={showSaveError}
+            allowDownloadAsIs={
+              !!error || saveIssues.length > 0 || !!photoDrafts.error || !!localEntry?.error
+            }
+            downloadAsIsRequest={downloadAsIsRequest}
+            onDownloadAsIsHandled={() => setDownloadAsIsRequest(0)}
           />
         </View>
       )}

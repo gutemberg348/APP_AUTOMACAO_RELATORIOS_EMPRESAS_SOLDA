@@ -318,7 +318,14 @@ export function PointPhotos({
             error: undefined,
             photos: [
               ...draft.photos,
-              { id, pointKey: pointId, asset: localAsset, caption: '', sha256 },
+              {
+                id,
+                pointKey: pointId,
+                pointNumber: pointId ? number : undefined,
+                asset: localAsset,
+                caption: '',
+                sha256,
+              },
             ],
           }));
         }}

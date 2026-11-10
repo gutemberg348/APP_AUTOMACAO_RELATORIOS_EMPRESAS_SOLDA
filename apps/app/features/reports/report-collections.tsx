@@ -2,7 +2,7 @@ import type { CorrectionRequest } from './report-save-feedback';
 import { useTheme } from '../../utils/theme';
 import { reportPanelStyle } from './report-panel-style';
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, Switch, Keyboard, type ViewInstance } from 'react-native';
+import { View, Text, Image, Pressable, Switch, Keyboard, type ViewInstance } from 'react-native';
 import {
   Controller,
   useFieldArray,
@@ -149,6 +149,12 @@ export function ReportPoints({
     name: 'points',
     keyName: '_formKey',
   });
+  const orphanPhotos = draft.photos.filter(
+    (photo) =>
+      photo.sectionKey !== 'drawing' &&
+      photo.pointKey &&
+      !values.some((point) => pointKey(point) === photo.pointKey),
+  );
   const measurement = code === 'ME';
   const penetrant = code === 'LP';
   const invalidPointIndexes = Object.keys(errors.points ?? {})
@@ -276,6 +282,63 @@ export function ReportPoints({
   };
   return (
     <View style={{ gap: 16 }}>
+      {orphanPhotos.length > 0 && (
+        <Card style={{ gap: 12 }}>
+          <PanelHeader
+            title="Fotos aguardando vínculo"
+            subtitle="Escolha o ponto de cada foto para concluir o envio."
+            icon="alert"
+          />
+          {orphanPhotos.map((photo) => (
+            <View key={photo.id} style={{ gap: 10 }}>
+              <Image
+                source={{ uri: photo.asset.uri }}
+                style={{ width: '100%', height: 120, resizeMode: 'contain' }}
+              />
+              <Text style={styles.text}>{photo.asset.name}</Text>
+              <SelectField
+                label="Ponto desta foto"
+                value=""
+                disabled={!editable || !canUploadPhotos}
+                options={values.map((point) => ({
+                  value: pointKey(point),
+                  label: 'Ponto ' + point.number,
+                }))}
+                onChange={(key) => {
+                  if (!key || !editable || !canUploadPhotos) return;
+                  useReportPhotoDrafts.getState().update(photoDraftKey, (current) => ({
+                    ...current,
+                    error: undefined,
+                    photos: current.photos.map((item) =>
+                      item.id === photo.id
+                        ? {
+                            ...item,
+                            pointKey: key,
+                            pointNumber: values.find((p) => pointKey(p) === key)?.number,
+                          }
+                        : item,
+                    ),
+                  }));
+                }}
+              />
+              {editable && (
+                <Button
+                  title="Retirar foto pendente"
+                  variant="ghost"
+                  icon="trash"
+                  onPress={() =>
+                    useReportPhotoDrafts.getState().update(photoDraftKey, (current) => ({
+                      ...current,
+                      error: undefined,
+                      photos: current.photos.filter((item) => item.id !== photo.id),
+                    }))
+                  }
+                />
+              )}
+            </View>
+          ))}
+        </Card>
+      )}
       <PanelHeader
         title={measurement ? 'Pontos de medição' : 'Pontos de solda'}
         subtitle={

@@ -10,12 +10,14 @@ export function ReportSaveIssues({
   onClose,
   onOpen,
   onCorrect,
+  onDownloadAsIs,
 }: {
   issues: ReportCorrection[];
   visible: boolean;
   onClose(): void;
   onOpen(): void;
   onCorrect(issue: ReportCorrection): void;
+  onDownloadAsIs?(): void;
 }) {
   const { tokens: t, styles } = useTheme();
   if (!issues.length) return null;
@@ -31,6 +33,9 @@ export function ReportSaveIssues({
           Seu preenchimento continua nesta tela. Corrija e toque em Salvar novamente.
         </Text>
         <Button title="Ver o que corrigir" icon="alert" secondary onPress={onOpen} />
+        {onDownloadAsIs && (
+          <Button title="Baixar como está" icon="download" secondary onPress={onDownloadAsIs} />
+        )}
       </Card>
       <PickerSheet
         visible={visible}
@@ -39,6 +44,15 @@ export function ReportSaveIssues({
         subtitle="Veja onde ocorreu o problema e como continuar."
         onClose={onClose}
       >
+        {onDownloadAsIs && (
+          <View style={{ gap: 8 }}>
+            <Text style={styles.muted}>
+              Baixe o PDF com o preenchimento atual e as fotos do telefone. Vamos mostrar os pontos,
+              campos e fotos com problema antes do download; os demais serão incluídos normalmente.
+            </Text>
+            <Button title="Baixar como está" icon="download" secondary onPress={onDownloadAsIs} />
+          </View>
+        )}
         {issues.map((issue, index) => (
           <View
             key={issue.path.join('.') + index}

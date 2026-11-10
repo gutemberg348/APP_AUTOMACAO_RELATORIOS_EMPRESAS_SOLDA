@@ -30,7 +30,7 @@ async function request<T>(
   token?: string,
   binary = false,
 ): Promise<T> {
-  const pdf = /^\/reports\/[^/]+\/pdf(?:\/preview)?$/.test(path);
+  const pdf = /^\/reports\/[^/]+\/pdf(?:\/|$)/.test(path);
   const controller = new AbortController();
   let expired = false;
   const cancel = () => controller.abort();
