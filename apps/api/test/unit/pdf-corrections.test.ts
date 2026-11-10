@@ -25,6 +25,7 @@ vi.mock('puppeteer-core', () => ({
   default: {
     launch: async () => ({
       newPage: async () => ({
+        setDefaultTimeout: () => {},
         setJavaScriptEnabled: async () => {},
         setRequestInterception: async () => {},
         on: () => {},
@@ -36,6 +37,7 @@ vi.mock('puppeteer-core', () => ({
     }),
   },
 }));
+import { pdfRenderCache } from '../../src/modules/pdf/pdf-render-cache';
 import { PdfService } from '../../src/modules/pdf/pdf.service';
 
 const fixture = (code = 'LP') => ({
@@ -56,6 +58,7 @@ const fixture = (code = 'LP') => ({
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  pdfRenderCache.clear();
   mocks.exists.mockResolvedValue(true);
 });
 describe('PDF for incomplete reports and located errors', () => {
@@ -230,4 +233,28 @@ describe('PDF for incomplete reports and located errors', () => {
     expect((await new PdfService().preview('report')).toString()).toBe('%PDF-test');
     expect(mocks.exists).not.toHaveBeenCalled();
   });
+});
+
+it('renders only once across approval generation and download, including a different service instance', async () => {
+  const report = { ...fixture(), status: 'APPROVED' };
+  mocks.snapshot.mockResolvedValue(report);
+  mocks.archivedPdf.mockResolvedValue({ version: 1, filePath: 'archive.pdf' });
+  await new PdfService().generate(report as never, 'user');
+  mocks.snapshot.mockResolvedValue({ ...report, version: 2, updatedAt: new Date() });
+  await new PdfService().download('report');
+  expect(mocks.html).toHaveBeenCalledOnce();
+  mocks.snapshot.mockResolvedValue({ ...report, version: 3, title: 'Alterado' });
+  await new PdfService().download('report');
+  expect(mocks.html).toHaveBeenCalledTimes(2);
+});
+
+it('shares concurrent requests but retries a failed render', async () => {
+  mocks.snapshot.mockResolvedValue(fixture());
+  mocks.html.mockRejectedValueOnce(new Error('Chrome stopped'));
+  const service = new PdfService();
+  const results = await Promise.allSettled([service.preview('report'), service.preview('report')]);
+  expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+  expect(mocks.html).toHaveBeenCalledOnce();
+  await service.preview('report');
+  expect(mocks.html).toHaveBeenCalledTimes(2);
 });

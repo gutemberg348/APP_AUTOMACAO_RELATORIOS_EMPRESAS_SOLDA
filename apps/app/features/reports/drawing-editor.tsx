@@ -144,6 +144,9 @@ type Tool =
   | 'pan'
   | SketchTool;
 const freehandDragThreshold = 0.35;
+// Holding an existing object must tolerate finger/stylus jitter independently
+// from the much smaller movement that starts freehand ink in blank space.
+const selectionHoldSlop = 10;
 const sketchTools: Tool[] = ['pencil', 'straighten', 'circle', 'rectangle'];
 // Screen pixels: the same touch tolerance at any zoom level.
 const drawingDragThreshold = 6;
@@ -188,7 +191,7 @@ const tools: { id: Tool; name: string; icon: IconName; hint: string }[] = [
     id: 'eraser',
     name: 'Borracha',
     icon: 'eraser',
-    hint: 'Apague só o trecho do traço. Ajuste o tamanho na chave ao lado da borracha; use a lixeira para objetos inteiros.',
+    hint: 'Apague só os traços do lápis livre. Linhas e Endireitar são preservados. Ajuste o tamanho na chave; use a lixeira para excluir outros objetos.',
   },
   {
     id: 'straighten',
@@ -476,6 +479,7 @@ export function DrawingEditor({
         angle: number;
         delta: number;
         ratio: number;
+        dragOffset?: { dx: number; dy: number };
       }
     | undefined
   >(undefined);
@@ -534,8 +538,10 @@ export function DrawingEditor({
         width: number;
         samples: DrawingPosition[];
         held?: boolean;
+        heldAt?: { dx: number; dy: number };
         selectionOnly?: boolean;
         drawingStarted: boolean;
+        startedAt: number;
         corner?: number;
         labelOrigin?: DrawingPosition;
         dx: number;
@@ -1539,7 +1545,7 @@ export function DrawingEditor({
               .slice(0, 3)
               .findIndex((c) => Math.hypot(c.x - p.x, c.y - p.y) < (16 / width) * view.w)
           : -1;
-      const current = {
+      const current: NonNullable<typeof gesture.current> = {
         start: p,
         original:
           corner >= 0 ? selectedElement : selectionOnly && !imageNeedsHold ? found : undefined,
@@ -1553,6 +1559,7 @@ export function DrawingEditor({
         held: selectionOnly && !!found && !imageNeedsHold,
         selectionOnly,
         drawingStarted: false,
+        startedAt: Date.now(),
       };
       gesture.current = current;
       if (
@@ -1570,11 +1577,12 @@ export function DrawingEditor({
             if (
               gesture.current !== current ||
               multiTouch.current ||
-              Math.hypot(current.dx, current.dy) > 10
+              Math.hypot(current.dx, current.dy) > selectionHoldSlop
             )
               return;
             current.original = found;
             current.held = true;
+            current.heldAt = { dx: current.dx, dy: current.dy };
             const members = found.groupId ? drawingGroupMembers(data!.elements, [found.id]) : [];
             if (members.length > 1) {
               gesture.current = undefined;
@@ -1592,6 +1600,7 @@ export function DrawingEditor({
                 angle: 0,
                 delta: 0,
                 ratio: viewport.w / width,
+                dragOffset: current.heldAt,
               };
               setStroke([]);
               setTraceStart(undefined);
@@ -1763,10 +1772,12 @@ export function DrawingEditor({
           setBlockDraft(block.result);
           setRotationDelta(block.result === block.elements ? 0 : delta);
         } else if (block.elements.length) {
-          if (Math.hypot(state.dx, state.dy) < 3) return;
+          const dx = state.dx - (block.dragOffset?.dx ?? 0),
+            dy = state.dy - (block.dragOffset?.dy ?? 0);
+          if (Math.hypot(dx, dy) < 3) return;
           const center = block.pivot;
           const snapped = smartSnap(
-            { x: center.x + state.dx * block.ratio, y: center.y + state.dy * block.ratio },
+            { x: center.x + dx * block.ratio, y: center.y + dy * block.ratio },
             block.elements.map((e) => e.id),
           );
           block.result = transformDrawingSelection(
@@ -1800,22 +1811,38 @@ export function DrawingEditor({
         );
         return;
       }
-      const penThreshold = tool === 'pencil' ? freehandDragThreshold : 10;
-      if (!g.held && Math.hypot(state.dx, state.dy) > penThreshold) cancelHold();
-      if (holdTimer.current && !g.held && Math.hypot(state.dx, state.dy) <= penThreshold) return;
+      if (holdTimer.current && !g.held) {
+        if (Math.hypot(state.dx, state.dy) > selectionHoldSlop) cancelHold();
+        else {
+          // Keep the first few samples if this becomes a stroke, but never
+          // paint while a deliberate hold on an object is still possible.
+          if (sketchTools.includes(tool))
+            g.samples = appendStrokePoint(
+              g.samples,
+              clampPosition({
+                x: g.start.x + (state.dx / g.width) * g.view.w,
+                y: g.start.y + (state.dy / g.width) * g.view.w,
+              }),
+              (0.25 * g.view.w) / g.width,
+            );
+          return;
+        }
+      }
       if (g.held && g.original) {
-        if (Math.hypot(state.dx, state.dy) < 3) return;
+        const dx = state.dx - (g.heldAt?.dx ?? 0),
+          dy = state.dy - (g.heldAt?.dy ?? 0);
+        if (Math.hypot(dx, dy) < 3) return;
         if (g.labelOrigin && (g.original.type === 'point' || g.original.type === 'marker')) {
           setDraftElement(
             positionDrawingPointLabel(g.original, {
-              x: g.labelOrigin.x + (state.dx / g.width) * g.view.w,
-              y: g.labelOrigin.y + (state.dy / g.width) * g.view.w,
+              x: g.labelOrigin.x + (dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (dy / g.width) * g.view.w,
             }),
           );
           return;
         }
         setDraftElement(
-          moveSnapped(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
+          moveSnapped(g.original, (dx / g.width) * g.view.w, (dy / g.width) * g.view.w),
         );
         return;
       }
@@ -1894,6 +1921,7 @@ export function DrawingEditor({
       }
       liveInk.current?.clear();
       setCanvasGestureActive(false);
+      const awaitingHold = !!holdTimer.current && !gesture.current?.held;
       cancelHold();
       if (endpointGesture.current && !multiTouch.current) {
         const endpoint = endpointGesture.current;
@@ -1937,7 +1965,13 @@ export function DrawingEditor({
           Math.hypot(state.dx, state.dy) > 3
         ) {
           setMessage('Não há espaço para esse giro. Afaste a seleção da borda do desenho.');
-        } else if (block.result && Math.hypot(state.dx, state.dy) >= 3) {
+        } else if (
+          block.result &&
+          Math.hypot(
+            state.dx - (block.dragOffset?.dx ?? 0),
+            state.dy - (block.dragOffset?.dy ?? 0),
+          ) >= 3
+        ) {
           updateBlock(block.result);
           if (block.mode === 'rotate')
             setBlockAngle((old) => normalizeDrawingAngle(old + (rotationDelta ?? 0)));
@@ -1947,6 +1981,19 @@ export function DrawingEditor({
       }
       const g = gesture.current;
       if (!g) return;
+      if (
+        awaitingHold &&
+        !g.drawingStarted &&
+        (sketchTools.includes(tool) || ['pipe', 'line', 'dimension'].includes(tool)) &&
+        // Preserve quick, tiny handwriting strokes over a photo or existing
+        // geometry. A paused, unfinished hold should leave nothing behind.
+        !(tool === 'pencil' && Date.now() - g.startedAt < 250)
+      ) {
+        // Releasing a not-yet-complete hold is a cancelled selection attempt,
+        // not a tiny pencil mark or a new segment on the existing object.
+        resetGesture();
+        return;
+      }
       if (g.corner !== undefined && g.original) {
         if (Math.hypot(state.dx, state.dy) >= 3)
           updateElement(
@@ -1958,25 +2005,22 @@ export function DrawingEditor({
             ),
           );
       } else if (g.held && g.original) {
+        const dx = state.dx - (g.heldAt?.dx ?? 0),
+          dy = state.dy - (g.heldAt?.dy ?? 0);
         if (
-          Math.hypot(state.dx, state.dy) >= 3 &&
+          Math.hypot(dx, dy) >= 3 &&
           g.labelOrigin &&
           (g.original.type === 'point' || g.original.type === 'marker')
         )
           updateElement(
             positionDrawingPointLabel(g.original, {
-              x: g.labelOrigin.x + (state.dx / g.width) * g.view.w,
-              y: g.labelOrigin.y + (state.dy / g.width) * g.view.w,
+              x: g.labelOrigin.x + (dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (dy / g.width) * g.view.w,
             }),
           );
-        else if (Math.hypot(state.dx, state.dy) >= 3)
+        else if (Math.hypot(dx, dy) >= 3)
           updateElement(
-            moveSnapped(
-              g.original,
-              (state.dx / g.width) * g.view.w,
-              (state.dy / g.width) * g.view.w,
-              false,
-            ),
+            moveSnapped(g.original, (dx / g.width) * g.view.w, (dy / g.width) * g.view.w, false),
           );
       } else if (g.selectionOnly) {
         if (!g.original && Math.hypot(state.dx, state.dy) < 10) finishSelection();
@@ -4254,9 +4298,9 @@ export function DrawingEditor({
         }
       >
         <Text style={styles.muted}>
-          Apaga somente os trechos de linhas e traços por onde passar. Fotos, pontos, textos,
-          símbolos e hachuras são preservados. Para excluir um objeto inteiro, selecione e use a
-          lixeira.
+          Apaga somente os traços feitos com lápis livre, no trecho por onde passar. Linhas,
+          Endireitar, formas, fotos, pontos e textos são preservados. Para excluir outros objetos,
+          selecione e use a lixeira.
         </Text>
         <View
           style={{

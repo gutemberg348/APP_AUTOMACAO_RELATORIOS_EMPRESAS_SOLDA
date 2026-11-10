@@ -39,6 +39,7 @@ import { ConfirmDialog } from '../../components/confirm-dialog';
 import { usePageScroll } from '../../components/page-scroll';
 import { emptyPhotoDrafts, useReportPhotoDrafts } from './report-photo-drafts';
 import { PersonForm, PersonPicker, personSigner } from '../people/people';
+import { useConnectivity } from '../../stores/connectivity';
 import { usePermission } from '../../hooks/use-permission';
 import { SignatureField } from '../people/signature-field';
 export interface ReportFormValues {
@@ -785,6 +786,7 @@ export function ReportSigners({
   const currentUser = useAuth((state) => state.session!.user);
   const canViewPeople = usePermission('people.view');
   const canManagePeople = usePermission('people.manage');
+  const online = useConnectivity((state) => state.online);
   const signers = useWatch({ control, name: 'signatures' });
   const [selecting, setSelecting] = useState<number | null>(null);
   const [registering, setRegistering] = useState<number | null>(null);
@@ -1081,7 +1083,7 @@ export function ReportSigners({
                 />
               )}
             />
-            {editable && canManagePeople && (
+            {editable && canManagePeople && online && (
               <Button
                 title="Guardar pessoa para próximos relatórios"
                 small

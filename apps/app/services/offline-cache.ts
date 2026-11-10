@@ -3,7 +3,7 @@ import { offlineStorageFailure } from '../stores/connectivity';
 
 export const offlineScope = (apiUrl: string, userId: string) => offlineHash(apiUrl + ':' + userId);
 const catalogRoot = (path: string) =>
-  /^\/(companies|projects|report-types|reports)(?:\?|\/|$)/.exec(path)?.[1];
+  /^\/(companies|projects|report-types|reports|people)(?:\?|\/|$)/.exec(path)?.[1];
 export const cacheablePath = (path: string) =>
   /^\/(companies|projects|report-types|reports|dashboard|people)(?:\?|\/|$)/.test(path) &&
   !path.includes('/pdf');
@@ -53,6 +53,7 @@ export async function cachedApiData<T>(scope: string, path: string): Promise<T |
     (item) =>
       (!params.get('companyId') || item.companyId === params.get('companyId')) &&
       (!params.get('status') || item.status === params.get('status')) &&
+      (!params.get('active') || String(item.active) === params.get('active')) &&
       (!params.get('search') ||
         JSON.stringify(item)
           .toLocaleLowerCase()
@@ -62,7 +63,7 @@ export async function cachedApiData<T>(scope: string, path: string): Promise<T |
     String(a.name ?? a.title ?? a.number).localeCompare(String(b.name ?? b.title ?? b.number)),
   );
   const page = Number(params.get('page') || 1),
-    limit = Number(params.get('limit') || 100);
+    limit = Number(params.get('limit') || (root === 'people' ? 30 : 100));
   return {
     items: items.slice((page - 1) * limit, page * limit),
     total: items.length,

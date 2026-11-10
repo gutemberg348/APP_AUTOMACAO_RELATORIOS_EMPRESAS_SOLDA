@@ -19,17 +19,23 @@ vi.mock('../../../app/stores/auth', () => ({
     }),
   },
 }));
-import { api } from '../../../app/services/api';
+import { useConnectivity } from '../../../app/stores/connectivity';
+import { api, apiBlob } from '../../../app/services/api';
 const result = () =>
   new Response(JSON.stringify({ success: true, data: { id: 'saved' } }), {
     headers: { 'Content-Type': 'application/json' },
   });
 beforeEach(() => {
+  useConnectivity.setState({ online: true });
+  state.platform.OS = 'ios';
   state.expoFetch.mockReset().mockResolvedValue(result());
   state.nativeFetch.mockReset().mockResolvedValue(result());
   vi.stubGlobal('fetch', state.nativeFetch);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 describe('API transport for the installed Expo SDK', () => {
   it('does not send an offline queue using another account after login changes', async () => {
     await expect(
@@ -59,5 +65,93 @@ describe('API transport for the installed Expo SDK', () => {
     await api('/reports/test', { method: 'PUT', body: JSON.stringify({ version: 1 }) });
     expect(state.expoFetch).not.toHaveBeenCalled();
     expect(state.nativeFetch.mock.calls[0]![1].headers['Content-Type']).toBe('application/json');
+  });
+});
+
+describe('PDF request deadlines', () => {
+  it.each(['ios', 'android', 'web'])(
+    'allows a slow PDF beyond 12 seconds on %s',
+    async (platform) => {
+      vi.useFakeTimers();
+      state.platform.OS = platform;
+      const fetch = platform === 'web' ? state.nativeFetch : state.expoFetch;
+      fetch.mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  new Response('%PDF-result', { headers: { 'Content-Type': 'application/pdf' } }),
+                ),
+              15000,
+            ),
+          ),
+      );
+      const pending = apiBlob('/reports/qa/pdf/preview');
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(await (await pending).text()).toBe('%PDF-result');
+      expect(useConnectivity.getState().online).toBe(true);
+    },
+  );
+  it.each(['headers', 'body'])(
+    'ends a stalled PDF %s without marking the phone offline',
+    async (phase) => {
+      vi.useFakeTimers();
+      state.expoFetch.mockImplementation(() =>
+        phase === 'headers'
+          ? new Promise(() => {})
+          : Promise.resolve({
+              ok: true,
+              headers: new Headers({ 'content-type': 'application/pdf' }),
+              blob: () => new Promise(() => {}),
+            }),
+      );
+      const check = expect(apiBlob('/reports/qa/pdf')).rejects.toMatchObject({
+        code: 'REQUEST_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(180000);
+      await check;
+      expect(useConnectivity.getState().online).toBe(true);
+      expect(state.expoFetch.mock.calls[0]![1].signal.aborted).toBe(true);
+    },
+  );
+  it('can cancel even a transport that ignores AbortSignal and retry immediately', async () => {
+    const controller = new AbortController();
+    state.expoFetch.mockImplementationOnce(() => new Promise(() => {}));
+    const check = expect(
+      apiBlob('/reports/qa/pdf', { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' });
+    controller.abort();
+    await check;
+    expect(useConnectivity.getState().online).toBe(true);
+    state.expoFetch.mockResolvedValueOnce(
+      new Response('%PDF-retry', { headers: { 'content-type': 'application/pdf' } }),
+    );
+    expect(await (await apiBlob('/reports/qa/pdf')).text()).toBe('%PDF-retry');
+  });
+  it('rejects HTML and empty successful responses instead of sharing a broken PDF', async () => {
+    state.expoFetch.mockResolvedValueOnce(new Response('<html>proxy</html>'));
+    await expect(apiBlob('/reports/qa/pdf')).rejects.toMatchObject({ code: 'INVALID_PDF' });
+    state.expoFetch.mockResolvedValueOnce(
+      new Response('', { headers: { 'content-type': 'application/pdf' } }),
+    );
+    await expect(apiBlob('/reports/qa/pdf')).rejects.toMatchObject({ code: 'INVALID_PDF' });
+  });
+  it('keeps ordinary request timeout compatible with offline fallback', async () => {
+    vi.useFakeTimers();
+    state.expoFetch.mockImplementationOnce(() => new Promise(() => {}));
+    const check = expect(api('/reports/qa')).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    await vi.advanceTimersByTimeAsync(12000);
+    await check;
+    expect(useConnectivity.getState().online).toBe(false);
+  });
+  it('allows POST generation time beyond 12 seconds as well', async () => {
+    vi.useFakeTimers();
+    state.expoFetch.mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve(result()), 20000)),
+    );
+    const request = api('/reports/qa/pdf', { method: 'POST' });
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(await request).toEqual({ id: 'saved' });
   });
 });

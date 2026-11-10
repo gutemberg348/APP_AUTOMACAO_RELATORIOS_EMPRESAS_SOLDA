@@ -34,6 +34,7 @@ import { SelectField } from '../../components/select-field';
 import { PickerSheet } from '../../components/picker-sheet';
 import { SignatureField } from './signature-field';
 import { CompanyAccessField } from '../users/company-access-field';
+import { useConnectivity } from '../../stores/connectivity';
 
 export const personRoles = [
   { value: 'INSPECTOR', label: 'Inspetor' },
@@ -65,6 +66,7 @@ export function PersonForm({
 }) {
   const { styles } = useTheme(),
     client = useQueryClient();
+  const online = useConnectivity((state) => state.online);
   const canCreateLogin = usePermission('users.create'),
     canManageLogin = usePermission('users.view');
   const [withLogin, setWithLogin] = useState(false),
@@ -354,6 +356,15 @@ export function PersonForm({
           onPress={async () => {
             setError(undefined);
             if (busy) return;
+            if (!online) {
+              setError(
+                new Error(
+                  'Sem internet. Para continuar a inspeção, preencha nome, registro e assinatura diretamente no relatório. O cadastro geral de pessoas fica disponível quando a conexão voltar.',
+                ),
+              );
+              setFeedback((old) => ({ field: 'feedback', attempt: old.attempt + 1 }));
+              return;
+            }
             const parsed = personSaveSchema.safeParse({
               ...data,
               ...(withLogin && !person?.userId
@@ -411,10 +422,11 @@ export function PeopleList({
   active?: boolean;
 }) {
   const { styles } = useTheme();
+  const online = useConnectivity((state) => state.online);
   const [search, setSearch] = useState(''),
     [page, setPage] = useState(1);
   const query = useQuery({
-    queryKey: ['people', search, page, active],
+    queryKey: ['people', search, page, active, online],
     queryFn: () =>
       api<Paginated<Person>>(
         `/people?search=${encodeURIComponent(search)}&page=${page}&active=${active}`,
@@ -431,7 +443,15 @@ export function PeopleList({
           setPage(1);
         }}
       />
-      <Notice error={query.error} />
+      {online ? (
+        <Notice error={query.error} />
+      ) : (
+        <Text style={styles.muted} accessibilityLiveRegion="polite">
+          {query.data?.items.length
+            ? 'Sem internet. Escolha entre as pessoas guardadas neste telefone.'
+            : 'Sem internet. Nenhuma pessoa disponível para esta busca no telefone. Você pode fechar esta janela e preencher nome, registro e assinatura diretamente no relatório.'}
+        </Text>
+      )}
       {query.isPending && <Loading />}
       {query.data?.items.map((person) => (
         <View key={person.id} style={{ gap: 4 }}>
@@ -480,6 +500,7 @@ export function PersonPicker({
   roleLabel?: string;
 }) {
   const canManagePeople = usePermission('people.manage');
+  const online = useConnectivity((state) => state.online);
   return (
     <PickerSheet
       visible={visible}
@@ -497,7 +518,9 @@ export function PersonPicker({
         contentContainerStyle={{ padding: 20, gap: 18 }}
       >
         {visible && <PeopleList onSelect={onSelect} />}
-        {canManagePeople && <Button title="Cadastrar nova pessoa" icon="plus" onPress={onNew} />}
+        {canManagePeople && online && (
+          <Button title="Cadastrar nova pessoa" icon="plus" onPress={onNew} />
+        )}
       </ScrollView>
     </PickerSheet>
   );

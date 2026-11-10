@@ -21,6 +21,10 @@ export function apiValidationIssues(error: unknown): ValidationIssue[] {
 export function formErrorGuidance(error: unknown): string | undefined {
   if (!error) return undefined;
   if (error instanceof ApiError) {
+    if (error.code === 'REQUEST_CANCELLED')
+      return 'Você pode baixar ou compartilhar novamente quando quiser.';
+    if (['PDF_BUSY', 'PDF_TIMEOUT', 'REQUEST_TIMEOUT', 'INVALID_PDF'].includes(error.code))
+      return 'Tente baixar ou compartilhar novamente em instantes. Não é necessário preencher o relatório outra vez.';
     if (error.status === 401) return 'Entre novamente para continuar.';
     if (error.status === 403) return 'Peça ao administrador acesso para realizar esta ação.';
     if (error.status === 404)

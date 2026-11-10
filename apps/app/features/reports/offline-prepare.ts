@@ -1,4 +1,4 @@
-import type { Paginated, Project, Company, ReportType, Report } from '@weldcosta/shared';
+import type { Paginated, Project, Company, ReportType, Report, Person } from '@weldcosta/shared';
 import { api, apiUrl } from '../../services/api';
 import { useConnectivity } from '../../stores/connectivity';
 import { useAuth } from '../../stores/auth';
@@ -22,7 +22,7 @@ export async function prepareOfflineCatalog(progress: (text: string) => void) {
     throw new Error(
       'Conecte à internet para carregar as empresas, obras e modelos pela primeira vez.',
     );
-  const { accountId, check } = offlineAccount();
+  const { accountId, check, scope } = offlineAccount();
   check();
   progress('Carregando modelos…');
   await api<Paginated<ReportType>>('/report-types?limit=100&sortBy=name&sortOrder=asc', {
@@ -62,6 +62,25 @@ export async function prepareOfflineCatalog(progress: (text: string) => void) {
     progress('Guardando dados da obra · ' + project.name);
     check();
     await api('/projects/' + project.id, { accountId });
+  }
+  if (useAuth.getState().session?.user.permissions.includes('people.view')) {
+    let page = 1,
+      pages = 1;
+    do {
+      check();
+      progress(`Guardando responsáveis · página ${page}…`);
+      const list = await api<Paginated<Person>>('/people?active=true&page=' + page, { accountId });
+      pages = list.pages;
+      for (const person of list.items) {
+        check();
+        if (!person.signatureAssetId) continue;
+        const path = '/people/signatures/' + person.signatureAssetId;
+        if (!(await offlineDisk.hasBlob(scope, 'remote-' + offlineHash(path))))
+          await api<Blob>(path, { accountId }, true, true);
+      }
+      page++;
+    } while (page <= pages);
+    check();
   }
   if (!useConnectivity.getState().online || useConnectivity.getState().storageError)
     throw new Error(

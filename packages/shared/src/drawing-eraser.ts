@@ -67,17 +67,27 @@ function cuts(a: Point, b: Point, from: Point, to: Point, r: number): Interval[]
 
 // Flatten only a touched freehand path. Midpoint quadratics match freehandPath;
 // adaptive subdivision keeps the visible curve within 0.2 drawing units.
-function contour(element: Extract<DrawingElement, { type: 'line' | 'polyline' }>): Point[] {
-  if (element.type === 'line')
-    return [
-      { x: element.x1, y: element.y1 },
-      { x: element.x2, y: element.y2 },
-    ];
-  if (!element.freehand) return element.points;
+function contour(element: Extract<DrawingElement, { type: 'polyline' }>): Point[] {
   const result: Point[] = [element.points[0]!];
+  const append = (point: Point) => {
+    const last = result.at(-1)!;
+    if (same(last, point)) return;
+    const before = result.at(-2);
+    if (before) {
+      const ax = last.x - before.x,
+        ay = last.y - before.y,
+        bx = point.x - last.x,
+        by = point.y - last.y;
+      if (Math.abs(ax * by - ay * bx) < 1e-8 && ax * bx + ay * by >= 0) {
+        result[result.length - 1] = point;
+        return;
+      }
+    }
+    result.push(point);
+  };
   const curve = (a: Point, c: Point, b: Point, depth = 0) => {
     if (depth >= 8 || Math.hypot(a.x - 2 * c.x + b.x, a.y - 2 * c.y + b.y) / 4 <= 0.2) {
-      result.push(b);
+      append(b);
       return;
     }
     const ac = mix(a, c, 0.5),
@@ -92,7 +102,7 @@ function contour(element: Extract<DrawingElement, { type: 'line' | 'polyline' }>
       element.points[i - 1]!,
       mix(element.points[i - 1]!, element.points[i]!, 0.5),
     );
-  if (!same(result.at(-1)!, element.points.at(-1)!)) result.push(element.points.at(-1)!);
+  append(element.points.at(-1)!);
   return result;
 }
 
@@ -106,19 +116,10 @@ export function eraseDrawingStrokes(
   if (!Number.isFinite(radius) || radius <= 0) return elements;
   let changed = false;
   const output = elements.flatMap((element) => {
-    // Text, symbols, hatch, photos and inspection markers remain independent objects.
-    if (
-      (element.type !== 'line' && element.type !== 'polyline') ||
-      (element.type === 'polyline' && element.hatch)
-    )
-      return [element];
-    const raw =
-      element.type === 'line'
-        ? [
-            { x: element.x1, y: element.y1 },
-            { x: element.x2, y: element.y2 },
-          ]
-        : element.points;
+    // Only the freehand pencil is erasable. Lines, straightened segments and
+    // geometric contours remain intact even when they use the same brush/color.
+    if (element.type !== 'polyline' || !element.freehand || element.hatch) return [element];
+    const raw = element.points;
     const r = radius + drawingStrokeWidth(element) / 2;
     const xs = raw.map((p) => p.x),
       ys = raw.map((p) => p.y);
@@ -142,7 +143,7 @@ export function eraseDrawingStrokes(
       if (current.length && !same(current.at(-1)!, a)) finish();
       if (!current.length) current.push(a);
       current.push(b);
-      if (current.length === 1200) {
+      if (current.length === 600) {
         finish();
         current = [b];
       }
@@ -167,18 +168,15 @@ export function eraseDrawingStrokes(
     finish();
     if (!touched) return [element];
     changed = true;
-    return fragments.map((points, i): DrawingElement =>
-      element.type === 'line'
-        ? {
-            ...element,
-            id: i ? newId() : element.id,
-            x1: points[0]!.x,
-            y1: points[0]!.y,
-            x2: points.at(-1)!.x,
-            y2: points.at(-1)!.y,
-          }
-        : { ...element, id: i ? newId() : element.id, freehand: false, points },
-    );
+    return fragments.map((points, i): DrawingElement => ({
+      ...element,
+      id: i ? newId() : element.id,
+      // Repeated inner vertices encode the flattened contour exactly using
+      // the existing freehand format. This preserves both shape and pencil
+      // identity for later erasing, reopening, copying and offline sync.
+      freehand: true,
+      points: points.flatMap((p, index) => (index > 0 && index < points.length - 1 ? [p, p] : [p])),
+    }));
   });
   return changed ? output : elements;
 }

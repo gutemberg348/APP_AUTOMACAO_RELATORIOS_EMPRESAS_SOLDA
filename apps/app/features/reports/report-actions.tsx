@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -23,7 +23,7 @@ import { useConnectivity } from '../../stores/connectivity';
 
 export interface ReportActionControls {
   report?: Report;
-  save?(): Promise<Report | undefined>;
+  save?(): Promise<Report | 'local' | undefined>;
   hasChanges?: boolean;
   busy?: boolean;
   creating?: boolean;
@@ -53,17 +53,21 @@ export function ReportActions({
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<unknown>();
   const [scheduled, setScheduled] = useState(false);
+  const [pdfStage, setPdfStage] = useState('');
+  const [canCancelPdf, setCanCancelPdf] = useState(false);
+  const pdfController = useRef<AbortController | undefined>(undefined);
   const actionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(
     () => () => {
       if (actionTimer.current) clearTimeout(actionTimer.current);
+      pdfController.current?.abort();
     },
     [],
   );
   const can = (permission: string) => user.permissions.includes(permission);
   const update = async (saved: Report) => {
     client.setQueryData(['report', saved.id], saved);
-    await Promise.all(
+    void Promise.all(
       ['reports', 'dashboard', 'report-autofill'].map((key) =>
         client.invalidateQueries({ queryKey: [key] }),
       ),
@@ -71,7 +75,12 @@ export function ReportActions({
   };
   const operation = useMutation({
     onMutate: () => onBusyChange?.(true),
-    onSettled: () => onBusyChange?.(false),
+    onSettled: () => {
+      onBusyChange?.(false);
+      setPdfStage('');
+      setCanCancelPdf(false);
+      pdfController.current = undefined;
+    },
     onError: (error) => {
       onError?.(error);
       setPending(undefined);
@@ -83,9 +92,17 @@ export function ReportActions({
     },
     mutationFn: async ({ action, confirmed }: { action: Action; confirmed?: Report }) => {
       setMessage('');
+      if (action === 'download' || action === 'share')
+        setPdfStage('Salvando e preparando o relatório…');
       let saved =
         confirmed ??
-        (save && (hasChanges || !report || !report.number.trim()) ? await save() : report);
+        (save && (action === 'save' || hasChanges || !report || !report.number.trim())
+          ? await save()
+          : report);
+      if (saved === 'local') {
+        setMessage('Salvo no telefone. Será sincronizado quando a internet voltar.');
+        return;
+      }
       if (!saved) return;
       if (!confirmed && ['download', 'share', 'send', 'approve'].includes(action)) {
         const warnings = reportReviewWarnings(saved);
@@ -121,6 +138,7 @@ export function ReportActions({
         await update(saved);
       }
       if (action === 'download' || action === 'share') {
+        setPdfStage('Preparando o PDF… Relatórios com muitas fotos podem levar mais tempo.');
         if (saved.status === 'APPROVED') {
           saved = await api<Report>(
             '/reports/' + saved.id + '/pdf',
@@ -128,10 +146,25 @@ export function ReportActions({
           );
           await update(saved);
         }
+        pdfController.current = new AbortController();
+        setCanCancelPdf(true);
         const file = await downloadReportPdf(
           saved.id,
           saved.status !== 'APPROVED' && saved.status !== 'FINISHED',
           action === 'share',
+          {
+            signal: pdfController.current.signal,
+            onProgress: (stage) => {
+              setPdfStage(
+                stage === 'download'
+                  ? 'Preparando e baixando o PDF… Aguarde a conclusão.'
+                  : stage === 'prepare'
+                    ? 'Preparando o arquivo no dispositivo…'
+                    : 'PDF pronto. Abrindo as opções para salvar ou compartilhar…',
+              );
+              if (stage === 'open') setCanCancelPdf(false);
+            },
+          },
         );
         if (file) {
           setPending(undefined);
@@ -190,13 +223,28 @@ export function ReportActions({
           {message}
         </Text>
       )}
+      {!!pdfStage && (
+        <View style={{ gap: 10 }} accessibilityLiveRegion="polite">
+          <View style={[styles.row, { gap: 10 }]}>
+            <ActivityIndicator color={t.colors.blue} />
+            <Text style={[styles.muted, { flex: 1 }]}>{pdfStage}</Text>
+          </View>
+          {canCancelPdf && (
+            <Button
+              title="Cancelar download"
+              variant="ghost"
+              onPress={() => pdfController.current?.abort()}
+            />
+          )}
+        </View>
+      )}
       <View style={[styles.row, { gap: 10 }]}>
         {!!save && (
           <Button
             title={online ? 'Salvar' : 'Salvar no telefone'}
             icon="save"
             secondary
-            disabled={working || (!!report && !hasChanges)}
+            disabled={working || (online && !!report && !hasChanges)}
             busy={operation.isPending && operation.variables?.action === 'save'}
             onPress={() => operation.mutate({ action: 'save' })}
           />
@@ -217,7 +265,9 @@ export function ReportActions({
             title="Enviar"
             icon="send"
             disabled={working || !online}
-            busy={operation.isPending && operation.variables?.action === 'send'}
+            busy={
+              operation.isPending && ['send', 'share'].includes(operation.variables?.action ?? '')
+            }
             onPress={() => setSendOptions(true)}
           />
         )}

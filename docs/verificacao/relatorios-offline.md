@@ -59,3 +59,14 @@ O APK é disponibilizado em `artifacts/android/weldcosta-release.apk`.
 - O mesmo teste verifica prévias do relatório sincronizado sem rede, envio automático de rascunho fechado e conflito sem sobrescrever o servidor antes da confirmação.
 
 O APK não foi compilado nem validado em aparelho físico nesta verificação. Nenhuma implantação ou alteração no banco de produção foi executada.
+
+## Confirmação de salvamento e responsáveis sem internet — 05/11/2026
+
+- O botão final de salvar confirma no próprio card quando a gravação local termina. Salvar offline retorna um resultado próprio, sem exigir um relatório já criado no servidor. A confirmação também cobre perda de conexão durante o envio após a gravação local.
+- O salvamento manual indica andamento; o aviso no início do formulário mostra o horário da última gravação. Falhas reais de armazenamento exibem orientação simples e retiram a mensagem de sucesso.
+- A lista calcula a situação pelos rascunhos atuais: não mantém “Tudo sincronizado” quando há preenchimentos pendentes. Falta de internet não aparece como pendência de correção.
+- A preparação automática/manual inclui pessoas e assinaturas para quem tem acesso à lista de pessoas. A busca offline funciona por nome, empresa ou registro, com paginação e filtro de disponibilidade, isolada por conta.
+- Sem pessoas guardadas, a janela orienta a preencher os responsáveis diretamente no relatório. O cadastro geral de pessoas fica disponível com conexão. Mensagens de conexão não expõem “API” ou endereço do servidor.
+- Validação desta revisão: 36 testes de cache de pessoas, preparação, fila e sincronização; TypeScript, lint e exportação web. Interface real no navegador com rede interrompida: selecionar pessoa preparada, salvar com confirmação no final, reabrir o rascunho e recuperar o responsável, pesquisar sem resultado e simular falta de espaço seguida de nova tentativa bem-sucedida. Armazenamento real do navegador e API simulada; aparelho físico não validado.
+
+Esta revisão altera o cliente. Para o APK, gere e instale a atualização; a API não precisa de alteração adicional. O painel web exige nova publicação para receber o mesmo comportamento.

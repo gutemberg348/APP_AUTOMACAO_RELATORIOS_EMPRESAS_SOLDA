@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import request from 'supertest';
 import sharp from 'sharp';
+import puppeteer from 'puppeteer-core';
 import { reportTypeCodes } from '@weldcosta/shared';
 import { app } from '../../src/app';
 import { prisma } from '../../src/prisma/client';
@@ -207,6 +208,42 @@ it.each(reportTypeCodes)(
       .attach('file', portrait, 'photo.jpg');
     expect(anotherUpload.status, JSON.stringify(anotherUpload.body)).toBe(201);
     expect((await new PdfService().preview(id)).subarray(0, 5).toString()).toBe('%PDF-');
+    // Exercise the actual approved POST -> GET -> share/download again route.
+    // Different service instances must reuse bytes, without serving a preview or
+    // a stale archived layout. The archive itself stays untouched.
+    await prisma.report.update({ where: { id }, data: { status: 'APPROVED' } });
+    await load();
+    const launch = vi.spyOn(puppeteer, 'launch');
+    try {
+      const generated = await request(app)
+        .post(`/reports/${id}/pdf`)
+        .set(auth())
+        .send({ version: saved.version });
+      expect(generated.status, JSON.stringify(generated.body)).toBe(200);
+      const final = await request(app).get(`/reports/${id}/pdf`).set(auth());
+      expect(final.status).toBe(200);
+      expect(final.headers['content-type']).toContain('application/pdf');
+      expect(final.body.subarray(0, 5).toString()).toBe('%PDF-');
+      const again = await request(app).get(`/reports/${id}/pdf`).set(auth());
+      expect(again.body).toEqual(final.body);
+      expect(launch).toHaveBeenCalledTimes(1);
+      const artifact = await prisma.reportPdf.findFirstOrThrow({
+        where: { reportId: id },
+        orderBy: { version: 'desc' },
+      });
+      expect(await storage.get(artifact.filePath)).toEqual(final.body);
+      await prisma.report.update({
+        where: { id },
+        data: { title: 'CHANGED PDF ' + code, version: { increment: 1 } },
+      });
+      expect((await request(app).get(`/reports/${id}/pdf`).set(auth())).status).toBe(200);
+      expect(launch).toHaveBeenCalledTimes(2);
+      await prisma.report.update({ where: { id }, data: { status: 'DRAFT' } });
+      expect((await request(app).get(`/reports/${id}/pdf`).set(auth())).status).toBe(404);
+      expect((await request(app).get(`/reports/${id}/pdf`)).status).toBe(401);
+    } finally {
+      launch.mockRestore();
+    }
   },
   90000,
 );

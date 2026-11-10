@@ -30,48 +30,107 @@ async function request<T>(
   token?: string,
   binary = false,
 ): Promise<T> {
-  let response: Response;
+  const pdf = /^\/reports\/[^/]+\/pdf(?:\/preview)?$/.test(path);
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    init.body instanceof FormData ? 60000 : 12000,
-  );
-  try {
-    if (!useConnectivity.getState().online && path !== '/health') throw new Error('OFFLINE');
-    const fetchRequest = Platform.OS === 'web' ? globalThis.fetch : expoFetch;
-    response = await fetchRequest(`${apiUrl}${path}`, {
-      ...init,
-      signal: init.signal ?? controller.signal,
-      headers: {
-        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...init.headers,
+  let expired = false;
+  const cancel = () => controller.abort();
+  if (init.signal?.aborted) cancel();
+  init.signal?.addEventListener('abort', cancel, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const interrupted = new Promise<never>((_, reject) => {
+    const abort = () =>
+      reject(
+        new ApiError(
+          0,
+          expired ? (pdf ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR') : 'REQUEST_CANCELLED',
+          expired
+            ? pdf
+              ? 'O PDF demorou mais que o esperado. Tente novamente; seu relatório continua salvo.'
+              : 'A operação demorou mais que o esperado. Tente novamente.'
+            : 'Operação cancelada. Seu relatório continua salvo.',
+        ),
+      );
+    controller.signal.addEventListener('abort', abort, { once: true });
+    if (controller.signal.aborted) abort();
+    timer = setTimeout(
+      () => {
+        expired = true;
+        controller.abort();
       },
-    });
-  } catch {
+      pdf ? 180000 : init.body instanceof FormData ? 60000 : 12000,
+    );
+  });
+  try {
+    // Bound both the response headers AND the body. Some native transports do not
+    // reject a stalled body read on abort, so also race the complete operation.
+    return await Promise.race([
+      interrupted,
+      (async () => {
+        if (controller.signal.aborted) return await interrupted;
+        if (!useConnectivity.getState().online && path !== '/health') throw new Error('OFFLINE');
+        const fetchRequest = Platform.OS === 'web' ? globalThis.fetch : expoFetch;
+        const response = await fetchRequest(`${apiUrl}${path}`, {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...init.headers,
+          },
+        });
+        if (binary && response.ok) {
+          if (pdf && !response.headers.get('content-type')?.includes('application/pdf'))
+            throw new ApiError(
+              502,
+              'INVALID_PDF',
+              'O servidor não entregou o PDF. Tente baixar novamente.',
+            );
+          const blob = await response.blob();
+          if (pdf && !blob.size)
+            throw new ApiError(
+              502,
+              'INVALID_PDF',
+              'O PDF recebido está vazio. Tente baixar novamente.',
+            );
+          return blob as T;
+        }
+        let body: ApiResponse<T>;
+        try {
+          body = (await response.json()) as ApiResponse<T>;
+        } catch {
+          throw new ApiError(
+            response.status,
+            'INVALID_RESPONSE',
+            pdf
+              ? 'Não foi possível receber o PDF. Tente novamente em instantes.'
+              : 'O servidor retornou uma resposta inválida.',
+          );
+        }
+        if (!body.success)
+          throw new ApiError(
+            response.status,
+            body.error.code,
+            body.error.message,
+            body.error.details,
+          );
+        return body.data;
+      })(),
+    ]);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.code === 'NETWORK_ERROR') useConnectivity.setState({ online: false });
+      throw error;
+    }
     useConnectivity.setState({ online: false });
     throw new ApiError(
       0,
       'NETWORK_ERROR',
-      'Não foi possível conectar à API. Confira sua conexão e o endereço do servidor.',
+      'Sem conexão no momento. Confira sua internet e tente novamente quando ela voltar.',
     );
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
+    init.signal?.removeEventListener('abort', cancel);
   }
-  if (binary && response.ok) return (await response.blob()) as T;
-  let body: ApiResponse<T>;
-  try {
-    body = (await response.json()) as ApiResponse<T>;
-  } catch {
-    throw new ApiError(
-      response.status,
-      'INVALID_RESPONSE',
-      'O servidor retornou uma resposta inválida.',
-    );
-  }
-  if (!body.success)
-    throw new ApiError(response.status, body.error.code, body.error.message, body.error.details);
-  return body.data;
 }
 let refreshPending: Promise<AuthSession> | null = null;
 export async function api<T>(
@@ -140,4 +199,4 @@ export const jsonBody = (method: string, data: unknown): RequestInit => ({
   method,
   body: JSON.stringify(data),
 });
-export const apiBlob = (path: string) => api<Blob>(path, {}, true, true);
+export const apiBlob = (path: string, init: RequestInit = {}) => api<Blob>(path, init, true, true);

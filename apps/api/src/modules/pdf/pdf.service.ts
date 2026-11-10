@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { pdfRenderCache, pdfRenderKey } from './pdf-render-cache';
 import { reportCreateSchema, drawingDataSchema } from '@weldcosta/shared';
 import { photoWithAnnotations, photoForPdf } from './photo-annotations';
 import { reportForPdf } from './pdf-snapshot';
@@ -71,8 +72,42 @@ export class PdfService implements PdfProvider {
       'Chrome/Chromium não está disponível no servidor para gerar o PDF.',
     );
   }
-  private async render(report: PdfReport, final: boolean) {
-    report = reportForPdf(report);
+  private render(report: PdfReport, final: boolean) {
+    const printable = reportForPdf(report);
+    return pdfRenderCache.run(pdfRenderKey(printable, final), async () => {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new AppError(
+              503,
+              'PDF_TIMEOUT',
+              'O PDF demorou mais que o esperado. Tente novamente; o relatório continua salvo.',
+            ),
+          );
+          controller.abort();
+        }, 120000);
+      });
+      try {
+        return await Promise.race([
+          deadline,
+          this.renderDocument(printable, final, controller.signal),
+        ]);
+      } catch (cause) {
+        if (cause instanceof Error && cause.name === 'TimeoutError')
+          throw new AppError(
+            503,
+            'PDF_TIMEOUT',
+            'Não foi possível concluir o PDF a tempo. Tente novamente; o relatório continua salvo.',
+          );
+        throw cause;
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  }
+  private async renderDocument(report: PdfReport, final: boolean, signal: AbortSignal) {
     reportCreateSchema.pick({ number: true }).parse({ number: report.number });
     const template = renderers[report.reportType.code];
     if (!template)
@@ -88,6 +123,7 @@ export class PdfService implements PdfProvider {
     const invalid = (path: (string | number)[], message: string): never => {
       throw new AppError(422, 'VALIDATION_ERROR', message, [{ code: 'custom', path, message }]);
     };
+    const imageDrawings = new Map<string, number>();
     for (const [index, drawing] of report.drawings.entries()) {
       const parsed = drawingDataSchema.safeParse(drawing.data);
       if (!parsed.success)
@@ -100,6 +136,8 @@ export class PdfService implements PdfProvider {
             path: ['drawings', index, 'data', ...issue.path],
           })),
         );
+      for (const element of parsed.data.elements)
+        if (element.type === 'image') imageDrawings.set(element.mediaKey, index);
       for (const [elementIndex, element] of parsed.data.elements.entries())
         if (element.type === 'image' && !availableImages.has(element.mediaKey))
           invalid(
@@ -109,6 +147,7 @@ export class PdfService implements PdfProvider {
     }
     report.signatureImages = {};
     for (const [index, signer] of report.signatures.entries()) {
+      signal.throwIfAborted();
       // The client signs the printed document; saved assets remain in the app.
       if (signer.role === 'CLIENT') continue;
       if (signer.signatureImagePath) {
@@ -123,13 +162,8 @@ export class PdfService implements PdfProvider {
       }
     }
     for (const media of report.media) {
-      const drawingIndex = report.drawings.findIndex((drawing) =>
-        drawingDataSchema
-          .parse(drawing.data)
-          .elements.some(
-            (e) => e.type === 'image' && e.mediaKey === (media.clientUploadId ?? media.id),
-          ),
-      );
+      signal.throwIfAborted();
+      const drawingIndex = imageDrawings.get(media.clientUploadId ?? media.id) ?? -1;
       const pointIndex = report.points.findIndex((point) => point.id === media.reportPointId);
       const path =
         drawingIndex >= 0
@@ -163,7 +197,10 @@ export class PdfService implements PdfProvider {
         );
       }
     }
+    signal.throwIfAborted();
     const browser = await puppeteer.launch({
+      signal,
+      timeout: 30000,
       executablePath: await this.executable(),
       headless: true,
       args:
@@ -172,7 +209,9 @@ export class PdfService implements PdfProvider {
           : [],
     });
     try {
+      signal.throwIfAborted();
       const page = await browser.newPage();
+      page.setDefaultTimeout(30000);
       await page.setJavaScriptEnabled(false);
       await page.setRequestInterception(true);
       page.on('request', (request) => {
@@ -185,6 +224,7 @@ export class PdfService implements PdfProvider {
       await page.evaluate(paginateEvs);
       return Buffer.from(
         await page.pdf({
+          timeout: 60000,
           format: 'A4',
           printBackground: true,
           preferCSSPageSize: true,
@@ -195,7 +235,13 @@ export class PdfService implements PdfProvider {
         }),
       );
     } finally {
-      await browser.close();
+      // Do not let a stuck Chromium shutdown keep the download spinning forever.
+      const kill = setTimeout(() => browser.process()?.kill('SIGKILL'), 3000);
+      try {
+        await browser.close();
+      } finally {
+        clearTimeout(kill);
+      }
     }
   }
   async preview(id: string) {

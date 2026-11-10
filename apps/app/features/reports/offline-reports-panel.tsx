@@ -24,11 +24,18 @@ export function OfflineReportsPanel() {
   const userId = useAuth((state) => state.session?.user.id);
   const sync = useOfflineSynchronization();
   const preparing = sync.accountId === userId && sync.busy;
-  const message = sync.accountId === userId ? sync.message : '';
+  const preparationMessage = sync.accountId === userId ? sync.message : '';
   const syncError = sync.accountId === userId ? sync.error : undefined;
   const client = useQueryClient();
   const [discarding, setDiscarding] = useState<LocalReportDraft>();
   const entries = Object.values(drafts).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const message = preparing
+    ? preparationMessage
+    : entries.length
+      ? `${entries.length} ${entries.length === 1 ? 'relatório salvo' : 'relatórios salvos'} neste telefone. ${online ? 'Aguardando sincronização.' : 'Serão sincronizados quando a internet voltar.'}`
+      : !online
+        ? 'Sem internet. Os dados já guardados continuam disponíveis neste telefone.'
+        : preparationMessage;
   return (
     <Card>
       <PanelHeader
@@ -40,7 +47,9 @@ export function OfflineReportsPanel() {
         }
         icon="save"
       />
-      <Notice error={storageError || syncError ? new Error(storageError || syncError) : error} />
+      <Notice
+        error={storageError || (online && syncError) ? new Error(storageError || syncError) : error}
+      />
       {!!message && (
         <Text style={styles.muted} accessibilityLiveRegion="polite">
           {message}
@@ -76,14 +85,20 @@ export function OfflineReportsPanel() {
           <Text style={styles.muted}>
             {syncing.includes(draft.id)
               ? 'Sincronizando…'
-              : draft.error
+              : draft.error && draft.error.code !== 'NETWORK_ERROR'
                 ? 'Precisa de atenção · salvo no telefone'
                 : 'Aguardando sincronização · salvo no telefone'}
           </Text>
-          {draft.error && <Notice error={new Error(draft.error.message)} />}
+          {draft.error && draft.error.code !== 'NETWORK_ERROR' && (
+            <Notice error={new Error(draft.error.message)} />
+          )}
           <View style={[styles.row, { flexWrap: 'wrap' }]}>
             <Button
-              title={draft.error ? 'Abrir e corrigir' : 'Continuar preenchimento'}
+              title={
+                draft.error && draft.error.code !== 'NETWORK_ERROR'
+                  ? 'Abrir e corrigir'
+                  : 'Continuar preenchimento'
+              }
               small
               secondary
               disabled={syncing.includes(draft.id)}

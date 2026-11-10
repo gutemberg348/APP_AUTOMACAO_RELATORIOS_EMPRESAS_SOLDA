@@ -85,7 +85,7 @@ import {
   type LocalReportDraft,
 } from './offline-report-store';
 import { newOfflineMutationId, syncLocalReport, syncWaitingReports } from './offline-report-sync';
-import { useConnectivity } from '../../stores/connectivity';
+import { useConnectivity, offlineStorageFailure } from '../../stores/connectivity';
 import { offlineDisk } from '../../services/offline-disk';
 import { ReportSummary } from './report-summary';
 const resultOptions: SelectOption[] = [
@@ -394,7 +394,9 @@ function ReportFormContent({
       useConnectivity.setState({ storageError: undefined });
       setLocallySaved(true);
       setLocalMessage(
-        'Salvo neste telefone. ' +
+        'Salvo neste telefone às ' +
+          new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) +
+          '. ' +
           (useConnectivity.getState().online
             ? 'Pronto para sincronizar.'
             : 'Será enviado quando houver internet.'),
@@ -463,8 +465,12 @@ function ReportFormContent({
         void saveOnPhoneRef.current(getValues()).catch(showLocalError);
     });
     function showLocalError(cause: unknown) {
+      offlineStorageFailure(cause);
       setLocallySaved(false);
-      setError(cause);
+      setLocalMessage(
+        'Não foi possível guardar as últimas alterações. Confira o aviso e salve novamente.',
+      );
+      setError(new Error(useConnectivity.getState().storageError));
     }
     return () => {
       mountedOfflineReports.delete(localId);
@@ -483,7 +489,14 @@ function ReportFormContent({
     if (!changed || !hasPhotoDrafts || saving || syncingLocally) return;
     setLocallySaved(false);
     clearTimeout(localTimer.current);
-    void saveOnPhoneRef.current(getValues()).catch((cause) => setError(cause));
+    void saveOnPhoneRef.current(getValues()).catch((cause) => {
+      offlineStorageFailure(cause);
+      setLocallySaved(false);
+      setLocalMessage(
+        'Não foi possível guardar as últimas alterações. Confira o aviso e salve novamente.',
+      );
+      setError(new Error(useConnectivity.getState().storageError));
+    });
   }, [photoDrafts, hasPhotoDrafts, saving, syncingLocally, getValues]);
   const watchedPoints = useWatch({ control, name: 'points' });
   const watchedDrawings = useWatch({ control, name: 'drawings' });
@@ -801,6 +814,7 @@ function ReportFormContent({
     onMutate: () => {
       Keyboard.dismiss();
       setSaving(true);
+      setLocalMessage('Salvando neste telefone…');
       if (hasPhotoDrafts)
         setTransferProgress({
           message: 'Salvando dados do relatório…',
@@ -844,12 +858,31 @@ function ReportFormContent({
       setTransferProgress(undefined);
     },
   });
-  const save = async () => {
+  const save = async (): Promise<Report | 'local' | undefined> => {
     if (!useConnectivity.getState().online) {
-      await saveOnPhone(getValues()).catch(showSaveError);
+      if (localContext.current.saving) return;
+      Keyboard.dismiss();
+      setSaving(true);
+      try {
+        await saveOnPhone(getValues());
+        setError(undefined);
+        setSaveIssues([]);
+        setIssuesOpen(false);
+        setFailureOpen(false);
+        return 'local';
+      } catch (cause) {
+        offlineStorageFailure(cause);
+        setLocallySaved(false);
+        setLocalMessage(
+          'Não foi possível guardar as últimas alterações. Confira o aviso e salve novamente.',
+        );
+        showSaveError(new Error(useConnectivity.getState().storageError));
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    let saved: Report | undefined;
+    let saved: Report | 'local' | undefined;
     clearErrors();
     await handleSubmit(
       async (data) => {
@@ -884,7 +917,11 @@ function ReportFormContent({
           showIssues(validationIssues);
           return;
         }
-        saved = await mutation.mutateAsync(data).catch(() => undefined);
+        saved = await mutation
+          .mutateAsync(data)
+          .catch((cause) =>
+            (cause as { code?: string })?.code === 'NETWORK_ERROR' ? ('local' as const) : undefined,
+          );
       },
       (fieldErrors) => {
         const issues = reportFormIssues(fieldErrors);
@@ -922,7 +959,7 @@ function ReportFormContent({
                 ? 'Há um rascunho salvo neste telefone aguardando sincronização.'
                 : 'As alterações e fotos serão guardadas neste telefone enquanto você preenche.')}
           </Text>
-          {!!localEntry?.error && (
+          {!!localEntry?.error && localEntry.error.code !== 'NETWORK_ERROR' && (
             <View style={{ gap: 8 }}>
               <Notice
                 error={new Error(localEntry.error.message)}
@@ -965,6 +1002,7 @@ function ReportFormContent({
             secondary
             icon="save"
             disabled={editingBusy}
+            busy={saving || syncingLocally}
             onPress={() => void save()}
           />
           {!online && (

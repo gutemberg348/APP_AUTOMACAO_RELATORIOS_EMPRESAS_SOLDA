@@ -1,7 +1,2 @@
-offline
-
-3 duplas de fotos do ensaio 
-
 se tiver em qualquer outro q nao seja o selecionar ter presionnar uns 2.5s pq to la linha ou no endireitar e as vezes pego da ponta para fazer a linha ja seleciona
 
-escolher onde o ponto vai ficar no ponto em cima em baixo ao lado  print selecionar o numero e mostra onde ele vai ficar arrastando ao redor da bolinha 100px  tipo soq menos 
