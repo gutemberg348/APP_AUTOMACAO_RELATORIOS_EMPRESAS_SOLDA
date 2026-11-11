@@ -1,7 +1,8 @@
 import { reportSections, reportTypeCodes, type ReportSection } from '@weldcosta/shared';
 
 export type ReportFormSection = ReportSection & {
-  content?: 'points' | 'discontinuities' | 'inspectionRecords' | 'signatures' | 'drawings';
+  content?:
+    'points' | 'discontinuities' | 'inspectionRecords' | 'signatures' | 'drawings' | 'testPhotos';
 };
 
 // The model defines the complete form. Company/project defaults only supply values.
@@ -20,6 +21,9 @@ export function reportFormSections(code: string, base: ReportSection[]): ReportF
       ? [{ title: 'Registros de inspeção', fields: [], content: 'inspectionRecords' as const }]
       : []),
     { title: 'Desenho técnico', fields: [], content: 'drawings' },
+    ...(code === 'LP'
+      ? [{ title: 'Fotos do ensaio', fields: [], content: 'testPhotos' as const }]
+      : []),
     ...(reportTypeCodes.some((registered) => registered === code)
       ? [
           {

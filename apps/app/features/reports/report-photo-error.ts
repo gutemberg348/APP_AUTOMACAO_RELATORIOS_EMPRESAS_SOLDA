@@ -22,7 +22,13 @@ export function photoSaveReason(cause: unknown) {
 export class ReportPhotoSaveError extends Error {
   constructor(
     message: string,
-    public location: { pointNumber?: string; photoId?: string; drawing?: boolean; label: string },
+    public location: {
+      pointNumber?: string;
+      photoId?: string;
+      drawing?: boolean;
+      testPhotos?: boolean;
+      label: string;
+    },
     public code?: string,
   ) {
     super(message);

@@ -3,6 +3,7 @@ import { z, ZodError } from 'zod';
 import sharp from 'sharp';
 import {
   pointInputSchema,
+  lpWeldGroups,
   reportSignerSchema,
   reportNumberSchema,
   drawingDataSchema,
@@ -46,7 +47,7 @@ export const pdfAsIsSchema = z
             pointKey: z.string().max(100).nullable(),
             pointNumber: z.string().max(100).optional(),
             name: z.string().max(500),
-            sectionKey: z.enum(['drawing', 'photos']).default('photos'),
+            sectionKey: z.enum(['drawing', 'photos', 'test-photos']).default('photos'),
             caption: z.string().max(10000),
             annotations: z.unknown().optional(),
             fileIndex: z.number().int().min(0).max(99).nullable(),
@@ -426,7 +427,16 @@ export async function preparePdfAsIs(
     signatures,
     signatureImages,
   } as PdfReport);
-  for (const point of report.points) {
+  const printableGroups =
+    report.reportType.code === 'LP'
+      ? lpWeldGroups(report.points)
+      : report.points.map((point, index) => ({
+          index,
+          number: point.number,
+          memberIndexes: [index],
+        }));
+  for (const group of printableGroups) {
+    const point = { ...report.points[group.index]!, number: group.number };
     const data = point.data as Record<string, unknown> | null;
     if (!point.number.trim())
       warn(
@@ -440,7 +450,11 @@ export async function preparePdfAsIs(
       warn(
         `Ponto ${point.number}: leitura de espessura não informada ou inválida. As fotos serão incluídas; a leitura ficará vazia. Corrija em Pontos e fotos → Leitura.`,
       );
-    if (!report.media.some((m) => m.reportPointId === point.id))
+    if (
+      !report.media.some((m) =>
+        group.memberIndexes.some((index) => m.reportPointId === report.points[index]!.id),
+      )
+    )
       warn(
         `Ponto ${point.number}: sem foto disponível. Os dados do ponto serão incluídos sem imagem.`,
       );

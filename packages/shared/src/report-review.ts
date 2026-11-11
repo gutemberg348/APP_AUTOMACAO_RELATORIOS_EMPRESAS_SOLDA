@@ -1,3 +1,4 @@
+import { lpWeldGroups } from './lp-weld-groups';
 import { ZodError } from 'zod';
 import { reportSections } from './report-fields';
 import { isVisualWeldReport } from './enums';
@@ -50,7 +51,11 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
       warnings.push(`${label}: ${issue.message}`);
     }
   }
-  const points = report.points ?? [];
+  const sourcePoints = report.points ?? [];
+  const groups = report.reportType.code === 'LP' ? lpWeldGroups(sourcePoints) : undefined;
+  const points = groups
+    ? groups.map((group) => ({ ...sourcePoints[group.index]!, number: group.number }))
+    : sourcePoints;
   if (report.points && !points.length && report.reportType.code !== 'RDO')
     warnings.push('Nenhum ponto foi registrado nesta inspeção.');
   const numbered = (items: typeof points) => items.map((point) => point.number).join(', ');

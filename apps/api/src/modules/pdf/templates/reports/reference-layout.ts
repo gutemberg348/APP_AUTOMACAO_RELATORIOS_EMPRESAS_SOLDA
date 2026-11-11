@@ -1,5 +1,5 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
-import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg, lpWeldGroups } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, clientSignatureCell, type PdfReport } from './layout';
 export { chunks } from './evs';
@@ -218,28 +218,29 @@ export function photoRows(
   mode: 'LP' | 'TH' | 'RDO',
 ) {
   type Entry = { point?: PdfReport['points'][number]; image?: PdfReport['media'][number] };
-  const groups: Entry[][] = report.points.map((point) => {
-    const media = report.media.filter((m) => m.reportPointId === point.id);
+  const pointGroups =
+    mode === 'LP'
+      ? lpWeldGroups(report.points)
+      : report.points.map((point, index) => ({
+          index,
+          number: point.number,
+          memberIndexes: [index],
+        }));
+  const entries: Entry[] = pointGroups.flatMap<Entry>((group) => {
+    const point = { ...report.points[group.index]!, number: group.number };
+    const ids = new Set(group.memberIndexes.map((index) => report.points[index]!.id));
+    const media = report.media.filter(
+      (item) => ids.has(item.reportPointId!) && item.sectionKey !== 'test-photos',
+    );
+    // A real, ungrouped inspection still gets a placeholder when it has no photo.
+    // Otherwise pack actual photos consecutively, never reserve a second slot.
     return media.length ? media.map((image) => ({ point, image })) : [{ point, image: undefined }];
   });
-  const entries: Entry[] = [];
-  if (mode === 'LP') {
-    // Keep the two welds in the same columns as their successive inspection photos.
-    for (let i = 0; i < groups.length; i += 2) {
-      const left = groups[i]!;
-      const right = groups[i + 1] ?? [];
-      if (!right.length) {
-        entries.push(...left);
-        continue;
-      }
-      for (let j = 0; j < Math.max(left.length, right.length); j++) {
-        entries.push(left[j] ?? {}, right[j] ?? {});
-      }
-    }
-  } else entries.push(...groups.flat());
   entries.push(
     ...report.media
-      .filter((m) => !m.reportPointId && m.sectionKey !== 'drawing')
+      .filter(
+        (m) => !m.reportPointId && m.sectionKey !== 'drawing' && m.sectionKey !== 'test-photos',
+      )
       .map((image) => ({ point: undefined, image })),
   );
   let html = '';

@@ -1,5 +1,7 @@
 # Relatórios preenchidos pela obra e geração de PDF
 
+No **Líquido Penetrante**, a seção opcional **Fotos do ensaio** aparece após **Desenho técnico**. Permite selecionar várias imagens juntas, conferir/pintar, legendar e remover antes de salvar. No PDF, as imagens ficam em páginas próprias após todos os desenhos, com **até três fotos por folha**, na ordem da seleção. Sem fotos nessa seção, nenhuma folha é criada. As fotos das soldas continuam separadas. A fila offline e **Baixar como está** também preservam essa seção. Não exige migração de banco; atualize a API e o aplicativo/painel. Veja a [verificação da alteração](verificacao/lp-fotos-do-ensaio.md).
+
 Atualização de fotos: a mesma imagem pode ocupar os dois espaços do **mesmo ponto**. Em outro ponto ou relatório, a seleção é bloqueada. A galeria permite escolher as duas imagens juntas. Veja [regras e verificação de fotos](verificacao/fotos-mesmo-ponto.md).
 
 ## Preenchimento e edição

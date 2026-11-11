@@ -9,7 +9,7 @@ import type { LocalAsset } from '../../services/offline-files';
 
 export interface ReportPhotoDraft {
   annotations?: PhotoAnnotations;
-  sectionKey?: 'photos' | 'drawing';
+  sectionKey?: 'photos' | 'drawing' | 'test-photos';
   id: string;
   pointKey: string | null;
   pointNumber?: string;
@@ -91,7 +91,7 @@ export async function saveReportPhotos(
   const initial = useReportPhotoDrafts.getState().reports[nextKey]!;
   const total = initial.photos.length;
   let completed = 0;
-  let location: { pointNumber?: string; photoId?: string; drawing?: boolean; label: string } = {
+  let location: ReportPhotoSaveError['location'] = {
     label: 'Fotos do relatório',
   };
   const locateMedia = (id: string, action: string) => {
@@ -100,6 +100,7 @@ export async function saveReportPhotos(
     location = {
       pointNumber: number,
       drawing: media?.sectionKey === 'drawing',
+      testPhotos: media?.sectionKey === 'test-photos',
       label:
         action +
         (number ? ' · Ponto ' + number : '') +
@@ -170,6 +171,7 @@ export async function saveReportPhotos(
         pointNumber: pointNumber ?? photo.pointNumber,
         photoId: photo.id,
         drawing: photo.sectionKey === 'drawing',
+        testPhotos: photo.sectionKey === 'test-photos',
         label:
           'Enviar foto' + (pointNumber ? ' · Ponto ' + pointNumber : '') + ' · ' + photo.asset.name,
       };

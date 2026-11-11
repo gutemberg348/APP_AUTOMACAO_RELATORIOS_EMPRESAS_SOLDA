@@ -18,6 +18,7 @@ export function PointPhotos({
   pointId,
   persistedPointId,
   number,
+  bindingNumber,
   reportId,
   projectId,
   media,
@@ -25,13 +26,16 @@ export function PointPhotos({
   canRemove,
   onPickingChange,
   additional = false,
+  testPhotos = false,
   groupedWelds = false,
+  linkedPointIds,
   measurement = false,
 }: {
   draftKey: string;
   pointId: string | null;
   persistedPointId?: string;
   number?: string;
+  bindingNumber?: string;
   reportId?: string;
   projectId?: string;
   media: ReportMedia[];
@@ -39,7 +43,9 @@ export function PointPhotos({
   canRemove: boolean;
   onPickingChange(busy: boolean): void;
   additional?: boolean;
+  testPhotos?: boolean;
   groupedWelds?: boolean;
+  linkedPointIds?: string[];
   measurement?: boolean;
 }) {
   const { tokens: t, styles } = useTheme();
@@ -53,15 +59,23 @@ export function PointPhotos({
     editable: boolean;
   }>();
   const draft = useReportPhotoDrafts((state) => state.reports[draftKey] ?? emptyPhotoDrafts);
+  const inSection = (sectionKey?: string | null) =>
+    testPhotos ? sectionKey === 'test-photos' : sectionKey !== 'test-photos';
   const update = (
     change: Parameters<ReturnType<typeof useReportPhotoDrafts.getState>['update']>[1],
   ) => useReportPhotoDrafts.getState().update(draftKey, change);
+  const belongsToGroup = (key?: string | null) =>
+    key === pointId || (!!key && !!linkedPointIds?.includes(key));
   const pending = draft.photos.filter(
-    (photo) => photo.pointKey === pointId && photo.sectionKey !== 'drawing',
+    (photo) =>
+      belongsToGroup(photo.pointKey) &&
+      photo.sectionKey !== 'drawing' &&
+      inSection(photo.sectionKey),
   );
   const existing = media.filter(
     (photo) =>
-      photo.reportPointId === pointId &&
+      belongsToGroup(photo.reportPointId) &&
+      inSection(photo.sectionKey) &&
       !photo.clientUploadId?.startsWith('drawing-image-') &&
       !draft.removedIds.includes(photo.id),
   );
@@ -93,9 +107,9 @@ export function PointPhotos({
       )}
       {!additional && (
         <Text style={[styles.muted, { fontSize: 12 }]}>
-          {count}/2 fotos sugeridas · Duas imagens por linha no PDF. Você pode finalizar mesmo sem
-          fotos. Escolha as duas juntas na galeria. A mesma foto pode ocupar os dois espaços deste
-          ponto.
+          {groupedWelds
+            ? `${count} foto(s). Adicione uma ou várias fotos deste grupo. O PDF coloca a próxima foto ao lado, sem exigir uma segunda foto.`
+            : `${count}/2 fotos sugeridas · Duas imagens por linha no PDF. Você pode finalizar mesmo sem fotos. Escolha as duas juntas na galeria. A mesma foto pode ocupar os dois espaços deste ponto.`}
         </Text>
       )}
       <Notice error={error} />
@@ -108,7 +122,11 @@ export function PointPhotos({
         </Text>
       )}
       {editable && !additional && count === 0 && (
-        <Button title="Selecionar as duas fotos" icon="image" onPress={openSource} />
+        <Button
+          title={groupedWelds ? 'Selecionar fotos' : 'Selecionar as duas fotos'}
+          icon="image"
+          onPress={openSource}
+        />
       )}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {existing.map((photo, index) => (
@@ -220,7 +238,7 @@ export function PointPhotos({
           </View>
         ))}
         {!additional &&
-          Array.from({ length: Math.max(0, 2 - count) }, (_, index) => (
+          Array.from({ length: Math.max(0, (groupedWelds ? 1 : 2) - count) }, (_, index) => (
             <Pressable
               key={'empty-' + index}
               accessibilityRole="button"
@@ -252,7 +270,7 @@ export function PointPhotos({
             </Pressable>
           ))}
       </View>
-      {editable && !additional && count === 1 && pending.length === 1 && (
+      {editable && !additional && !groupedWelds && count === 1 && pending.length === 1 && (
         <Button
           title="Usar esta foto também ao lado"
           small
@@ -273,16 +291,24 @@ export function PointPhotos({
       {!existing.length && !pending.length && (
         <Text style={styles.muted}>
           {additional
-            ? 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
+            ? testPhotos
+              ? 'Opcional. Escolha várias fotos do ensaio, sem vinculá-las aos pontos. O PDF organiza três fotos por folha após os desenhos. Sem fotos, essas folhas não aparecem.'
+              : 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
             : groupedWelds
               ? 'Uma foto pode mostrar várias soldas. Informe todas na ficha; as fotos continuam vinculadas ao grupo ao editar sua identificação.'
               : 'Adicione as fotos deste ponto aqui. O vínculo acompanha o número do ponto.'}
         </Text>
       )}
-      {editable && (additional || count >= 2) && (
+      {editable && (additional || count >= (groupedWelds ? 1 : 2)) && (
         <View style={styles.row}>
           <Button
-            title={additional ? 'Adicionar foto adicional' : 'Adicionar outra foto'}
+            title={
+              testPhotos
+                ? 'Selecionar fotos do ensaio'
+                : additional
+                  ? 'Adicionar foto adicional'
+                  : 'Adicionar outra foto'
+            }
             small
             secondary
             icon="camera"
@@ -293,11 +319,20 @@ export function PointPhotos({
       <MediaSourcePicker
         visible={sourceOpen}
         contextLabel={
-          additional
-            ? 'Adicionar imagens complementares'
-            : (groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto ') + number
+          testPhotos
+            ? 'Fotos do ensaio · seleção múltipla'
+            : additional
+              ? 'Adicionar imagens complementares'
+              : (groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto ') + number
         }
-        maxSelections={additional ? 1 : Math.max(1, 2 - count)}
+        maxSelections={testPhotos || groupedWelds ? 100 : additional ? 1 : Math.max(1, 2 - count)}
+        selectionDescription={
+          testPhotos
+            ? 'Escolha várias fotos na ordem desejada. Você pode adicionar mais depois. O PDF divide automaticamente em três fotos por folha.'
+            : groupedWelds
+              ? 'Selecione uma ou várias fotos das soldas desta ficha. Não é obrigatório adicionar duas fotos.'
+              : undefined
+        }
         onClose={closeSource}
         onSelect={async (asset, onProgress) => {
           if (asset.size && asset.size > 10 * 1024 * 1024) {
@@ -321,7 +356,8 @@ export function PointPhotos({
               {
                 id,
                 pointKey: pointId,
-                pointNumber: pointId ? number : undefined,
+                sectionKey: testPhotos ? 'test-photos' : 'photos',
+                pointNumber: pointId ? (bindingNumber ?? number) : undefined,
                 asset: localAsset,
                 caption: '',
                 sha256,
@@ -335,6 +371,7 @@ export function PointPhotos({
           media.some(
             (photo) =>
               !photo.reportPointId &&
+              inSection(photo.sectionKey) &&
               (draft.captionEdits?.[photo.id] !== undefined ||
                 draft.annotationEdits?.[photo.id] !== undefined ||
                 draft.removedIds.includes(photo.id)),
@@ -345,8 +382,12 @@ export function PointPhotos({
         )}
       <ConfirmDialog
         visible={!!removing}
-        title="Remover a foto deste ponto?"
-        description="A foto será removida quando você salvar. Os resultados do ponto serão preservados."
+        title={testPhotos ? 'Remover esta foto do ensaio?' : 'Remover a foto deste ponto?'}
+        description={
+          testPhotos
+            ? 'A foto sairá das páginas de Fotos do ensaio quando você salvar o relatório.'
+            : 'A foto será removida quando você salvar. Os resultados do ponto serão preservados.'
+        }
         confirmLabel="Marcar para remover"
         danger
         onClose={() => setRemoving(undefined)}

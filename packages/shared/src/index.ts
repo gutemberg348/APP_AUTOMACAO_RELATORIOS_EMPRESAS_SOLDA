@@ -3,6 +3,7 @@ export * from './permissions';
 export * from './schemas';
 export * from './report-fields';
 export * from './lp-options';
+export * from './lp-weld-groups';
 export * from './report-defaults';
 export * from './types';
 export * from './drawings';

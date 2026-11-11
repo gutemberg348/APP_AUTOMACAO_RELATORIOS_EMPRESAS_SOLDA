@@ -30,7 +30,7 @@ export async function prepareCurrentReportPdf(
     pointKey: string | null;
     pointNumber?: string;
     name: string;
-    sectionKey: 'photos' | 'drawing';
+    sectionKey: 'photos' | 'drawing' | 'test-photos';
     caption: string;
     annotations?: unknown;
     fileIndex: number | null;

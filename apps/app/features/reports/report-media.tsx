@@ -98,11 +98,13 @@ export function ReportMediaPanel({ report }: { report: Report }) {
                 <Text style={styles.label}>
                   {item.sectionKey === 'drawing'
                     ? 'Croqui anexado'
-                    : item.reportPointId
-                      ? 'Ponto / solda ' +
-                        (report.points?.find((point) => point.id === item.reportPointId)?.number ??
-                          '')
-                      : 'Foto adicional'}
+                    : item.sectionKey === 'test-photos'
+                      ? 'Foto do ensaio'
+                      : item.reportPointId
+                        ? 'Ponto / solda ' +
+                          (report.points?.find((point) => point.id === item.reportPointId)
+                            ?.number ?? '')
+                        : 'Foto adicional'}
                 </Text>
                 <Text style={styles.muted}>{item.caption || item.originalName}</Text>
               </View>

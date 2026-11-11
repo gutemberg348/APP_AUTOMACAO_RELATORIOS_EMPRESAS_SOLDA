@@ -1,12 +1,18 @@
-import { drawingId, nextPointNumber, reportSections, type ReportPoint } from '@weldcosta/shared';
+import {
+  drawingId,
+  lpWeldLabel,
+  lpWeldNumbers,
+  nextPointNumber,
+  reportSections,
+  type ReportPoint,
+} from '@weldcosta/shared';
 
-export function nextLpWeldNumber(points: { number: string }[]) {
+export function nextLpWeldNumber(points: { number: string; data?: unknown }[]) {
   return nextPointNumber(
-    points.flatMap((point) =>
-      /^\d+(?:\s*[-,;]\s*\d+)+$/.test(point.number.trim())
-        ? point.number.match(/\d+/g)!.map((number) => ({ number }))
-        : [point],
-    ),
+    points.flatMap((point) => [
+      { number: point.number },
+      ...lpWeldNumbers(lpWeldLabel(point)).map((number) => ({ number })),
+    ]),
   );
 }
 

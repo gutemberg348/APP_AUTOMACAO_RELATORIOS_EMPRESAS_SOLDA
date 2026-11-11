@@ -17,6 +17,7 @@ export function MediaSourcePicker({
   includeDocuments = false,
   maxSelections = 1,
   contextLabel,
+  selectionDescription,
 }: {
   visible: boolean;
   onClose(): void;
@@ -27,6 +28,7 @@ export function MediaSourcePicker({
   includeDocuments?: boolean;
   maxSelections?: number;
   contextLabel?: string;
+  selectionDescription?: string;
 }) {
   const { styles } = useTheme();
   const [busy, setBusy] = useState(false);
@@ -187,11 +189,12 @@ export function MediaSourcePicker({
       visible={visible}
       title={contextLabel ?? 'De onde vem o material?'}
       subtitle={
-        maxSelections > 1
+        selectionDescription ??
+        (maxSelections > 1
           ? 'Selecione até ' +
             maxSelections +
             ' fotos de uma vez. Elas entram neste ponto na ordem escolhida.'
-          : 'Escolha a origem. Você poderá conferir o arquivo antes de enviar.'
+          : 'Escolha a origem. Você poderá conferir o arquivo antes de enviar.')
       }
       icon="image"
       onClose={() => {
@@ -206,9 +209,10 @@ export function MediaSourcePicker({
         {!busy && added.length > 0 && (
           <View style={{ gap: 8 }}>
             <Text accessibilityLiveRegion="polite" style={styles.label}>
-              {added.length} foto(s) adicionada(s) nesta seleção. Serão enviadas ao salvar o ponto.
+              {added.length} foto(s) adicionada(s) nesta seleção. Serão enviadas ao salvar{' '}
+              {maxSelections > 2 ? 'o relatório' : 'o ponto'}.
             </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {added.map((photo, index) => (
                 <Image
                   key={index}
@@ -221,8 +225,9 @@ export function MediaSourcePicker({
             </View>
             {!error && (
               <Text style={styles.muted}>
-                Agora tire a segunda foto ou escolha na galeria. Você também pode concluir com uma
-                só.
+                {maxSelections > 2
+                  ? 'Continue fotografando ou selecione outras imagens na galeria. Toque em Concluir seleção quando terminar.'
+                  : 'Agora tire a segunda foto ou escolha na galeria. Você também pode concluir com uma só.'}
               </Text>
             )}
           </View>
@@ -234,9 +239,11 @@ export function MediaSourcePicker({
               title={
                 includeDocuments
                   ? 'Galeria de fotos e vídeos'
-                  : maxSelections > 1
-                    ? 'Galeria · selecionar as duas fotos'
-                    : 'Galeria de fotos'
+                  : maxSelections > 2
+                    ? 'Galeria · selecionar várias fotos'
+                    : maxSelections > 1
+                      ? 'Galeria · selecionar as duas fotos'
+                      : 'Galeria de fotos'
               }
               icon="image"
               disabled={busy}

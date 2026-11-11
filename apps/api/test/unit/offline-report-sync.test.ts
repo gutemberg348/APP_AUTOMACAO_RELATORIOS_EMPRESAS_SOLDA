@@ -1,3 +1,4 @@
+import { lpWeldGroups } from '@weldcosta/shared';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { reportTypeCodes, type Report } from '@weldcosta/shared';
 const mocks = vi.hoisted(() => ({
@@ -289,3 +290,136 @@ it.each(reportTypeCodes)(
     expect(useReportPhotoDrafts.getState().reports[entry.photoKey]).toBeUndefined();
   },
 );
+
+it('restores optional LP test photos after restart and synchronizes them without binding a weld', async () => {
+  const entry = initial();
+  entry.type = { ...entry.type, code: 'LP' };
+  entry.values.points = [];
+  await putLocalReport(entry);
+  useReportPhotoDrafts.getState().update(entry.photoKey, () => ({
+    photos: ['test-a', 'test-b', 'test-c', 'test-d'].map((name) => ({
+      id: name,
+      pointKey: null,
+      sectionKey: 'test-photos',
+      caption: '',
+      asset: { uri: 'file://' + name, name: name + '.jpg' },
+    })),
+    removedIds: [],
+  }));
+  await flushPhotoQueue();
+  unsubscribe?.();
+  unsubscribe = undefined;
+  useOfflineReports.setState({ drafts: {} });
+  useReportPhotoDrafts.setState({ reports: {} });
+  await hydrateOfflineReports('qa', 'user-a');
+  unsubscribe = persistPhotoQueue('qa', 'user-a');
+  expect(useReportPhotoDrafts.getState().reports[entry.photoKey]?.photos).toHaveLength(4);
+  let server: Report;
+  const sent: string[] = [];
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/reports') {
+      server = {
+        ...entry.values,
+        id: id(10),
+        version: 1,
+        reportType: entry.type,
+        projectId: entry.projectId,
+        companyId: entry.companyId,
+        company: { name: 'QA' },
+        project: { name: 'Work' },
+        media: [],
+        lastClientMutationId: entry.mutationId,
+      } as unknown as Report;
+      return structuredClone(server);
+    }
+    if (path.endsWith('/media') && options?.method === 'POST') {
+      const form = options.body as FormData;
+      expect(form.has('reportPointId')).toBe(false);
+      expect(form.get('sectionKey')).toBe('test-photos');
+      sent.push(String(form.get('clientUploadId')));
+      server.version++;
+      return {};
+    }
+    return structuredClone(server);
+  });
+  await syncLocalReport(entry.id);
+  expect(sent).toEqual(['test-a', 'test-b', 'test-c', 'test-d']);
+  expect(useOfflineReports.getState().drafts[entry.id]).toBeUndefined();
+});
+
+it('keeps LP coverage and queued photos on covered points through offline restart and synchronization', async () => {
+  const entry = initial();
+  entry.type = { ...entry.type, code: 'LP' };
+  entry.values.points = [
+    {
+      clientId: 'local-1',
+      number: '1',
+      type: 'WELD',
+      data: { weldNumbers: '01 - 02 - 03', acceptable: true },
+    },
+    { clientId: 'local-2', number: '2', type: 'WELD', data: {} },
+    { clientId: 'local-3', number: '3', type: 'WELD', data: {} },
+    {
+      clientId: 'local-4',
+      number: '4',
+      type: 'WELD',
+      label: 'No photo',
+      data: { acceptable: true },
+    },
+  ];
+  await putLocalReport(entry);
+  useReportPhotoDrafts.getState().update(entry.photoKey, () => ({
+    photos: ['local-1', 'local-2'].map((key) => ({
+      id: 'photo-' + key,
+      pointKey: key,
+      sectionKey: 'photos',
+      caption: '',
+      asset: { uri: 'file://' + key, name: key + '.jpg' },
+    })),
+    removedIds: [],
+  }));
+  await flushPhotoQueue();
+  unsubscribe?.();
+  unsubscribe = undefined;
+  useOfflineReports.setState({ drafts: {} });
+  useReportPhotoDrafts.setState({ reports: {} });
+  await hydrateOfflineReports('qa', 'user-a');
+  unsubscribe = persistPhotoQueue('qa', 'user-a');
+  expect(
+    lpWeldGroups(useOfflineReports.getState().drafts[entry.id]!.values.points).map(
+      (group) => group.number,
+    ),
+  ).toEqual(['01 - 02 - 03', '4']);
+  let server: Report;
+  const uploaded: string[] = [];
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path === '/reports') {
+      const body = JSON.parse(String(options?.body));
+      expect(body.points[0].data.weldNumbers).toBe('01 - 02 - 03');
+      server = {
+        ...entry.values,
+        id: id(10),
+        version: 1,
+        reportType: entry.type,
+        projectId: entry.projectId,
+        companyId: entry.companyId,
+        points: entry.values.points.map(({ clientId: _clientId, ...point }, index) => ({
+          ...point,
+          id: id(20 + index),
+        })),
+        media: [],
+        lastClientMutationId: entry.mutationId,
+      } as unknown as Report;
+      return structuredClone(server);
+    }
+    if (path.endsWith('/media') && options?.method === 'POST') {
+      uploaded.push(String((options.body as FormData).get('reportPointId')));
+      server.version++;
+      return {};
+    }
+    return structuredClone(server);
+  });
+  await syncLocalReport(entry.id);
+  expect(uploaded).toEqual([id(20), id(21)]);
+  expect(useOfflineReports.getState().drafts[entry.id]).toBeUndefined();
+});

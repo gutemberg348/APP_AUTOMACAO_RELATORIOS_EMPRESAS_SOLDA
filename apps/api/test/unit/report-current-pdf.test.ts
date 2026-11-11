@@ -69,3 +69,35 @@ it.each(reportTypeCodes)(
     expect(values.title).toBe('CURRENT');
   },
 );
+
+it('includes optional LP test photos in Download as is without converting them into point photos', async () => {
+  const values = {
+    number: 'LP-1',
+    title: '',
+    reportDate: '',
+    specificData: {},
+    drawings: [],
+    signatures: [],
+    points: [],
+  } as ReportFormValues;
+  useReportPhotoDrafts.getState().update('user:report', () => ({
+    photos: [
+      {
+        id: 'test-photo',
+        pointKey: null,
+        sectionKey: 'test-photos',
+        caption: '',
+        asset: { uri: 'file://test.jpg', name: 'test.jpg' },
+      },
+    ],
+    removedIds: [],
+  }));
+  await prepareCurrentReportPdf('report', values, 'user:report');
+  const form = mocks.api.mock.calls[0]![1].body as FormData;
+  expect(JSON.parse(String(form.get('data'))).photos[0]).toMatchObject({
+    sectionKey: 'test-photos',
+    pointKey: null,
+    fileIndex: 0,
+  });
+  expect(useReportPhotoDrafts.getState().reports['user:report']?.photos).toHaveLength(1);
+});

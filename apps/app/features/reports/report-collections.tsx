@@ -14,6 +14,8 @@ import {
 import type { Report, ReportPoint, ReportSigner } from '@weldcosta/shared';
 import {
   nextPointNumber,
+  lpWeldGroups,
+  lpWeldLabel,
   pointKey,
   removePointFromDrawings,
   type ReportDrawing,
@@ -128,6 +130,7 @@ export function ReportPoints({
 }) {
   const { tokens: t, styles } = useTheme();
   const [expandedPoint, setExpandedPoint] = useState<number | null>(0);
+  const [editingNumber, setEditingNumber] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<string, boolean>>({});
   const [firstNumberOpen, setFirstNumberOpen] = useState(false);
   const [firstNumber, setFirstNumber] = useState('1');
@@ -157,6 +160,13 @@ export function ReportPoints({
   );
   const measurement = code === 'ME';
   const penetrant = code === 'LP';
+  const groups = penetrant
+    ? lpWeldGroups(values)
+    : values.map((point, index) => ({ index, number: point.number, memberIndexes: [index] }));
+  const groupAt = (index: number) => groups.find((group) => group.memberIndexes.includes(index));
+  const groupKeys = (index: number) =>
+    (groupAt(index)?.memberIndexes ?? [index]).map((member) => pointKey(values[member]!));
+  const ownerIndex = (index: number) => groupAt(index)?.index ?? index;
   const invalidPointIndexes = Object.keys(errors.points ?? {})
     .filter((key) => /^\d+$/.test(key))
     .join(',');
@@ -168,7 +178,7 @@ export function ReportPoints({
     if (!hasNewErrors) return;
     // Reveal one invalid point; the remaining errors stay signalled in their headers.
     revealPending.current = true;
-    setExpandedPoint(Number(indexes[0]));
+    setExpandedPoint(ownerIndex(Number(indexes[0])));
   }, [invalidPointIndexes]);
   useEffect(() => {
     if (!revealPending.current) return;
@@ -184,21 +194,34 @@ export function ReportPoints({
     const index = Number(correction.path[1]);
     if (!Number.isInteger(index) || !fields[index]) return;
     revealPending.current = true;
-    setExpandedPoint(index);
-    const timer = setTimeout(() => reveal(headers.current[fields[index]!._formKey]), 300);
+    setExpandedPoint(ownerIndex(index));
+    const timer = setTimeout(
+      () => reveal(headers.current[fields[ownerIndex(index)]!._formKey]),
+      300,
+    );
     return () => clearTimeout(timer);
   }, [correction, fields, reveal]);
-  const photoCount = (key: string) =>
-    (report?.media ?? []).filter(
-      (photo) => photo.reportPointId === key && !draft.removedIds.includes(photo.id),
-    ).length + draft.photos.filter((photo) => photo.pointKey === key).length;
+  const photoCount = (key: string) => {
+    const index = values.findIndex((point) => pointKey(point) === key);
+    const keys = index < 0 ? [key] : groupKeys(index);
+    return (
+      (report?.media ?? []).filter(
+        (photo) =>
+          !!photo.reportPointId &&
+          keys.includes(photo.reportPointId) &&
+          !draft.removedIds.includes(photo.id),
+      ).length +
+      draft.photos.filter((photo) => !!photo.pointKey && keys.includes(photo.pointKey)).length
+    );
+  };
   const advance = (key: string, add: boolean) => {
     if (!editable) return;
     const index = values.findIndex((point) => pointKey(point) === key);
     if (index < 0) return;
     Keyboard.dismiss();
     revealPending.current = true;
-    if (index < values.length - 1) setExpandedPoint(index + 1);
+    const next = groups.find((group) => group.index > index);
+    if (next) setExpandedPoint(next.index);
     else if (add) {
       if (penetrant) {
         setFirstNumber(nextLpWeldNumber(values));
@@ -207,24 +230,27 @@ export function ReportPoints({
     } else setExpandedPoint(null);
   };
   const finish = (key: string, add = false) => {
-    if (photoCount(key) < 2) {
+    if (!penetrant && photoCount(key) < 2) {
       Keyboard.dismiss();
       setFinishing({ key, add });
     } else advance(key, add);
   };
   const removingIndex = values.findIndex((point) => pointKey(point) === removingKey);
   const removingPoint = values[removingIndex];
+  const removingIndexes = groupAt(removingIndex)?.memberIndexes ?? [removingIndex];
+  const removingKeys = removingPoint ? groupKeys(removingIndex) : [];
   const linkedMarks = drawings.reduce(
     (count, drawing) =>
       count +
-      drawing.data.elements.filter((e) => e.type === 'point' && e.reportPointId === removingKey)
-        .length,
+      drawing.data.elements.filter(
+        (e) => e.type === 'point' && removingKeys.includes(e.reportPointId),
+      ).length,
     0,
   );
   const confirmPointRemoval = (keepInDrawing: boolean) => {
     if (!editable || !removingPoint || !removingKey) return;
     const mediaIds = (report?.media ?? [])
-      .filter((photo) => photo.reportPointId === removingKey)
+      .filter((photo) => !!photo.reportPointId && removingKeys.includes(photo.reportPointId))
       .map((photo) => photo.id);
     if ((linkedMarks && !canEditDrawings) || (mediaIds.length && !canRemovePhotos)) {
       setError(
@@ -236,10 +262,17 @@ export function ReportPoints({
       return;
     }
     if (linkedMarks)
-      onDrawingsChange(removePointFromDrawings(drawings, removingPoint, keepInDrawing));
+      onDrawingsChange(
+        removingIndexes.reduce(
+          (current, index) => removePointFromDrawings(current, values[index]!, keepInDrawing),
+          drawings,
+        ),
+      );
     useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
       ...draft,
-      photos: draft.photos.filter((photo) => photo.pointKey !== removingKey),
+      photos: draft.photos.filter(
+        (photo) => !photo.pointKey || !removingKeys.includes(photo.pointKey),
+      ),
       removedIds: [...new Set([...draft.removedIds, ...mediaIds])],
       annotationEdits: Object.fromEntries(
         Object.entries(draft.annotationEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
@@ -248,7 +281,7 @@ export function ReportPoints({
         Object.entries(draft.captionEdits ?? {}).filter(([id]) => !mediaIds.includes(id)),
       ),
     }));
-    remove(removingIndex);
+    remove(removingIndexes);
     revealPending.current = true;
     setExpandedPoint(Math.max(0, Math.min(removingIndex, fields.length - 2)));
     setRemovingKey(undefined);
@@ -343,7 +376,7 @@ export function ReportPoints({
         title={measurement ? 'Pontos de medição' : 'Pontos de solda'}
         subtitle={
           penetrant
-            ? 'Cada ficha pode representar uma ou várias soldas na mesma foto. Informe, por exemplo, 01 - 02 - 03 e registre o resultado do grupo.'
+            ? 'Informe as soldas da foto, por exemplo 01 - 02 - 03. As fichas repetidas são agrupadas automaticamente. Os números e as posições no desenho ficam como você colocou.'
             : 'Preencha os dados e adicione as fotos no mesmo ponto. Ao criar o próximo, o anterior fica recolhido.'
         }
         action={
@@ -384,14 +417,14 @@ export function ReportPoints({
         <Text style={styles.muted}>Comece informando o número da primeira solda ou medição.</Text>
       )}
       {fields.map((point, index) => {
+        const group = groups.find((item) => item.index === index);
+        if (!group) return null;
         const value = values[index],
           key = pointKey(value ?? point);
+        const nextGroup = groups.find((item) => item.index > index);
         const open = expandedPoint === index;
-        const hasError = !!errors.points?.[index];
-        const photos =
-          (report?.media ?? []).filter(
-            (photo) => photo.reportPointId === key && !draft.removedIds.includes(photo.id),
-          ).length + draft.photos.filter((photo) => photo.pointKey === key).length;
+        const hasError = group.memberIndexes.some((member) => !!errors.points?.[member]);
+        const photos = photoCount(key);
         return (
           <Card
             key={point._formKey}
@@ -403,7 +436,7 @@ export function ReportPoints({
               }}
               accessibilityRole="button"
               accessibilityLabel={
-                open ? 'Recolher ponto' : 'Abrir ponto ' + (value?.number || index + 1)
+                open ? 'Recolher ponto' : 'Abrir ponto ' + (group.number || index + 1)
               }
               accessibilityState={{ expanded: open }}
               aria-expanded={open}
@@ -423,7 +456,7 @@ export function ReportPoints({
               <View style={{ flex: 1, gap: 5 }}>
                 <Text style={[styles.text, { fontFamily: t.fonts.bold }]}>
                   {(measurement ? 'Medição ' : penetrant ? 'Soldas ' : 'Ponto / solda ') +
-                    (value?.number || index + 1)}
+                    (group.number || index + 1)}
                 </Text>
                 <Text style={[styles.muted, { fontSize: 11 }]}>
                   {[
@@ -466,17 +499,20 @@ export function ReportPoints({
             </Pressable>
             {open && (
               <View style={{ padding: 18, paddingTop: 4, gap: 16 }}>
-                {correction?.path[0] === 'points' && Number(correction.path[1]) === index && (
-                  <Notice
-                    error={new Error(correction.label + ': ' + correction.message)}
-                    guidance={correction.guidance}
-                  />
-                )}
+                {correction?.path[0] === 'points' &&
+                  group.memberIndexes.includes(Number(correction.path[1])) && (
+                    <Notice
+                      error={new Error(correction.label + ': ' + correction.message)}
+                      guidance={correction.guidance}
+                    />
+                  )}
                 <FormGrid>
                   <FormCell>
                     <Controller
                       control={control}
-                      name={`points.${index}.number`}
+                      name={
+                        penetrant ? `points.${index}.data.weldNumbers` : `points.${index}.number`
+                      }
                       render={({ field, fieldState }) => (
                         <Field
                           error={fieldState.error?.message}
@@ -485,11 +521,22 @@ export function ReportPoints({
                           }
                           hint={
                             penetrant
-                              ? 'Uma solda: 01. Várias soldas: 01 - 02 - 03. As fotos e o resultado desta ficha valem para o grupo informado.'
+                              ? 'Uma solda: 01. Várias: 01 - 02 - 03. Números usados na primeira ficha deixam de aparecer nas seguintes. As fotos e o resultado valem para o grupo.'
                               : undefined
                           }
                           placeholder={penetrant ? 'Ex.: 01 - 02 - 03' : undefined}
-                          value={field.value}
+                          value={
+                            penetrant
+                              ? editingNumber !== index
+                                ? group.number
+                                : lpWeldLabel(value ?? point)
+                              : field.value
+                          }
+                          onFocus={() => setEditingNumber(index)}
+                          onBlur={() => {
+                            field.onBlur();
+                            setEditingNumber(null);
+                          }}
                           onChangeText={field.onChange}
                           editable={editable}
                           maxLength={100}
@@ -585,7 +632,9 @@ export function ReportPoints({
                   draftKey={photoDraftKey}
                   pointId={key}
                   persistedPointId={value?.id}
-                  number={value?.number || String(index + 1)}
+                  number={group.number || String(index + 1)}
+                  bindingNumber={value?.number}
+                  linkedPointIds={penetrant ? groupKeys(index) : undefined}
                   reportId={report?.id}
                   projectId={report?.projectId ?? projectId}
                   media={report?.media ?? []}
@@ -667,15 +716,13 @@ export function ReportPoints({
                       salvar o relatório.
                     </Text>
                     <Button
-                      title={
-                        index < fields.length - 1 ? 'Finalizar e ir ao próximo' : 'Finalizar ponto'
-                      }
+                      title={nextGroup ? 'Finalizar e ir ao próximo' : 'Finalizar ponto'}
                       small
                       icon="check"
                       style={{ minHeight: 44 }}
                       onPress={() => finish(key)}
                     />
-                    {index === fields.length - 1 && (
+                    {!nextGroup && (
                       <Button
                         title="Finalizar e adicionar próximo"
                         small

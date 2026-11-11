@@ -14,6 +14,7 @@ export const signatureReference = z
 export const weldPointDataSchema = z
   .object({
     dimension: optionalText,
+    weldNumbers: z.string().max(100).optional(),
     discontinuity: optionalText,
     acceptable: z.boolean().optional(),
     notes: optionalText,

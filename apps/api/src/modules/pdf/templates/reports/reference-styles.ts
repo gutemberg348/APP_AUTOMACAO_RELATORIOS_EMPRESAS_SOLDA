@@ -1,4 +1,10 @@
 export const referenceStyles = `
+.lp-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
+.lp-test-photo{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.lp-test-photo+.lp-test-photo{border-top:1px solid #111}
+.lp-test-photo-image{position:relative;flex:1;min-height:0;overflow:hidden}
+.lp-test-photo-image img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill}
+.lp-test-photo figcaption{flex:none;padding:1mm 2mm;font-size:12px;line-height:1.25;white-space:pre-wrap;overflow-wrap:anywhere}
 .reference-band{margin:0;padding:3mm 2mm;text-align:center;font-size:17px;font-weight:normal;border-top:1px solid #111;border-bottom:1px solid #111}
 .reference-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px}
 .reference-table th,.reference-table td{border:1px solid #111;padding:2mm 1mm;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;font-weight:normal}

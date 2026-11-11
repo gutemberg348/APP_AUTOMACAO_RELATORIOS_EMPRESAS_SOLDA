@@ -24,7 +24,7 @@ const metadata = z
   .object({
     version: z.coerce.number().int().positive(),
     caption: z.string().max(2000).optional(),
-    sectionKey: z.enum(['photos', 'drawing']).default('photos'),
+    sectionKey: z.enum(['photos', 'drawing', 'test-photos']).default('photos'),
     reportPointId: z.uuid().optional(),
     clientUploadId: z.string().min(1).max(100).optional(),
     annotations: z
@@ -40,7 +40,11 @@ const metadata = z
       .pipe(photoAnnotationsSchema)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.sectionKey !== 'test-photos' || !input.reportPointId, {
+    path: ['reportPointId'],
+    message: 'As fotos do ensaio são gerais e não precisam de vínculo com um ponto.',
+  });
 async function prepareImage(file: Express.Multer.File | undefined) {
   if (!file) throw new AppError(400, 'FILE_REQUIRED', 'Selecione uma imagem.');
   let content: Buffer;
@@ -139,9 +143,18 @@ reportMediaRoutes.post(
     await storage.save(filePath, content);
     try {
       const saved = await prisma.$transaction(async (tx) => {
-        const report = await tx.report.findFirst({ where: { id: reportId, deletedAt: null } });
+        const report = await tx.report.findFirst({
+          where: { id: reportId, deletedAt: null },
+          include: { reportType: { select: { code: true } } },
+        });
         if (!report) throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado.');
         assertEditable(report.status, req.user!);
+        if (input.sectionKey === 'test-photos' && report.reportType?.code !== 'LP')
+          throw new AppError(
+            400,
+            'INVALID_MEDIA_SECTION',
+            'Fotos do ensaio está disponível no relatório de Líquido Penetrante.',
+          );
         if (
           input.reportPointId &&
           !(await tx.reportPoint.findFirst({ where: { id: input.reportPointId, reportId } }))
@@ -299,15 +312,24 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       version: z.number().int().positive(),
       caption: z.string().max(2000),
       reportPointId: z.uuid().nullable(),
-      sectionKey: z.enum(['photos', 'drawing']),
+      sectionKey: z.enum(['photos', 'drawing', 'test-photos']),
       annotations: photoAnnotationsSchema.nullable().optional(),
     })
     .strict()
     .parse(req.body);
   await prisma.$transaction(async (tx) => {
-    const report = await tx.report.findFirst({ where: { id: reportId, deletedAt: null } });
+    const report = await tx.report.findFirst({
+      where: { id: reportId, deletedAt: null },
+      include: { reportType: { select: { code: true } } },
+    });
     if (!report) throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado.');
     assertEditable(report.status, req.user!);
+    if (input.sectionKey === 'test-photos' && report.reportType?.code !== 'LP')
+      throw new AppError(
+        400,
+        'INVALID_MEDIA_SECTION',
+        'Fotos do ensaio está disponível no relatório de Líquido Penetrante.',
+      );
     const item = await tx.reportMedia.findFirst({ where: { id: mediaId, reportId } });
     if (!item) throw new AppError(404, 'NOT_FOUND', 'Imagem não encontrada.');
     if (
@@ -315,7 +337,9 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
       !(await tx.reportPoint.findFirst({ where: { id: input.reportPointId, reportId } }))
     )
       throw new AppError(400, 'INVALID_POINT', 'Selecione um ponto deste relatório.');
-    const targetPointId = input.sectionKey === 'drawing' ? null : input.reportPointId;
+    const targetPointId = ['drawing', 'test-photos'].includes(input.sectionKey)
+      ? null
+      : input.reportPointId;
     await lockPhotoHash(tx, item.sha256);
     await assertPhotoPoint(
       tx,

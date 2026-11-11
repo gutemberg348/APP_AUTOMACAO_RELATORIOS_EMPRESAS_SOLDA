@@ -17,6 +17,7 @@ import {
   isVisualWeldReport,
   type VisualInspectionRecord,
   pointKey,
+  lpWeldGroups,
   type Report,
   type ReportType,
   type Paginated,
@@ -50,6 +51,7 @@ import {
 import { todayISO } from '../../utils/dates';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { DrawingEditor } from './drawing-editor';
+import { PointPhotos } from './point-photos';
 import { usePageScroll } from '../../components/page-scroll';
 import { prepareCurrentReportPdf } from './report-current-pdf';
 import { ReportActions } from './report-actions';
@@ -573,10 +575,22 @@ function ReportFormContent({
     return () => cancelAnimationFrame(frame);
   }, [step, error, reveal, sectionNavigation]);
   const sectionSummary = (section: Section) => {
+    if (section.content === 'points' && type.code === 'LP')
+      return `${lpWeldGroups(watchedPoints).length} fichas de soldas · dados, resultados e fotos`;
     if (section.content === 'points')
       return `${watchedPoints.length} ${watchedPoints.length === 1 ? 'ponto' : 'pontos'} · dados, resultados e fotos`;
     if (section.content === 'drawings')
       return `${watchedDrawings.length} desenhos · isométrico ou croqui`;
+    if (section.content === 'testPhotos') {
+      const count =
+        (report?.media ?? []).filter(
+          (photo) =>
+            photo.sectionKey === 'test-photos' && !photoDrafts.removedIds.includes(photo.id),
+        ).length + photoDrafts.photos.filter((photo) => photo.sectionKey === 'test-photos').length;
+      return count
+        ? `${count} fotos · ${Math.ceil(count / 3)} folhas no PDF`
+        : 'Opcional · três fotos por folha após os desenhos';
+    }
     if (section.content === 'signatures') return `${watchedSignatures.length} responsáveis`;
     if (section.content === 'discontinuities')
       return 'Códigos e descrições das indicações encontradas';
@@ -730,13 +744,17 @@ function ReportFormContent({
         {
           path: cause.location.drawing
             ? ['drawings']
-            : pointIndex >= 0
-              ? ['points', String(pointIndex)]
-              : ['points'],
+            : cause.location.testPhotos
+              ? ['testPhotos']
+              : pointIndex >= 0
+                ? ['points', String(pointIndex)]
+                : ['points'],
           label: cause.location.label,
           message: cause.message,
           guidance:
-            (cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
+            (cause.location.testPhotos
+              ? 'Abra Fotos do ensaio e confira a foto indicada. Ela continua no telefone. Corrija o arquivo ou retire somente esta foto e salve novamente.'
+              : cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
             'Abra o ponto e a foto indicados. As fotos pendentes continuam no telefone; confira o motivo acima e toque em Salvar para tentar o envio novamente.',
         },
       ]);
@@ -1432,9 +1450,11 @@ function ReportFormContent({
                   name={
                     section.content === 'drawings'
                       ? 'pipe'
-                      : section.content === 'points'
-                        ? 'pin'
-                        : 'report'
+                      : section.content === 'testPhotos'
+                        ? 'image'
+                        : section.content === 'points'
+                          ? 'pin'
+                          : 'report'
                   }
                   size={20}
                   color={t.colors.blue}
@@ -1490,6 +1510,19 @@ function ReportFormContent({
                       onDrawingsChange={(drawings) =>
                         setValue('drawings', drawings, { shouldDirty: true })
                       }
+                    />
+                  ) : section.content === 'testPhotos' ? (
+                    <PointPhotos
+                      draftKey={photoDraftKey}
+                      pointId={null}
+                      reportId={report?.id}
+                      projectId={projectId}
+                      media={report?.media ?? []}
+                      editable={!editingBusy && user.permissions.includes('media.upload')}
+                      canRemove={!editingBusy && user.permissions.includes('media.delete')}
+                      onPickingChange={setPickingPhoto}
+                      additional
+                      testPhotos
                     />
                   ) : section.content === 'signatures' ? (
                     <ReportSigners
