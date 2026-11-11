@@ -1,7 +1,11 @@
+import { referenceDrawingSymbols } from './drawing-reference-symbols';
+
 export interface DrawingSymbolDefinition {
   code: string;
   name: string;
   path: string;
+  family?: string;
+  fillPath?: string;
   bounds?: { x: number; y: number; width: number; height: number };
   dash?: string;
   color?: string;
@@ -74,6 +78,7 @@ export const drawingSymbols = [
     name: 'União',
     path: 'M-30 0H-13 M13 0H30 M-13-14H13V14H-13Z M-6-14V14 M6-14V14',
   },
+  ...referenceDrawingSymbols,
 ] as const satisfies readonly DrawingSymbolDefinition[];
 
 export function drawingSymbolDefinition(
@@ -88,5 +93,5 @@ export function drawingSymbolPreview(code: string, color: string) {
   const symbol = drawingSymbolDefinition(code),
     b = symbol.bounds;
   const stroke = `fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x - 8} ${b.y - 8} ${b.width + 16} ${b.height + 16}"><path d="${symbol.path}" ${stroke}${symbol.dash ? ` stroke-dasharray="${symbol.dash}"` : ''}/>${symbol.accentPath ? `<path d="${symbol.accentPath}" ${stroke}/>` : ''}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x - 8} ${b.y - 8} ${b.width + 16} ${b.height + 16}"><path d="${symbol.path}" ${stroke}${symbol.dash ? ` stroke-dasharray="${symbol.dash}"` : ''}/>${symbol.fillPath ? `<path d="${symbol.fillPath}" fill="${color}"/>` : ''}${symbol.accentPath ? `<path d="${symbol.accentPath}" ${stroke}/>` : ''}</svg>`;
 }

@@ -87,7 +87,7 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
-        { images: drawingImageSources(report, images) },
+        { images: drawingImageSources(report, images), centerContent: true },
       )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala'),
     );
   }

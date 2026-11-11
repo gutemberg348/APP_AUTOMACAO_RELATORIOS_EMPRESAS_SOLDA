@@ -13,6 +13,7 @@ body{margin:0;font:12px Arial,sans-serif;color:#111;text-transform:uppercase}p{m
 .evs-header table{width:100%;height:100%;border-collapse:collapse;table-layout:fixed;font-size:15px}
 .evs-header td{border-bottom:1px solid #111;padding:3px 4px;overflow-wrap:anywhere}
 .evs-header tr:last-child td{border-bottom:0}.evs-header td+td{border-left:1px solid #111;text-align:center;color:#245aa1}
+.evs-header .evs-report-number{position:relative}.evs-report-number>span{position:absolute;left:4px;right:4px;top:50%;transform:translateY(-50%);line-height:1.1;overflow-wrap:anywhere}
 .evs-flow{flex:1;min-height:0}
 .evs-contact{flex-shrink:0;padding:5mm 2mm 4mm;border-top:1.5px solid #111;text-align:center;font:italic 11px Georgia,serif;line-height:1.35;color:#263b70}
 .evs-cover-block{padding:42mm 18mm 26mm;font-size:24px;line-height:1.5;font-weight:bold;overflow-wrap:anywhere}

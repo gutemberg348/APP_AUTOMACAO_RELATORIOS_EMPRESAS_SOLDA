@@ -105,7 +105,9 @@ describe('LP consecutive photo cells', () => {
     const drawingHtml = drawings(report, sources);
     expect(photoHtml).toContain('01 - 02 - 03 - 04');
     expect(drawingSvg(report.drawings[0]!.data, report.points)).toBe(svg);
-    expect(drawingHtml).toContain(svg);
+    expect(drawingHtml).toContain(
+      drawingSvg(report.drawings[0]!.data, originalPoints, { centerContent: true }),
+    );
     expect(drawingHtml).not.toContain('01 - 02 - 03 - 04');
     for (let number = 1; number <= 6; number++) expect(svg).toContain('>' + number + '</text>');
     expect(report.drawings).toEqual(before);

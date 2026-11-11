@@ -4,6 +4,7 @@ import {
   drawingSvg,
   drawingSymbols,
   drawingSymbolPreview,
+  drawingSymbolDefinition,
   drawingSelectionBounds,
   hitElement,
   newDrawingData,
@@ -89,4 +90,54 @@ describe('Isometric tank and valve actuator symbols', () => {
       true,
     );
   });
+});
+
+describe('Weld Costa reference library', () => {
+  const references = drawingSymbols.filter((symbol) => drawingSymbolDefinition(symbol.code).family);
+  it('offers every reference family with unique codes and usable orientations', () => {
+    expect(references).toHaveLength(68);
+    expect(new Set(drawingSymbols.map((symbol) => symbol.code)).size).toBe(drawingSymbols.length);
+    expect(
+      new Set(references.map((symbol) => drawingSymbolDefinition(symbol.code).family)).size,
+    ).toBe(12);
+  });
+  it.each(references.map((symbol) => [symbol.code]))(
+    'saves, renders and transforms %s without losing geometry',
+    (code) => {
+      const definition = drawingSymbolDefinition(code!);
+      const element = {
+        id: code!,
+        type: 'symbol' as const,
+        symbolCode: code!,
+        x: 500,
+        y: 400,
+        rotation: 0,
+        scale: 1,
+        strokeColor: '#C2185B',
+        strokeWidth: 2.4,
+      };
+      const data = drawingDataSchema.parse({ ...newDrawingData(), elements: [element] });
+      const restored = drawingDataSchema.parse(JSON.parse(JSON.stringify(data)));
+      const svg = drawingSvg(restored, []);
+      expect(svg).toContain(`d="${definition.path}"`);
+      expect(svg).toContain('stroke="#C2185B"');
+      if (definition.fillPath) {
+        expect(svg).toContain(`d="${definition.fillPath}"`);
+        expect(svg).toContain('fill="#C2185B"');
+        expect(drawingSymbolPreview(code!, '#C2185B')).toContain(definition.fillPath);
+      }
+      const bounds = drawingSelectionBounds(data.elements);
+      expect(bounds.width).toBeGreaterThan(0);
+      expect(bounds.height).toBeGreaterThan(0);
+      expect(hitElement(data.elements, bounds.center)?.id).toBe(code);
+      const rotated = transformDrawingSelection(data.elements, 45, 0, 0, 0.7);
+      expect(drawingDataSchema.safeParse({ ...newDrawingData(), elements: rotated }).success).toBe(
+        true,
+      );
+      expect(drawingSelectionBounds(rotated).center.x).toBeCloseTo(bounds.center.x);
+      expect(drawingSelectionBounds(rotated).center.y).toBeCloseTo(bounds.center.y);
+      expect(drawingSvg({ ...newDrawingData(), elements: rotated }, [])).toContain(definition.path);
+      expect(svg).not.toContain('NaN');
+    },
+  );
 });

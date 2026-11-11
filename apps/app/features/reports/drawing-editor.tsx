@@ -520,6 +520,7 @@ export function DrawingEditor({
   const annotationField = useRef<ViewInstance>(null);
   const [textRotation, setTextRotation] = useState(0);
   const [symbolScale, setSymbolScale] = useState(1);
+  const [symbolFamily, setSymbolFamily] = useState('Gerais');
   const [symbol, setSymbol] = useState('valve'),
     [rotation, setRotation] = useState(30),
     [deleteSheet, setDeleteSheet] = useState(false);
@@ -3041,49 +3042,68 @@ export function DrawingEditor({
         {tool === 'symbol' && !editingSelection && (
           <>
             <Text style={styles.label}>Escolha o componente e toque no desenho</Text>
+            <SelectField
+              label="Tipo de componente"
+              value={symbolFamily}
+              clearable={false}
+              options={[
+                ...new Set(
+                  drawingSymbols.map(
+                    (item) => drawingSymbolDefinition(item.code).family ?? 'Gerais',
+                  ),
+                ),
+              ].map((family) => ({ value: family, label: family }))}
+              onChange={setSymbolFamily}
+            />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {drawingSymbols.map((item) => (
-                <Pressable
-                  key={item.code}
-                  accessibilityRole="button"
-                  accessibilityLabel={'Componente ' + item.name.toLowerCase()}
-                  accessibilityState={selectionState(symbol === item.code)}
-                  aria-pressed={symbol === item.code}
-                  onPress={() => {
-                    setSymbol(item.code);
-                    const defaults = drawingSymbolDefinition(item.code);
-                    if (defaults.defaultRotation !== undefined)
-                      setRotation(defaults.defaultRotation);
-                    if (defaults.defaultScale !== undefined) setSymbolScale(defaults.defaultScale);
-                    if (defaults.defaultStrokeWidth !== undefined)
-                      setStrokeWidth(defaults.defaultStrokeWidth);
-                    setSelected('');
-                    setDirectSelection(false);
-                  }}
-                  style={{
-                    width: '31%',
-                    minWidth: 70,
-                    padding: 8,
-                    gap: 5,
-                    alignItems: 'center',
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderColor: symbol === item.code ? t.colors.blue : t.colors.line,
-                    backgroundColor: symbol === item.code ? t.colors.blueSoft : t.colors.surface,
-                  }}
-                >
-                  <View pointerEvents="none">
-                    <SvgXml
-                      xml={drawingSymbolPreview(item.code, t.colors.text)}
-                      width={42}
-                      height={42}
-                    />
-                  </View>
-                  <Text style={[styles.muted, { fontSize: 10, textAlign: 'center' }]}>
-                    {item.name}
-                  </Text>
-                </Pressable>
-              ))}
+              {drawingSymbols
+                .filter(
+                  (item) =>
+                    (drawingSymbolDefinition(item.code).family ?? 'Gerais') === symbolFamily,
+                )
+                .map((item) => (
+                  <Pressable
+                    key={item.code}
+                    accessibilityRole="button"
+                    accessibilityLabel={'Componente ' + item.name.toLowerCase()}
+                    accessibilityState={selectionState(symbol === item.code)}
+                    aria-pressed={symbol === item.code}
+                    onPress={() => {
+                      setSymbol(item.code);
+                      const defaults = drawingSymbolDefinition(item.code);
+                      if (defaults.defaultRotation !== undefined)
+                        setRotation(defaults.defaultRotation);
+                      if (defaults.defaultScale !== undefined)
+                        setSymbolScale(defaults.defaultScale);
+                      if (defaults.defaultStrokeWidth !== undefined)
+                        setStrokeWidth(defaults.defaultStrokeWidth);
+                      setSelected('');
+                      setDirectSelection(false);
+                    }}
+                    style={{
+                      width: '31%',
+                      minWidth: 70,
+                      padding: 8,
+                      gap: 5,
+                      alignItems: 'center',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: symbol === item.code ? t.colors.blue : t.colors.line,
+                      backgroundColor: symbol === item.code ? t.colors.blueSoft : t.colors.surface,
+                    }}
+                  >
+                    <View pointerEvents="none">
+                      <SvgXml
+                        xml={drawingSymbolPreview(item.code, t.colors.text)}
+                        width={42}
+                        height={42}
+                      />
+                    </View>
+                    <Text style={[styles.muted, { fontSize: 10, textAlign: 'center' }]}>
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                ))}
             </View>
             <Numeric
               label="Tamanho do componente"

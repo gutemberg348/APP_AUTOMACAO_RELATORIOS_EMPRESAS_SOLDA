@@ -1,5 +1,31 @@
 // Executed inside Chromium after fonts/images load, so continuation pages use actual sizes.
 export function paginateEvs() {
+  // Keep the three header rows fixed even when the report number wraps.
+  for (const cell of document.querySelectorAll<HTMLElement>('.evs-report-number')) {
+    const text = cell.querySelector<HTMLElement>('span')!;
+    let size = 15;
+    text.style.fontSize = `${size}px`;
+    while (size > 4 && text.getBoundingClientRect().height > cell.clientHeight - 6) {
+      size -= 0.5;
+      text.style.fontSize = `${size}px`;
+    }
+  }
+  // Center the rendered content as one block. The stored drawing, point labels
+  // and relative positions are unchanged; the grid stays aligned with the page.
+  for (const content of document.querySelectorAll<SVGGElement>('[data-print-drawing-content]')) {
+    const page = content.ownerSVGElement!.viewBox.baseVal;
+    const bounds = content.getBBox();
+    if (!content.children.length || (!bounds.width && !bounds.height)) continue;
+    const scale = Math.min(
+      1,
+      page.width / Math.max(1, bounds.width),
+      page.height / Math.max(1, bounds.height),
+    );
+    content.setAttribute(
+      'transform',
+      `translate(${page.x + page.width / 2} ${page.y + page.height / 2}) scale(${scale}) translate(${-bounds.x - bounds.width / 2} ${-bounds.y - bounds.height / 2})`,
+    );
+  }
   const sheets = Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet'));
   for (const original of sheets) {
     let sheet = original;
@@ -19,7 +45,19 @@ export function paginateEvs() {
           frame.style.marginTop = `${top - offsets[index]!}px`;
         });
         const height = Math.max(...frames.map((frame) => frame.getBoundingClientRect().height));
-        return { height, overhead: block.getBoundingClientRect().height - height };
+        // EVS/EVD captions and point details are siblings of the photo block.
+        // Reserve their space too, otherwise the third pair is pushed out even
+        // though the images alone were sized to fit three rows.
+        let followingHeight = 0;
+        for (let i = blocks.indexOf(block) + 1; i < blocks.length; i++) {
+          const following = blocks[i]!;
+          if (following.querySelector('.report-photo-frame')) break;
+          followingHeight += following.getBoundingClientRect().height;
+        }
+        return {
+          height,
+          overhead: block.getBoundingClientRect().height - height + followingHeight,
+        };
       });
       const available =
         flow.getBoundingClientRect().height / 3 - Math.max(...measures.map((m) => m.overhead)) - 1;

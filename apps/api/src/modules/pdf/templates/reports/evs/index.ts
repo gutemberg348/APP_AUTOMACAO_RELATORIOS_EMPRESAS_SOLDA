@@ -64,7 +64,7 @@ export function chunks(value: unknown, size = 600) {
 }
 
 export function header(report: PdfReport, heading: string) {
-  return `<header class="evs-header"><div class="evs-logo"><img src="${referenceLogo}" alt="WELDCOSTA INSPEÇÕES INDUSTRIAIS"></div><div class="evs-heading">${heading}</div><table><tr><td>RELAT. Nº</td><td>${escape(report.number || 'Sem número')}</td></tr><tr><td>PÁGINA Nº</td><td class="evs-page-number"></td></tr><tr><td>DATA</td><td>${displayDate(report.reportDate).replace(/\/(\d{2})(\d{2})$/, '/$2')}</td></tr></table></header>`;
+  return `<header class="evs-header"><div class="evs-logo"><img src="${referenceLogo}" alt="WELDCOSTA INSPEÇÕES INDUSTRIAIS"></div><div class="evs-heading">${heading}</div><table><tr><td>RELAT. Nº</td><td class="evs-report-number"><span>${escape(report.number || 'Sem número')}</span></td></tr><tr><td>PÁGINA Nº</td><td class="evs-page-number"></td></tr><tr><td>DATA</td><td>${displayDate(report.reportDate).replace(/\/(\d{2})(\d{2})$/, '/$2')}</td></tr></table></header>`;
 }
 export const footer = `<footer class="evs-contact"><strong>WELDCOSTA INSPEÇÃO INDUSTRIAL LTDA</strong><br>Rua Saldanha Marinho, nº 451 Jd. Amanda II Hortolândia / SP<br>Fone: (19) 993106437 · site: www.weldcosta.com.br · e-mail: ednaldo@weldcosta.com.br</footer>`;
 
@@ -210,7 +210,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: p.data as { acceptable?: boolean },
         })),
-        { images: drawingImageSources(report, images) },
+        { images: drawingImageSources(report, images), centerContent: true },
       )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>`,
     );
   }

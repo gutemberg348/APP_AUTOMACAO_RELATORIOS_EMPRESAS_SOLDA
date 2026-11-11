@@ -691,6 +691,7 @@ export function drawingSvg(
     images?: Record<string, string>;
     selectedId?: string;
     viewBox?: string;
+    centerContent?: boolean;
     showGrid?: boolean;
     showBackground?: boolean;
     renderElements?: boolean;
@@ -726,6 +727,7 @@ export function drawingSvg(
     body += `<path d="${d}" stroke="#E4EAF2" stroke-width=".7" fill="none"/>`;
   }
   let selectionOverlay = '';
+  if (options.centerContent) body += '<g data-print-drawing-content="true">';
   for (const e of drawingOrderedElements(data.elements)) {
     const selected = options.selectedId === e.id || options.selectedIds?.includes(e.id),
       color =
@@ -853,6 +855,8 @@ export function drawingSvg(
         const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation}) scale(${e.scale ?? 1})"`;
         const symbolStroke = `stroke="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
         body += `<path d="${definition.path}" ${transform} ${symbolStroke}${e.strokeStyle ? dashAttribute : definition.dash ? ` stroke-dasharray="${definition.dash}"` : ''}/>`;
+        if (definition.fillPath)
+          body += `<path d="${definition.fillPath}" ${transform} fill="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}"/>`;
         if (definition.accentPath)
           body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
       }
@@ -912,6 +916,7 @@ export function drawingSvg(
       ])
         body += `<circle cx="${p.x}" cy="${p.y}" r="${options.endpointRadius ?? 5}" fill="white" stroke="#1764C0" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
   }
+  if (options.centerContent) body += '</g>';
   const grouped = data.elements.filter((e) => options.selectedIds?.includes(e.id));
   if (grouped.length) {
     const b = drawingSelectionBounds(grouped),
