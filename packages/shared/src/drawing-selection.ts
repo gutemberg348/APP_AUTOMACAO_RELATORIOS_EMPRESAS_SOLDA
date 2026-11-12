@@ -1,5 +1,6 @@
 import { type DrawingElement, type DrawingPosition } from './drawings';
 import { drawingSymbolDefinition } from './drawing-symbols';
+import { drawingReductionLabel } from './drawing-reduction';
 
 const rotate = (p: DrawingPosition, center: DrawingPosition, angle: number, scale = 1) => {
   const r = (angle * Math.PI) / 180,
@@ -35,13 +36,23 @@ export function drawingElementFootprint(e: DrawingElement): DrawingPosition[] {
           ? { x: -e.width / 2, y: -e.height / 2, width: e.width, height: e.height }
           : drawingSymbolDefinition(e.symbolCode).bounds,
       s = e.type === 'image' ? 1 : (e.scale ?? 1);
-    return [
+    const footprint = [
       { x: b.x, y: b.y },
       { x: b.x + b.width, y: b.y },
       { x: b.x + b.width, y: b.y + b.height },
       { x: b.x, y: b.y + b.height },
       { x: b.x, y: b.y },
     ].map((p) => rotate({ x: e.x + p.x * s, y: e.y + p.y * s }, e, e.rotation));
+    const label = e.type === 'symbol' ? drawingReductionLabel(e) : undefined;
+    return label
+      ? [
+          ...footprint,
+          { x: label.left, y: label.top },
+          { x: label.left + label.width, y: label.top },
+          { x: label.left + label.width, y: label.top + label.height },
+          { x: label.left, y: label.top + label.height },
+        ]
+      : footprint;
   }
   const size = e.type === 'text' ? (e.size ?? 20) : 20;
   const lines = e.type === 'text' ? e.text.split(/\r?\n/) : [];

@@ -22,6 +22,7 @@ import { DrawingWorkspace } from './drawing-workspace';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
 import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
 import { DrawingPointLabelControl } from './drawing-point-label-control';
+import { DrawingReductionControl } from './drawing-reduction-control';
 import { DrawingLiveInk, type LiveInkHandle } from './drawing-live-ink';
 import { DrawingCanvas } from './drawing-canvas';
 import { createDrawingFrameQueue } from './drawing-frame-queue';
@@ -60,6 +61,9 @@ import {
   drawingSymbols,
   drawingSymbolDefinition,
   drawingSymbolPreview,
+  isDrawingReduction,
+  drawingReductionLabel,
+  positionDrawingReductionLabel,
   hasDrawingStroke,
   drawingStrokeWidth,
   drawingStrokeColor,
@@ -1528,6 +1532,8 @@ export function DrawingEditor({
             ? points.find((point) => pointKey(point) === numberedFound.reportPointId)?.number
             : undefined;
       const pointLabel = numberedFound ? drawingPointLabel(numberedFound, number) : undefined;
+      const reductionLabel =
+        found && isDrawingReduction(found) ? drawingReductionLabel(found) : undefined;
       const labelTolerance = (6 * viewport.w) / width;
       const labelOrigin =
         pointLabel &&
@@ -1539,7 +1545,17 @@ export function DrawingEditor({
         p.y >= pointLabel.y - 18 - labelTolerance &&
         p.y <= pointLabel.y + labelTolerance
           ? pointLabel.center
-          : undefined;
+          : reductionLabel &&
+              found &&
+              isDrawingReduction(found) &&
+              !found.groupId &&
+              Math.hypot(p.x - found.x, p.y - found.y) > 8 &&
+              p.x >= reductionLabel.left - labelTolerance &&
+              p.x <= reductionLabel.left + reductionLabel.width + labelTolerance &&
+              p.y >= reductionLabel.top - labelTolerance &&
+              p.y <= reductionLabel.top + reductionLabel.height + labelTolerance
+            ? { x: reductionLabel.x, y: reductionLabel.y }
+            : undefined;
       const corner =
         editingSelection && selectedElement?.type === 'polyline' && selectedElement.hatch
           ? selectedElement.points
@@ -1833,6 +1849,15 @@ export function DrawingEditor({
         const dx = state.dx - (g.heldAt?.dx ?? 0),
           dy = state.dy - (g.heldAt?.dy ?? 0);
         if (Math.hypot(dx, dy) < 3) return;
+        if (g.labelOrigin && isDrawingReduction(g.original)) {
+          setDraftElement(
+            positionDrawingReductionLabel(g.original, {
+              x: g.labelOrigin.x + (dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (dy / g.width) * g.view.w,
+            }),
+          );
+          return;
+        }
         if (g.labelOrigin && (g.original.type === 'point' || g.original.type === 'marker')) {
           setDraftElement(
             positionDrawingPointLabel(g.original, {
@@ -2015,6 +2040,13 @@ export function DrawingEditor({
         )
           updateElement(
             positionDrawingPointLabel(g.original, {
+              x: g.labelOrigin.x + (dx / g.width) * g.view.w,
+              y: g.labelOrigin.y + (dy / g.width) * g.view.w,
+            }),
+          );
+        else if (Math.hypot(dx, dy) >= 3 && g.labelOrigin && isDrawingReduction(g.original))
+          updateElement(
+            positionDrawingReductionLabel(g.original, {
               x: g.labelOrigin.x + (dx / g.width) * g.view.w,
               y: g.labelOrigin.y + (dy / g.width) * g.view.w,
             }),
@@ -2620,6 +2652,8 @@ export function DrawingEditor({
                         }
                         onChange={updateElement}
                       />
+                    ) : selectedElement && isDrawingReduction(selectedElement) ? (
+                      <DrawingReductionControl element={selectedElement} onChange={updateElement} />
                     ) : undefined
                   }
                   onFillPage={
@@ -3290,6 +3324,9 @@ export function DrawingEditor({
             )}
             {selectedElement.type === 'symbol' && (
               <>
+                {isDrawingReduction(selectedElement) && (
+                  <DrawingReductionControl element={selectedElement} onChange={updateElement} />
+                )}
                 <SelectField
                   label="Símbolo selecionado"
                   value={selectedElement.symbolCode}

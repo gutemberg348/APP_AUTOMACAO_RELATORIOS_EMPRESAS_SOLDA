@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { drawingSymbols, drawingSymbolDefinition } from './drawing-symbols';
+import { drawingReductionLabel } from './drawing-reduction';
+export {
+  drawingReductionLabel,
+  positionDrawingReductionLabel,
+  isDrawingReduction,
+  type DrawingSymbol,
+} from './drawing-reduction';
 export { drawingSymbols, drawingSymbolDefinition, drawingSymbolPreview } from './drawing-symbols';
 import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
@@ -139,6 +146,16 @@ export const drawingElementSchema = z.discriminatedUnion('type', [
       ...xy,
       rotation: z.number().finite().min(-360).max(360),
       scale: z.number().finite().min(0.5).max(3).optional(),
+      reduction: z
+        .object({
+          inlet: z.string().max(20).default(''),
+          outlet: z.string().max(20).default(''),
+          labelSize: z.number().finite().min(10).max(40).optional(),
+          labelX: z.number().finite().min(-160).max(160).optional(),
+          labelY: z.number().finite().min(-160).max(160).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -481,6 +498,15 @@ export function hitElement(
         );
       }
       if (e.type === 'symbol' || e.type === 'image') {
+        const label = e.type === 'symbol' ? drawingReductionLabel(e) : undefined;
+        if (
+          label &&
+          p.x >= label.left - tolerance &&
+          p.x <= label.left + label.width + tolerance &&
+          p.y >= label.top - tolerance &&
+          p.y <= label.top + label.height + tolerance
+        )
+          return true;
         const bounds =
             e.type === 'image'
               ? { x: -e.width / 2, y: -e.height / 2, width: e.width, height: e.height }
@@ -794,6 +820,15 @@ export function drawingSvg(
           { x: label.left + label.width, y: label.y + 3 },
         ];
       }
+      if (e.type === 'symbol' && drawingReductionLabel(e)) {
+        const bounds = drawingSelectionBounds([e]);
+        positions = [
+          { x: bounds.x, y: bounds.y },
+          { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+        ];
+        rotation = 0;
+        origin = { x: 0, y: 0 };
+      }
       const x = Math.min(...positions.map((p) => p.x)) - 8,
         y = Math.min(...positions.map((p) => p.y)) - 8;
       const width = Math.max(...positions.map((p) => p.x)) - x + 8,
@@ -859,6 +894,9 @@ export function drawingSvg(
           body += `<path d="${definition.fillPath}" ${transform} fill="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}"/>`;
         if (definition.accentPath)
           body += `<path d="${definition.accentPath}" ${transform} stroke="${e.strokeColor ?? (selected ? '#1764C0' : '#285580')}" stroke-width="${drawingStrokeWidth(e)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashAttribute}/>`;
+        const label = drawingReductionLabel(e);
+        if (label)
+          body += `<text data-reduction-label="true" x="${num(label.x)}" y="${num(label.y)}" text-anchor="middle" dominant-baseline="central" font-family="Arial" font-size="${num(label.size)}" fill="${e.strokeColor ?? (selected ? '#1764C0' : (definition.color ?? color))}">${esc(label.text)}</text>`;
       }
       if (e.type === 'text')
         body += `<text x="${e.x}" y="${e.y}" transform="rotate(${e.rotation ?? 0} ${e.x} ${e.y})" font-family="Arial" font-size="${e.size ?? 20}" fill="${e.color ?? (selected ? '#1764C0' : '#285580')}">${e.text
