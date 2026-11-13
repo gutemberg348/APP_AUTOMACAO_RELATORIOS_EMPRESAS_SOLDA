@@ -38,6 +38,10 @@ export function render(report: PdfReport, images: Map<string, string>) {
   const info = `<div class="rdo-repeated"><table class="reference-table"><tbody><tr><th>DATA</th><td>${data.date ? displayDate(String(data.date)) : displayDate(report.reportDate)}</td><th>INSPETOR</th><td>${summary(data.inspector, 'Inspetor')}</td><th>VISTO</th><td>${summary(data.visa, 'Visto')}</td></tr>${fields.map((row) => `<tr>${row.map(([label, key]) => `<th>${label}</th><td>${summary(data[key!], label!)}</td>`).join('')}${row.length < 3 ? '<th></th><td></td>' : ''}</tr>`).join('')}</tbody></table></div>`;
   let content = overflow.join('');
   let fullDrawingPages = '';
+  // A mix of full-page and inline drawings must still follow the saved order.
+  const separateDrawings = report.drawings.some(
+    (drawing) => drawingDataSchema.parse(drawing.data).page === 'portrait',
+  );
   // A daily report has no cover or separate verdict page.
   for (const drawing of report.drawings) {
     const cad = drawingDataSchema.parse(drawing.data);
@@ -51,7 +55,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
         })),
         { images: drawingImageSources(report, images) },
       )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision);
-    if (cad.page === 'portrait') fullDrawingPages += sheet(report, 'DESENHO', drawingContent);
+    if (separateDrawings) fullDrawingPages += sheet(report, 'DESENHO', drawingContent);
     else content += drawingContent;
   }
   for (const m of report.media.filter(

@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { DrawingWorkspace } from './drawing-workspace';
+import { DrawingSheetPositionPicker } from './drawing-sheet-position-picker';
+import { insertDrawingSheet, moveDrawingSheet } from './drawing-sheet-order';
 import { DrawingSelectionPanel } from './drawing-selection-panel';
 import { DrawingSelectionQuickOptions } from './drawing-selection-quick-options';
 import { DrawingPointLabelControl } from './drawing-point-label-control';
@@ -2275,19 +2277,23 @@ export function DrawingEditor({
     editingSelection,
     selectionOpacity,
   ]);
-  const addSheet = () => {
+  const [sheetPositionMode, setSheetPositionMode] = useState<'add' | 'move'>();
+  const insertSheet = (position: number) => {
     if (!editable || value.length >= 12) return;
     Keyboard.dismiss();
     let number = value.length + 1;
     while (value.some((d) => d.data.title === 'Desenho ' + String(number).padStart(2, '0')))
       number++;
-    commit([
-      ...value,
-      {
-        data: { ...newDrawingData(), title: 'Desenho ' + String(number).padStart(2, '0') },
-      },
-    ]);
-    setIndex(value.length);
+    commit(
+      insertDrawingSheet(
+        value,
+        {
+          data: { ...newDrawingData(), title: 'Desenho ' + String(number).padStart(2, '0') },
+        },
+        position,
+      ),
+    );
+    setIndex(position);
     setTool('pencil');
     setSelected('');
     setStart(undefined);
@@ -2299,6 +2305,42 @@ export function DrawingEditor({
     gesture.current = undefined;
     setView({ x: 0, y: 0, w: 1000, h: 800 });
   };
+  const addSheet = () => {
+    if (!editable || value.length >= 12 || annotationMode) return;
+    Keyboard.dismiss();
+    resetGesture();
+    if (value.length) setSheetPositionMode('add');
+    else insertSheet(0);
+  };
+  const openSheetPosition = () => {
+    if (!editable || value.length < 2 || annotationMode) return;
+    Keyboard.dismiss();
+    resetGesture();
+    setSheetPositionMode('move');
+  };
+  const sheetPositionDialog = sheetPositionMode ? (
+    <DrawingSheetPositionPicker
+      sheets={value}
+      mode={sheetPositionMode}
+      currentIndex={activeIndex}
+      onClose={() => setSheetPositionMode(undefined)}
+      onChoose={(position) => {
+        if (sheetPositionMode === 'add') insertSheet(position);
+        else if (editable) {
+          const next = moveDrawingSheet(value, activeIndex, position);
+          if (next !== value) {
+            commit(next);
+            setIndex(position);
+            finishSelection();
+            setMessage(
+              `Desenho movido para a ${position + 1}ª posição. Salve o relatório para atualizar o PDF.`,
+            );
+          }
+        }
+        setSheetPositionMode(undefined);
+      }}
+    />
+  ) : null;
   const focusSelection = () => {
     if (!transformElements.length) return;
     const bounds = drawingSelectionBounds(transformElements);
@@ -3848,6 +3890,15 @@ export function DrawingEditor({
         )}
         {expanded && (
           <>
+            {!annotationMode && value.length > 1 && (
+              <Button
+                title="Alterar posição do desenho"
+                small
+                secondary
+                icon="layers"
+                onPress={openSheetPosition}
+              />
+            )}
             <Button
               title="Novo desenho"
               small
@@ -4670,7 +4721,16 @@ export function DrawingEditor({
         )}
       </View>
       {data && editable && (
-        <View style={{ alignSelf: 'flex-start' }}>
+        <View style={[styles.row, { alignSelf: 'flex-start' }]}>
+          {!annotationMode && value.length > 1 && (
+            <Button
+              title={`Posição ${activeIndex + 1} de ${value.length} · Alterar`}
+              small
+              secondary
+              icon="layers"
+              onPress={openSheetPosition}
+            />
+          )}
           <Button
             title="Excluir desenho"
             variant="ghost"
@@ -4931,6 +4991,7 @@ export function DrawingEditor({
       {clearDialog}
       {cleanupDialog}
       {deleteDialog}
+      {sheetPositionDialog}
       {pointRemovalDialog}
     </View>
   );
@@ -5042,6 +5103,7 @@ export function DrawingEditor({
               {data ? clearDialog : null}
               {cleanupDialog}
               {deleteDialog}
+              {sheetPositionDialog}
               {pointRemovalDialog}
             </>
           }
