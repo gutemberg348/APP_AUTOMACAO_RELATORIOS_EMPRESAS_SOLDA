@@ -149,11 +149,14 @@ reportMediaRoutes.post(
         });
         if (!report) throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado.');
         assertEditable(report.status, req.user!);
-        if (input.sectionKey === 'test-photos' && report.reportType?.code !== 'LP')
+        if (
+          input.sectionKey === 'test-photos' &&
+          !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '')
+        )
           throw new AppError(
             400,
             'INVALID_MEDIA_SECTION',
-            'Fotos do ensaio está disponível no relatório de Líquido Penetrante.',
+            'Fotos do ensaio está disponível nos relatórios de Líquido Penetrante, Teste Hidrostático e Medição de Espessura.',
           );
         if (
           input.reportPointId &&
@@ -324,11 +327,14 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
     });
     if (!report) throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado.');
     assertEditable(report.status, req.user!);
-    if (input.sectionKey === 'test-photos' && report.reportType?.code !== 'LP')
+    if (
+      input.sectionKey === 'test-photos' &&
+      !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '')
+    )
       throw new AppError(
         400,
         'INVALID_MEDIA_SECTION',
-        'Fotos do ensaio está disponível no relatório de Líquido Penetrante.',
+        'Fotos do ensaio está disponível nos relatórios de Líquido Penetrante, Teste Hidrostático e Medição de Espessura.',
       );
     const item = await tx.reportMedia.findFirst({ where: { id: mediaId, reportId } });
     if (!item) throw new AppError(404, 'NOT_FOUND', 'Imagem não encontrada.');

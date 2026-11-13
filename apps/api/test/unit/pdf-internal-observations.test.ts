@@ -54,8 +54,11 @@ describe('Internal drawing observations', () => {
       } as unknown as PdfReport;
       const before = structuredClone(report);
       const printable = reportForPdf(report);
-      expect(printable.drawings[0]!.data).not.toHaveProperty('notes');
-      expect(printable.drawings[0]!.data).not.toHaveProperty('notesDrawing');
+      if (code === 'TH' || code === 'ME') expect(printable.drawings).toEqual([]);
+      else {
+        expect(printable.drawings[0]!.data).not.toHaveProperty('notes');
+        expect(printable.drawings[0]!.data).not.toHaveProperty('notesDrawing');
+      }
       const html = render(printable, new Map());
       for (const secret of [
         'INTERNAL-TYPED-NOTE',
@@ -64,7 +67,8 @@ describe('Internal drawing observations', () => {
         'drawing-notes',
       ])
         expect(html).not.toContain(secret);
-      expect(html).toContain('PUBLIC-DRAWING-TEXT');
+      if (code === 'TH' || code === 'ME') expect(html).not.toContain('PUBLIC-DRAWING-TEXT');
+      else expect(html).toContain('PUBLIC-DRAWING-TEXT');
       expect(html).toContain(
         code === 'TH' || code === 'RDO' ? 'FORMAL-OBSERVATION' : 'FORMAL-CONCLUSION',
       );

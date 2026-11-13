@@ -33,6 +33,81 @@ beforeAll(async () => {
 });
 afterAll(() => prisma.$disconnect());
 
+it('uploads, edits, reopens and deletes a measurement gallery photo without creating a point card', async () => {
+  const create = await request(app).post('/reports').set(auth()).send({
+    companyId,
+    projectId,
+    reportTypeId: typeId,
+    number: 'ME-GALLERY-01',
+    points: [],
+  });
+  expect(create.status, JSON.stringify(create.body)).toBe(201);
+  const id = create.body.data.id;
+  const marks = {
+    elements: [],
+    measurementDetails: {
+      side: 'FRENTE',
+      discontinuity: '-',
+      acceptable: false,
+      projectThickness: '6 mm',
+    },
+    measurements: [{ id: 'm1', number: '1', x: 0.4, y: 0.6, value: 0 }],
+  };
+  const image = await sharp({
+    create: { width: 300, height: 500, channels: 3, background: '#C9CED0' },
+  })
+    .png()
+    .toBuffer();
+  const upload = await request(app)
+    .post(`/reports/${id}/media`)
+    .set(auth())
+    .field('version', String(create.body.data.version))
+    .field('sectionKey', 'test-photos')
+    .field('annotations', JSON.stringify(marks))
+    .attach('file', image, 'tanque.png');
+  expect(upload.status, JSON.stringify(upload.body)).toBe(201);
+  const before = (
+    await request(app)
+      .get('/reports/' + id)
+      .set(auth())
+  ).body.data;
+  expect(before.points).toEqual([]);
+  expect(before.media[0].annotations).toEqual(marks);
+  marks.measurementDetails.side = 'LATERAL DIREITA';
+  marks.measurements[0]!.value = 5.9;
+  const patch = await request(app)
+    .patch(`/reports/${id}/media/${before.media[0].id}`)
+    .set(auth())
+    .send({
+      version: before.version,
+      sectionKey: 'test-photos',
+      reportPointId: null,
+      caption: '',
+      annotations: marks,
+    });
+  expect(patch.status, JSON.stringify(patch.body)).toBe(200);
+  const reopened = (
+    await request(app)
+      .get('/reports/' + id)
+      .set(auth())
+  ).body.data;
+  expect(reopened.media[0].annotations).toEqual(marks);
+  expect(reopened.points).toEqual([]);
+  expect((await new PdfService().preview(id)).subarray(0, 5).toString()).toBe('%PDF-');
+  const removed = await request(app)
+    .delete(`/reports/${id}/media/${before.media[0].id}`)
+    .set(auth())
+    .send({ version: reopened.version });
+  expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+  expect(
+    (
+      await request(app)
+        .get('/reports/' + id)
+        .set(auth())
+    ).body.data.media,
+  ).toEqual([]);
+}, 90000);
+
 it('saves numbered photo measurements, updates values and retains original media and PDF output', async () => {
   const create = await request(app)
     .post('/reports')

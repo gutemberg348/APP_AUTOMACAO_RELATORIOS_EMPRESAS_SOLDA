@@ -91,7 +91,7 @@ it('paginates long photo measurement lists without discarding readings', () => {
   };
   const html = render(report, new Map([['m', 'main-photo']]));
   expect(html.match(/class="measurement-reading"/g)).toHaveLength(30);
-  expect(html.match(/class="measurement-photo report-photo-frame"/g)).toHaveLength(5);
+  expect(html.match(/class="measurement-photo report-photo-frame"/g)).toHaveLength(6);
   expect(html).toContain('PONTO 30:');
 });
 

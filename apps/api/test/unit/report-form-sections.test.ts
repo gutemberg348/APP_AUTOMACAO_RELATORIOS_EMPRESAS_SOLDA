@@ -29,7 +29,9 @@ describe('Complete report forms', () => {
   it.each(reportTypeCodes)('%s provides points/photos, drawings and signers', (code) => {
     const base = JSON.stringify(reportSections[code]);
     const sections = reportFormSections(code, reportSections[code]!);
-    for (const content of ['points', 'drawings', 'signatures'])
+    for (const content of code === 'TH' || code === 'ME'
+      ? ['testPhotos', 'signatures']
+      : ['points', 'drawings', 'signatures'])
       expect(sections.filter((section) => section.content === content)).toHaveLength(1);
     expect(hasReportForm(code)).toBe(true);
     expect(JSON.stringify(reportSections[code])).toBe(base);

@@ -1,8 +1,7 @@
+import { isHydrostaticTestPhoto } from '@weldcosta/shared';
 import {
   cover,
   identification,
-  drawings,
-  photoRows,
   sheet,
   band,
   annotations,
@@ -92,9 +91,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   if (value(data, 'generalData.manufacturer'))
     technical += row([['FABRICANTE DO EQUIPAMENTO', 'generalData.manufacturer']], '', true);
   html += sheet(report, titles.TH!, technical, false, 'th-technical');
-  html += drawings(report, images);
-  const photos = photoRows(report, images, 'TH');
-  if (photos) html += sheet(report, titles.TH!, photos);
+  html += hydrostaticPhotoSheets(report, images);
   return (
     html +
     conclusion(
@@ -105,4 +102,25 @@ export function render(report: PdfReport, images: Map<string, string>) {
       true,
     )
   );
+}
+
+/** Six real images per sheet. Empty legacy points never reserve a photo slot. */
+export function hydrostaticPhotoSheets(report: PdfReport, images: Map<string, string>) {
+  const photos = report.media.filter(isHydrostaticTestPhoto);
+  let html = '';
+  for (let offset = 0; offset < photos.length; offset += 6) {
+    const page = photos.slice(offset, offset + 6);
+    let rows = '';
+    for (let i = 0; i < page.length; i += 2) {
+      const cells = [page[i], page[i + 1]]
+        .map(
+          (photo) =>
+            `<figure class="th-test-photo">${photo ? `<div class="th-test-photo-image"><img alt="${escape(photo.caption || 'Imagem do ensaio')}" src="${images.get(photo.id) || ''}"></div>${photo.caption ? `<figcaption>${escape(photo.caption)}</figcaption>` : ''}` : ''}</figure>`,
+        )
+        .join('');
+      rows += `<div class="th-test-photo-row">${band('IMAGENS DO ENSAIO')}<div class="th-test-photo-columns">${cells}</div></div>`;
+    }
+    html += sheet(report, titles.TH!, rows, false, 'th-test-photos');
+  }
+  return html;
 }

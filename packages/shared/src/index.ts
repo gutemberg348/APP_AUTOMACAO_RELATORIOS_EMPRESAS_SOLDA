@@ -20,3 +20,6 @@ export * from './signature-geometry';
 export * from './report-status';
 export * from './report-review';
 export * from './users';
+
+export * from './hydrostatic-photos';
+export * from './measurement-photos';

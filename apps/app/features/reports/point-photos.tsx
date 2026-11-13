@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Text, View, Pressable } from 'react-native';
-import type { ReportMedia } from '@weldcosta/shared';
-import { drawingId } from '@weldcosta/shared';
+import type { ReportMedia, PhotoAnnotations } from '@weldcosta/shared';
+import { drawingId, isHydrostaticTestPhoto } from '@weldcosta/shared';
 import { MediaSourcePicker } from '../../components/media-source-picker';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Button, Field, Notice } from '../../components/ui';
@@ -27,9 +27,11 @@ export function PointPhotos({
   onPickingChange,
   additional = false,
   testPhotos = false,
+  hydrostatic = false,
   groupedWelds = false,
   linkedPointIds,
   measurement = false,
+  measurementDefaults,
 }: {
   draftKey: string;
   pointId: string | null;
@@ -44,9 +46,11 @@ export function PointPhotos({
   onPickingChange(busy: boolean): void;
   additional?: boolean;
   testPhotos?: boolean;
+  hydrostatic?: boolean;
   groupedWelds?: boolean;
   linkedPointIds?: string[];
   measurement?: boolean;
+  measurementDefaults?: Record<string, PhotoAnnotations['measurementDetails']>;
 }) {
   const { tokens: t, styles } = useTheme();
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -59,13 +63,18 @@ export function PointPhotos({
     editable: boolean;
   }>();
   const draft = useReportPhotoDrafts((state) => state.reports[draftKey] ?? emptyPhotoDrafts);
+  const inspectionGallery = hydrostatic || (measurement && testPhotos);
   const inSection = (sectionKey?: string | null) =>
-    testPhotos ? sectionKey === 'test-photos' : sectionKey !== 'test-photos';
+    inspectionGallery
+      ? sectionKey !== 'drawing'
+      : testPhotos
+        ? sectionKey === 'test-photos'
+        : sectionKey !== 'test-photos';
   const update = (
     change: Parameters<ReturnType<typeof useReportPhotoDrafts.getState>['update']>[1],
   ) => useReportPhotoDrafts.getState().update(draftKey, change);
   const belongsToGroup = (key?: string | null) =>
-    key === pointId || (!!key && !!linkedPointIds?.includes(key));
+    inspectionGallery || key === pointId || (!!key && !!linkedPointIds?.includes(key));
   const pending = draft.photos.filter(
     (photo) =>
       belongsToGroup(photo.pointKey) &&
@@ -75,6 +84,7 @@ export function PointPhotos({
   const existing = media.filter(
     (photo) =>
       belongsToGroup(photo.reportPointId) &&
+      (!inspectionGallery || isHydrostaticTestPhoto(photo)) &&
       inSection(photo.sectionKey) &&
       !photo.clientUploadId?.startsWith('drawing-image-') &&
       !draft.removedIds.includes(photo.id),
@@ -292,7 +302,11 @@ export function PointPhotos({
         <Text style={styles.muted}>
           {additional
             ? testPhotos
-              ? 'Opcional. Escolha várias fotos do ensaio, sem vinculá-las aos pontos. O PDF organiza três fotos por folha após os desenhos. Sem fotos, essas folhas não aparecem.'
+              ? measurement
+                ? 'Adicione as fotos dos lados do equipamento. Toque em cada foto para informar lado, descontinuidade, resultado e espessura de projeto. Marque os círculos numerados e preencha as medições abaixo. Fotos de apoio podem ficar sem pontos.'
+                : hydrostatic
+                  ? 'Escolha uma ou várias imagens do ensaio. O PDF organiza até seis fotos por folha, duas lado a lado. As próximas ocupam os espaços livres. Sem fotos, essa folha não aparece.'
+                  : 'Opcional. Escolha várias fotos do ensaio, sem vinculá-las aos pontos. O PDF organiza três fotos por folha após os desenhos. Sem fotos, essas folhas não aparecem.'
               : 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
             : groupedWelds
               ? 'Uma foto pode mostrar várias soldas. Informe todas na ficha; as fotos continuam vinculadas ao grupo ao editar sua identificação.'
@@ -328,7 +342,11 @@ export function PointPhotos({
         maxSelections={testPhotos || groupedWelds ? 100 : additional ? 1 : Math.max(1, 2 - count)}
         selectionDescription={
           testPhotos
-            ? 'Escolha várias fotos na ordem desejada. Você pode adicionar mais depois. O PDF divide automaticamente em três fotos por folha.'
+            ? measurement
+              ? 'Escolha as fotos na ordem desejada: duas lado a lado no PDF. Depois, toque em cada foto para marcar os pontos e preencher os valores.'
+              : hydrostatic
+                ? 'Escolha as imagens na ordem desejada. Você pode adicionar mais depois. O PDF organiza duas por linha, até seis por folha.'
+                : 'Escolha várias fotos na ordem desejada. Você pode adicionar mais depois. O PDF divide automaticamente em três fotos por folha.'
             : groupedWelds
               ? 'Selecione uma ou várias fotos das soldas desta ficha. Não é obrigatório adicionar duas fotos.'
               : undefined
@@ -370,7 +388,7 @@ export function PointPhotos({
         (pending.length > 0 ||
           media.some(
             (photo) =>
-              !photo.reportPointId &&
+              (inspectionGallery || !photo.reportPointId) &&
               inSection(photo.sectionKey) &&
               (draft.captionEdits?.[photo.id] !== undefined ||
                 draft.annotationEdits?.[photo.id] !== undefined ||
@@ -402,6 +420,7 @@ export function PointPhotos({
           source={editingPhoto.source}
           editable={editingPhoto.editable}
           measurement={measurement}
+          measurementDefaults={measurementDefaults?.[editingPhoto.id] ?? measurementDefaults?.['*']}
           value={
             (editingPhoto.pending
               ? draft.photos.find((p) => p.id === editingPhoto.id)?.annotations

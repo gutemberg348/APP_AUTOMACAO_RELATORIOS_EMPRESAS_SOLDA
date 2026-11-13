@@ -65,6 +65,9 @@ describe('Optional LP test photo sheets', () => {
       if (code === 'LP') {
         expect(index).toBe(sections.findIndex((s) => s.content === 'drawings') + 1);
         expect(sections[index]?.title).toBe('Fotos do ensaio');
+      } else if (code === 'TH' || code === 'ME') {
+        expect(index).toBeGreaterThan(-1);
+        expect(sections.some((s) => s.content === 'drawings')).toBe(false);
       } else expect(index).toBe(-1);
     },
   );

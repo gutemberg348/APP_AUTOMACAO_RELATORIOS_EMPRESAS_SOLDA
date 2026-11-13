@@ -177,7 +177,7 @@ export class PdfService implements PdfProvider {
       const drawingIndex = imageDrawings.get(media.clientUploadId ?? media.id) ?? -1;
       const pointIndex = report.points.findIndex((point) => point.id === media.reportPointId);
       const path =
-        media.sectionKey === 'test-photos'
+        ['TH', 'ME'].includes(report.reportType.code) || media.sectionKey === 'test-photos'
           ? ['testPhotos']
           : drawingIndex >= 0
             ? ['drawings', drawingIndex]

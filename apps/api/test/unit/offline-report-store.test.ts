@@ -128,6 +128,12 @@ it.each(reportTypeCodes)(
           pointKey: 'p-local',
           caption: 'LEGENDA',
           annotations: {
+            measurementDetails: {
+              side: 'LATERAL',
+              discontinuity: '-',
+              acceptable: false,
+              projectThickness: '6 mm',
+            },
             elements: [
               { id: 'paint', type: 'line', x1: 10, y1: 20, x2: 40, y2: 60, strokeColor: '#1764C0' },
             ],
@@ -151,6 +157,7 @@ it.each(reportTypeCodes)(
     expect(photos.photos[0]?.pointKey).toBe('p-local');
     expect(photos.photos[0]?.caption).toBe('LEGENDA');
     expect(photos.photos[0]?.annotations).toMatchObject({
+      measurementDetails: { side: 'LATERAL', acceptable: false, projectThickness: '6 mm' },
       elements: [{ id: 'paint', strokeColor: '#1764C0' }],
       measurements: [{ number: '1', value: 5.9 }],
     });

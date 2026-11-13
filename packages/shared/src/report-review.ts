@@ -51,12 +51,12 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
       warnings.push(`${label}: ${issue.message}`);
     }
   }
-  const sourcePoints = report.points ?? [];
+  const sourcePoints = ['TH', 'ME'].includes(report.reportType.code) ? [] : (report.points ?? []);
   const groups = report.reportType.code === 'LP' ? lpWeldGroups(sourcePoints) : undefined;
   const points = groups
     ? groups.map((group) => ({ ...sourcePoints[group.index]!, number: group.number }))
     : sourcePoints;
-  if (report.points && !points.length && report.reportType.code !== 'RDO')
+  if (report.points && !points.length && !['RDO', 'TH', 'ME'].includes(report.reportType.code))
     warnings.push('Nenhum ponto foi registrado nesta inspeção.');
   const numbered = (items: typeof points) => items.map((point) => point.number).join(', ');
   const unchecked = points.filter(
@@ -77,7 +77,7 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
     );
     if (withoutPhotos.length) warnings.push('Pontos sem fotos: ' + numbered(withoutPhotos) + '.');
   }
-  if (report.drawings?.length) {
+  if (!['TH', 'ME'].includes(report.reportType.code) && report.drawings?.length) {
     const marked = new Set(
       report.drawings.flatMap((drawing, index) => {
         const parsed = drawingDataSchema.safeParse(drawing.data);

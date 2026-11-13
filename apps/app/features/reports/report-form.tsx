@@ -1,3 +1,4 @@
+import { isHydrostaticTestPhoto, measurementPhotoDefaults } from '@weldcosta/shared';
 import { ReportPhotoSaveError } from './report-photo-error';
 import { cleanReportDraft } from './report-draft-clean';
 import { useTheme } from '../../utils/theme';
@@ -585,11 +586,21 @@ function ReportFormContent({
       const count =
         (report?.media ?? []).filter(
           (photo) =>
-            photo.sectionKey === 'test-photos' && !photoDrafts.removedIds.includes(photo.id),
-        ).length + photoDrafts.photos.filter((photo) => photo.sectionKey === 'test-photos').length;
+            (['TH', 'ME'].includes(type.code)
+              ? isHydrostaticTestPhoto(photo)
+              : photo.sectionKey === 'test-photos') && !photoDrafts.removedIds.includes(photo.id),
+        ).length +
+        photoDrafts.photos.filter((photo) =>
+          ['TH', 'ME'].includes(type.code)
+            ? isHydrostaticTestPhoto(photo)
+            : photo.sectionKey === 'test-photos',
+        ).length;
+      if (type.code === 'ME') return `${count} fotos · círculos numerados e medições por foto`;
       return count
-        ? `${count} fotos · ${Math.ceil(count / 3)} folhas no PDF`
-        : 'Opcional · três fotos por folha após os desenhos';
+        ? `${count} fotos · ${Math.ceil(count / (type.code === 'TH' ? 6 : 3))} folhas no PDF`
+        : type.code === 'TH'
+          ? 'Opcional · até seis fotos por folha, duas lado a lado'
+          : 'Opcional · três fotos por folha após os desenhos';
     }
     if (section.content === 'signatures') return `${watchedSignatures.length} responsáveis`;
     if (section.content === 'discontinuities')
@@ -742,17 +753,19 @@ function ReportFormContent({
       );
       setSaveIssues([
         {
-          path: cause.location.drawing
-            ? ['drawings']
-            : cause.location.testPhotos
-              ? ['testPhotos']
-              : pointIndex >= 0
-                ? ['points', String(pointIndex)]
-                : ['points'],
+          path: ['TH', 'ME'].includes(type.code)
+            ? ['testPhotos']
+            : cause.location.drawing
+              ? ['drawings']
+              : cause.location.testPhotos
+                ? ['testPhotos']
+                : pointIndex >= 0
+                  ? ['points', String(pointIndex)]
+                  : ['points'],
           label: cause.location.label,
           message: cause.message,
           guidance:
-            (cause.location.testPhotos
+            (['TH', 'ME'].includes(type.code) || cause.location.testPhotos
               ? 'Abra Fotos do ensaio e confira a foto indicada. Ela continua no telefone. Corrija o arquivo ou retire somente esta foto e salve novamente.'
               : cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
             'Abra o ponto e a foto indicados. As fotos pendentes continuam no telefone; confira o motivo acima e toque em Salvar para tentar o envio novamente.',
@@ -1523,6 +1536,27 @@ function ReportFormContent({
                       onPickingChange={setPickingPhoto}
                       additional
                       testPhotos
+                      hydrostatic={type.code === 'TH'}
+                      measurement={type.code === 'ME'}
+                      measurementDefaults={
+                        type.code === 'ME'
+                          ? {
+                              '*': measurementPhotoDefaults(
+                                undefined,
+                                watchedData.projectThickness,
+                              ),
+                              ...Object.fromEntries(
+                                (report?.media ?? []).map((photo) => [
+                                  photo.id,
+                                  measurementPhotoDefaults(
+                                    watchedPoints.find((p) => p.id === photo.reportPointId),
+                                    watchedData.projectThickness,
+                                  ),
+                                ]),
+                              ),
+                            }
+                          : undefined
+                      }
                     />
                   ) : section.content === 'signatures' ? (
                     <ReportSigners

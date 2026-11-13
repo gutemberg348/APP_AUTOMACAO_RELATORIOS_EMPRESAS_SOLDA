@@ -31,6 +31,8 @@ export function paginateEvs() {
     let sheet = original;
     let flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
     const blocks = Array.from(flow.children);
+    const measurement = original.classList.contains('measurement-sheet');
+    const maxPhotoRows = measurement ? 2 : 3;
     const photoBlocks = blocks.filter((block) => block.querySelector('.report-photo-frame'));
     if (photoBlocks.length) {
       // Every pair keeps the same image height, including a half-empty last row.
@@ -59,8 +61,17 @@ export function paginateEvs() {
           overhead: block.getBoundingClientRect().height - height + followingHeight,
         };
       });
-      const available =
-        flow.getBoundingClientRect().height / 3 - Math.max(...measures.map((m) => m.overhead)) - 1;
+      const leadingHeight = blocks
+        .slice(0, blocks.indexOf(photoBlocks[0]!))
+        .reduce((height, block) => height + block.getBoundingClientRect().height, 0);
+      const pairedOverhead = Math.max(
+        ...measures.map((m, i) => m.overhead + (measures[i + 1]?.overhead ?? 0)),
+      );
+      const available = measurement
+        ? (flow.getBoundingClientRect().height - leadingHeight - pairedOverhead) / 2 - 2
+        : flow.getBoundingClientRect().height / 3 -
+          Math.max(...measures.map((m) => m.overhead)) -
+          1;
       // Long measurement tables may need fewer rows; preserve their readable
       // text and a useful photo rather than dropping data to force six images.
       const height = Math.max(
@@ -76,7 +87,7 @@ export function paginateEvs() {
       flow.append(block);
       if (
         (block.getBoundingClientRect().bottom > flow.getBoundingClientRect().bottom + 1 ||
-          (photoRow && photoRows >= 3)) &&
+          (photoRow && photoRows >= maxPhotoRows)) &&
         flow.children.length > 1
       ) {
         block.remove();

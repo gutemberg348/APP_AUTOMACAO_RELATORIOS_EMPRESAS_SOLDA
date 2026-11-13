@@ -1,4 +1,14 @@
 export const referenceStyles = `
+.th-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
+.th-test-photo-row{min-height:0;display:flex;flex-direction:column;border-bottom:1px solid #111}
+.th-test-photo-row>.reference-band{flex:none;font-size:17px;padding:2mm}
+.th-test-photo-columns{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.th-test-photo{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column}
+.th-test-photo+.th-test-photo{border-left:1px solid #111}
+.th-test-photo-image{flex:1;min-height:0;position:relative;overflow:hidden}
+.th-test-photo-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+.th-test-photo figcaption{padding:1mm 2mm;font-size:12px;overflow-wrap:anywhere;white-space:pre-wrap}
+
 .lp-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
 .lp-test-photo{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .lp-test-photo+.lp-test-photo{border-top:1px solid #111}
@@ -42,12 +52,17 @@ export const referenceStyles = `
 .reference-conclusion.continuation{min-height:0}
 .reference-final:has(.evs-contact) .reference-conclusion{min-height:140mm}
 .reference-final .evs-signers{min-height:63mm;padding-top:8mm}
-.measurement-sheet .reference-photo-tab{font-size:14px;padding:1.5mm}
+.measurement-sheet{--report-photo-height:68mm}
+.measurement-sheet .reference-photo-tab{font-size:15px;padding:1mm;line-height:1.2}
+.measurement-sheet .reference-band{font-size:19px;padding:2mm}
 .measurement-sheet .reference-conclusion{font-size:20px}
 .measurement-sheet .evs-signer,.measurement-sheet .evs-result{font-size:14px}
 .measurement-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-.measurement-cell{min-width:0}.measurement-cell+.measurement-cell{box-shadow:inset 1px 0 #111}
-.measurement-reading{padding:2mm 1mm;border-bottom:1px solid #111;min-height:8mm;font-size:15px;overflow-wrap:anywhere}
+.measurement-cell{min-width:0;display:flex;flex-direction:column}.measurement-cell>*{flex-shrink:0}.measurement-cell+.measurement-cell{border-left:1px solid #111}
+.measurement-metadata{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111;font-size:14px;line-height:1.2;overflow-wrap:anywhere}
+.measurement-metadata>div{padding:1mm}.measurement-metadata>div+div{border-left:1px solid #111}.measurement-metadata span{color:#16789c}
+.measurement-reading{padding:2mm 1mm;border-bottom:1px solid #111;min-height:10mm;font-size:16px;overflow-wrap:anywhere}
+.measurement-with-readings:after{content:'';flex:1;min-height:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(10mm - 1px),#111 calc(10mm - 1px),#111 10mm)}
 .measurement-reading span{color:#16789c}.measurement-block{break-inside:avoid;border-bottom:1px solid #111}
 .rdo-sheet .evs-header{height:22mm;grid-template-columns:22% 48% 30%}.rdo-sheet .evs-heading{font-size:19px}
 .rdo-sheet .evs-header table{font-size:12px}.rdo-repeated{flex-shrink:0}

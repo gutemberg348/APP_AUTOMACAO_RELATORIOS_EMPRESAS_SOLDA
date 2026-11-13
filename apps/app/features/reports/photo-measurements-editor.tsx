@@ -16,6 +16,7 @@ import {
   type PhotoMeasurement,
 } from '@weldcosta/shared';
 import { PickerSheet } from '../../components/picker-sheet';
+import { SelectField } from '../../components/select-field';
 import { Button, Field, Notice } from '../../components/ui';
 import { useTheme } from '../../utils/theme';
 import type { PhotoSource } from './photo-preview';
@@ -63,6 +64,7 @@ export function PhotoMeasurementsEditor({
   const { styles, tokens: t } = useTheme();
   const window = useWindowDimensions();
   const [items, setItems] = useState<PhotoMeasurement[]>(value.measurements ?? []);
+  const [details, setDetails] = useState(value.measurementDetails ?? {});
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       (value.measurements ?? []).map((m) => [
@@ -97,6 +99,7 @@ export function PhotoMeasurementsEditor({
     }
     const parsed = photoAnnotationsSchema.safeParse({
       ...value,
+      measurementDetails: details,
       measurements:
         !items.length && value.measurements === undefined
           ? undefined
@@ -117,7 +120,7 @@ export function PhotoMeasurementsEditor({
     <PickerSheet
       visible
       fillHeight
-      title="Pontos de medição na foto"
+      title="Foto e pontos de medição"
       icon="pin"
       maxWidth={680}
       subtitle="Toque na foto para numerar. Preencha a espessura de cada ponto abaixo. Sem valor, não há linha no PDF."
@@ -134,6 +137,43 @@ export function PhotoMeasurementsEditor({
       }
     >
       <View style={{ gap: 12 }}>
+        <Field
+          label="Lado / parte do equipamento"
+          value={details.side ?? ''}
+          editable={editable}
+          maxLength={500}
+          placeholder="Ex.: lateral direita"
+          onChangeText={(side) => setDetails((old) => ({ ...old, side }))}
+        />
+        <Field
+          label="Descontinuidade"
+          value={details.discontinuity ?? ''}
+          editable={editable}
+          maxLength={500}
+          placeholder="Ex.: -"
+          onChangeText={(discontinuity) => setDetails((old) => ({ ...old, discontinuity }))}
+        />
+        <SelectField
+          label="Aceitável"
+          disabled={!editable}
+          value={details.acceptable == null ? '' : details.acceptable ? 'yes' : 'no'}
+          options={[
+            { value: 'yes', label: 'Sim' },
+            { value: 'no', label: 'Não' },
+          ]}
+          onChange={(v) =>
+            setDetails((old) => ({ ...old, acceptable: v === '' ? null : v === 'yes' }))
+          }
+        />
+        <Field
+          label="Espessura de projeto"
+          value={details.projectThickness ?? ''}
+          editable={editable}
+          maxLength={500}
+          placeholder="Ex.: 6 mm"
+          onChangeText={(projectThickness) => setDetails((old) => ({ ...old, projectThickness }))}
+        />
+        <Text style={styles.label}>Toque na foto para colocar os círculos numerados</Text>
         <View ref={photoRef} collapsable={false}>
           <Pressable
             ref={touchRef}

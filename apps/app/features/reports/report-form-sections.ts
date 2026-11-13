@@ -20,11 +20,24 @@ export function reportFormSections(code: string, base: ReportSection[]): ReportF
     ...(code === 'EVD'
       ? [{ title: 'Registros de inspeção', fields: [], content: 'inspectionRecords' as const }]
       : []),
-    { title: 'Desenho técnico', fields: [], content: 'drawings' },
-    ...(code === 'LP'
-      ? [{ title: 'Fotos do ensaio', fields: [], content: 'testPhotos' as const }]
+    ...(!['TH', 'ME'].includes(code)
+      ? [{ title: 'Desenho técnico', fields: [], content: 'drawings' as const }]
       : []),
-    ...(reportTypeCodes.some((registered) => registered === code)
+    ...(['LP', 'TH', 'ME'].includes(code)
+      ? [
+          {
+            title:
+              code === 'ME'
+                ? 'Fotos e pontos de medição'
+                : code === 'TH'
+                  ? 'Imagens do ensaio'
+                  : 'Fotos do ensaio',
+            fields: [],
+            content: 'testPhotos' as const,
+          },
+        ]
+      : []),
+    ...(!['TH', 'ME'].includes(code) && reportTypeCodes.some((registered) => registered === code)
       ? [
           {
             title: code === 'ME' ? 'Pontos de medição' : 'Pontos de solda',

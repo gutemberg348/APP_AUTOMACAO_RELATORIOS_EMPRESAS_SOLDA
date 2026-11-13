@@ -3,6 +3,15 @@ import { drawingElementSchema, drawingSvg, newDrawingData } from './drawings';
 
 export const photoAnnotationsSchema = z
   .object({
+    measurementDetails: z
+      .object({
+        side: z.string().max(500).optional(),
+        discontinuity: z.string().max(500).optional(),
+        acceptable: z.boolean().nullable().optional(),
+        projectThickness: z.string().max(500).optional(),
+      })
+      .strict()
+      .optional(),
     measurements: z
       .array(
         z
@@ -79,7 +88,7 @@ export function photoAnnotationsSvg(
       viewBox: `${500 - frame.width / 2} ${400 - frame.height / 2} ${frame.width} ${frame.height}`,
     },
   );
-  const radius = Math.min(frame.width, frame.height) * 0.026;
+  const radius = Math.min(frame.width, frame.height) * 0.035;
   const marks = (annotations.measurements ?? [])
     .map((m) => {
       const x = 500 - frame.width / 2 + frame.width * m.x;

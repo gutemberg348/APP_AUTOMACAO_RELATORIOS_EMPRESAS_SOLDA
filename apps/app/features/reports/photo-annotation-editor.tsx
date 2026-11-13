@@ -16,6 +16,7 @@ export function PhotoAnnotationEditor({
   onSave,
   onClose,
   measurement = false,
+  measurementDefaults,
 }: {
   source: PhotoSource;
   value: PhotoAnnotations;
@@ -23,8 +24,16 @@ export function PhotoAnnotationEditor({
   onSave(value: PhotoAnnotations): void;
   onClose(): void;
   measurement?: boolean;
+  measurementDefaults?: PhotoAnnotations['measurementDetails'];
 }) {
-  const [annotations, setAnnotations] = useState(value);
+  const [annotations, setAnnotations] = useState(() =>
+    measurement
+      ? {
+          ...value,
+          measurementDetails: { ...measurementDefaults, ...value.measurementDetails },
+        }
+      : value,
+  );
   const [painting, setPainting] = useState(false);
   const images = useMemo(() => ({ original: source.uri }), [source.uri]);
   const drawings: ReportDrawing[] = [
