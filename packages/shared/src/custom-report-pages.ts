@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { drawingDataSchema } from './drawings';
+import { drawingDataSchema, drawingId, newDrawingData } from './drawings';
 
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,30}$/, 'Identificação da página inválida.');
 export const customPagePointSchema = z
@@ -15,7 +15,7 @@ export const customPagePointSchema = z
 export const customReportPageSchema = z
   .object({
     id: key,
-    kind: z.enum(['blank', 'drawing', 'photos', 'points']),
+    kind: z.enum(['blank', 'drawing', 'calculation', 'photos', 'points']),
     title: z.string().max(150).default(''),
     position: z
       .enum([
@@ -54,6 +54,38 @@ export const customReportPagesSchema = z
   );
 export type CustomReportPage = z.infer<typeof customReportPageSchema>;
 export type CustomPagePoint = z.infer<typeof customPagePointSchema>;
+export const isCustomDrawingPage = (page: { kind: CustomReportPage['kind'] }) =>
+  ['blank', 'drawing', 'calculation'].includes(page.kind);
+export function newCustomReportPage(
+  kind: CustomReportPage['kind'],
+  title = '',
+  photosPerPage: CustomReportPage['photosPerPage'] = 6,
+): CustomReportPage {
+  const titles = {
+    blank: 'Página em branco',
+    drawing: 'Página de desenho',
+    calculation: 'CÁLCULOS',
+    photos: 'Fotos do ensaio',
+    points: 'Pontos e fotos',
+  };
+  return customReportPageSchema.parse({
+    id: drawingId(),
+    kind,
+    title: title.trim() || titles[kind],
+    position: 'beforeConclusion',
+    photosPerPage,
+    drawings: isCustomDrawingPage({ kind })
+      ? [
+          {
+            data: {
+              ...newDrawingData(),
+              ...(kind !== 'drawing' ? { grid: 'none' as const, page: 'portrait' as const } : {}),
+            },
+          },
+        ]
+      : [],
+  });
+}
 export function customReportPages(data: unknown): CustomReportPage[] {
   const raw =
     data && typeof data === 'object' ? (data as Record<string, unknown>).customPages : undefined;

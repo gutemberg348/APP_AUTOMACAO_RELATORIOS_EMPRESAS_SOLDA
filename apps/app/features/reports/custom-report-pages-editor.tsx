@@ -2,7 +2,8 @@ import { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import {
   drawingId,
-  newDrawingData,
+  newCustomReportPage,
+  isCustomDrawingPage,
   pointKey,
   type CustomReportPage,
   type ReportMedia,
@@ -20,6 +21,7 @@ import { useReportPhotoDrafts } from './report-photo-drafts';
 const types = [
   { value: 'blank', label: 'Página em branco · imagem, texto e desenho livre' },
   { value: 'drawing', label: 'Página de desenho' },
+  { value: 'calculation', label: 'Cálculos · inserir foto e editar' },
   { value: 'photos', label: 'Fotos do ensaio' },
   { value: 'points', label: 'Pontos e fotos' },
 ];
@@ -198,7 +200,14 @@ export function CustomReportPagesEditor({
                 />
               )}
               {active.kind === 'photos' && <PointPhotos {...photoProps} customPageId={active.id} />}
-              {(active.kind === 'drawing' || active.kind === 'blank') && (
+              {active.kind === 'calculation' && (
+                <Text style={styles.muted}>
+                  Insira a foto do cálculo pelo botão de imagem na folha. Segure a imagem para
+                  selecionar, mover, recortar ou ajustar o tamanho. Você também pode escrever e
+                  desenhar por cima. O título e a posição no PDF são editáveis.
+                </Text>
+              )}
+              {isCustomDrawingPage(active) && (
                 <DrawingEditor
                   value={active.drawings}
                   points={active.points.map((p) => ({
@@ -396,12 +405,14 @@ export function CustomReportPagesEditor({
                     label="Tipo da página"
                     value={kind}
                     options={types.filter(
-                      (option) => canDraw || !['drawing', 'blank'].includes(option.value),
+                      (option) =>
+                        canDraw || !['drawing', 'blank', 'calculation'].includes(option.value),
                     )}
                     onChange={(v) => setKind(v as CustomReportPage['kind'])}
                   />
                   <Field
                     label="Título (opcional)"
+                    placeholder={kind === 'calculation' ? 'CÁLCULOS' : 'Escolha o título da página'}
                     value={title}
                     maxLength={150}
                     onChangeText={setTitle}
@@ -418,26 +429,11 @@ export function CustomReportPagesEditor({
                     title="Criar página"
                     icon="plus"
                     onPress={() => {
-                      const page: CustomReportPage = {
-                        id: drawingId(),
+                      const page = newCustomReportPage(
                         kind,
-                        title: title.trim() || types.find((t) => t.value === kind)!.label,
-                        position: 'beforeConclusion',
-                        photosPerPage: Number(count) as CustomReportPage['photosPerPage'],
-                        drawings: ['drawing', 'blank'].includes(kind)
-                          ? [
-                              {
-                                data: {
-                                  ...newDrawingData(),
-                                  ...(kind === 'blank'
-                                    ? ({ grid: 'none', page: 'portrait' } as const)
-                                    : {}),
-                                },
-                              },
-                            ]
-                          : [],
-                        points: [],
-                      };
+                        title,
+                        Number(count) as CustomReportPage['photosPerPage'],
+                      );
                       commit([...value, page]);
                       setActiveId(page.id);
                       setCreating(false);

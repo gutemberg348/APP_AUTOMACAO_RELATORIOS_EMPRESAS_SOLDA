@@ -1,4 +1,4 @@
-/** Fields of the calculation record supplied by the responsible technician. */
+/** Legacy fields kept to reopen older reports; calculation sheets now use custom image pages. */
 export const thicknessCalculationFields = [
   { path: 'calculationMinimumThickness', label: 'Espessura mínima calculada (mm)', symbol: 't' },
   { path: 'calculationPressure', label: 'Pressão (MPa)', symbol: 'P' },

@@ -62,7 +62,7 @@ it.each(reportTypeCodes)(
     mocks.get.mockResolvedValue(bytes);
     const drawing = customReportPageSchema.parse({
       id: 'extra-draw',
-      kind: 'drawing',
+      kind: 'calculation',
       drawings: [
         {
           data: {

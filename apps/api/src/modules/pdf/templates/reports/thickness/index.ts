@@ -16,7 +16,6 @@ import {
   escape,
   type PdfReport,
 } from '../reference-layout';
-import { calculation } from './calculation';
 
 export function render(report: PdfReport, images: Map<string, string>) {
   const data = report.specificData as Record<string, unknown>;
@@ -180,7 +179,6 @@ export function render(report: PdfReport, images: Map<string, string>) {
     html += sheet(report, 'EQUIPAMENTO', annotations(data.equipment, 'EQUIPAMENTO'), true);
   return (
     html +
-    calculation(report) +
     conclusion(report, data.finalReport, ['TÉCNICO INSPEÇÃO', 'INSPETOR', 'CLIENTE'], true).replace(
       'reference-final',
       'reference-final measurement-sheet',

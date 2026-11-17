@@ -123,7 +123,7 @@ it.each([
         media.map((m) => m.annotations.measurements?.length ?? 0),
       );
       expect(await page.$$eval('.evs-sheet', (sheets) => sheets.length)).toBe(
-        4 +
+        3 +
           (overview
             ? count
               ? 1 + Math.ceil(Math.max(0, count - 4) / 6)

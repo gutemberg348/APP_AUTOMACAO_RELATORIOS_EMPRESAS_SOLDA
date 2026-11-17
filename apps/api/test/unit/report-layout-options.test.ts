@@ -111,7 +111,12 @@ it.each([
     missing: 'MATERIAIS UTILIZADOS',
     remaining: 'DESCONTINUIDADES',
   },
-  { code: 'ME', omitted: 'calculation', missing: 'MEMORIAL TUBULAÇÃO', remaining: 'LAUDO FINAL' },
+  {
+    code: 'ME',
+    omitted: 'identification',
+    missing: 'evs-identification',
+    remaining: 'LAUDO FINAL',
+  },
   { code: 'EVS', omitted: 'conclusion', missing: 'LAUDO FINAL', remaining: 'RESPONSÁVEIS' },
   { code: 'EVD', omitted: 'signatures', missing: 'class="evs-signers"', remaining: 'LAUDO FINAL' },
   {

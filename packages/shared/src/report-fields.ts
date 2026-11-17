@@ -1,5 +1,3 @@
-import { thicknessCalculationFields } from './thickness-calculation';
-
 export interface ReportField {
   path: string;
   label: string;
@@ -154,12 +152,6 @@ export const reportSections: Record<string, ReportSection[]> = {
       ],
     },
     { title: 'Equipamento', fields: [field('equipment', 'Equipamento')] },
-    {
-      title: 'Cálculo · memorial de tubulação',
-      fields: thicknessCalculationFields.map((item) =>
-        field(item.path, `${item.label}${item.symbol ? ' — ' + item.symbol : ''}`),
-      ),
-    },
     conclusion,
   ],
   RDO: [

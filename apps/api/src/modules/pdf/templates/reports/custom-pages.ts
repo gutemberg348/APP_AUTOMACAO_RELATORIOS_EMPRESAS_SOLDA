@@ -4,6 +4,7 @@ import {
   isCustomPagePhoto,
   drawingSvg,
   newDrawingData,
+  isCustomDrawingPage,
   type CustomReportPage,
 } from '@weldcosta/shared';
 import { sheet, annotations, escape, type PdfReport } from './reference-layout';
@@ -15,10 +16,11 @@ function renderCustomPage(report: PdfReport, page: CustomReportPage, images: Map
     {
       blank: 'PÁGINA PERSONALIZADA',
       drawing: 'DESENHO',
+      calculation: 'CÁLCULOS',
       photos: 'IMAGENS DO ENSAIO',
       points: 'PONTOS DO ENSAIO',
     }[page.kind];
-  if (page.kind === 'drawing' || page.kind === 'blank') {
+  if (isCustomDrawingPage(page)) {
     return (
       page.drawings.length
         ? page.drawings
@@ -33,7 +35,7 @@ function renderCustomPage(report: PdfReport, page: CustomReportPage, images: Map
             page.points.map((p) => ({ clientId: p.key, number: p.number })),
             {
               images: drawingImageSources(report, images),
-              centerContent: true,
+              centerContent: page.kind === 'drawing',
               pointStatusColors: false,
             },
           )}</div>`,

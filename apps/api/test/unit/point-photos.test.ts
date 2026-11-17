@@ -64,7 +64,7 @@ describe('Photos selected in the point form', () => {
         customPages: [
           customReportPageSchema.parse({
             id: 'extra',
-            kind: 'drawing',
+            kind: 'calculation',
             drawings: [
               {
                 data: {
@@ -88,12 +88,10 @@ describe('Photos selected in the point form', () => {
         ],
       },
     };
-    useReportPhotoDrafts
-      .getState()
-      .update('user:new', () => ({
-        photos: [{ ...draft(id), pointKey: null, sectionKey: 'drawing' }],
-        removedIds: [],
-      }));
+    useReportPhotoDrafts.getState().update('user:new', () => ({
+      photos: [{ ...draft(id), pointKey: null, sectionKey: 'drawing' }],
+      removedIds: [],
+    }));
     apiMock.mockResolvedValueOnce({ id }).mockResolvedValueOnce({ ...report, version: 2 });
     await saveReportPhotos('user:new', report, points);
     const body = apiMock.mock.calls[0]?.[1]?.body as FormData;
@@ -103,12 +101,10 @@ describe('Photos selected in the point form', () => {
   });
   it('keeps custom page identity and opens the custom-page correction after a failed upload', async () => {
     const id = customPhotoPrefix('extra') + 'photo';
-    useReportPhotoDrafts
-      .getState()
-      .update('user:new', () => ({
-        photos: [{ ...draft(id), pointKey: null, sectionKey: 'test-photos' }],
-        removedIds: [],
-      }));
+    useReportPhotoDrafts.getState().update('user:new', () => ({
+      photos: [{ ...draft(id), pointKey: null, sectionKey: 'test-photos' }],
+      removedIds: [],
+    }));
     apiMock
       .mockRejectedValueOnce(new ApiError(0, 'NETWORK_ERROR', 'Sem internet'))
       .mockResolvedValueOnce(saved);
