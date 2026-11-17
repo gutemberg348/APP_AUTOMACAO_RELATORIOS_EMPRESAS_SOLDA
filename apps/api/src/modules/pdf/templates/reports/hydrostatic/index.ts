@@ -2,6 +2,7 @@ import {
   isHydrostaticTestPhoto,
   reportSectionVisible,
   reportFieldVisible,
+  type ReportSectionId,
 } from '@weldcosta/shared';
 import {
   cover,
@@ -31,17 +32,22 @@ export function render(report: PdfReport, images: Map<string, string>) {
       ['ART Nº', 'artNumber'],
       ['NORMA DE REFERÊNCIA', 'referenceStandard'],
     ]);
-  const fields = (items: [string, unknown][], caption = '', joined = false) => {
+  const fields = (
+    items: [string, unknown][],
+    caption = '',
+    joined = false,
+    section: ReportSectionId = 'technical',
+  ) => {
     const overflow: string[] = [];
     const cells = items
       .map(([label, raw]) => {
         const text = String(raw ?? '').trim() || '—';
-        if (text.length > 110) overflow.push(annotations(text, label));
+        if (text.length > 110) overflow.push(annotations(text, label, section));
         return `<div class="th-field"><b>${escape(label)}:</b><div>${escape(text.length > 110 ? text.slice(0, 110) + '…' : text)}</div></div>`;
       })
       .join('');
     return (
-      `<div class="th-fields${joined ? ' th-fields-joined' : ''}">${caption ? band(caption) : ''}<div class="th-field-grid" style="grid-template-columns:repeat(${items.length},minmax(0,1fr))">${cells}</div></div>` +
+      `<div data-report-section="${section}" class="th-fields${joined ? ' th-fields-joined' : ''}">${caption ? band(caption) : ''}<div class="th-field-grid" style="grid-template-columns:repeat(${items.length},minmax(0,1fr))">${cells}</div></div>` +
       overflow.join('')
     );
   };
@@ -77,6 +83,8 @@ export function render(report: PdfReport, images: Map<string, string>) {
         ['SÉRIE Nº', value(data, 'manometer.serialNumber')],
       ],
       'MANÔMETRO',
+      false,
+      'manometer',
     );
   technical += row(
     [

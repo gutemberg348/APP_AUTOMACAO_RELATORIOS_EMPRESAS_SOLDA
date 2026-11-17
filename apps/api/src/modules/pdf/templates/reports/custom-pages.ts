@@ -35,7 +35,8 @@ function renderCustomPage(report: PdfReport, page: CustomReportPage, images: Map
             page.points.map((p) => ({ clientId: p.key, number: p.number })),
             {
               images: drawingImageSources(report, images),
-              centerContent: page.kind === 'drawing',
+              centerContent:
+                page.kind === 'drawing' && !drawing.data.elements.some((e) => e.type === 'image'),
               pointStatusColors: false,
             },
           )}</div>`,
@@ -122,7 +123,7 @@ export function renderWithCustomPages(
     .map((page) =>
       renderCustomPage(report, page, images).replace(
         /<article /g,
-        `<article data-custom-id="${page.id}" data-custom-position="${page.position}" data-custom-after="${page.afterPage ?? 1}" `,
+        `<article data-custom-id="${page.id}" data-custom-report-type="${escape(report.reportType.code)}" data-custom-position="${page.position === 'afterIdentification' ? 'afterSection' : page.position}" data-custom-section="${page.position === 'afterIdentification' ? 'identification' : (page.afterSection ?? '')}" data-custom-after="${page.afterPage ?? 1}" `,
       ),
     )
     .join('');

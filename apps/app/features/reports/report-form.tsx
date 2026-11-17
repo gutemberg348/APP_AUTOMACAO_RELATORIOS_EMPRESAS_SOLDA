@@ -1227,6 +1227,7 @@ function ReportFormContent({
           name="specificData.customPages"
           render={({ field }) => (
             <CustomReportPagesEditor
+              sections={sections}
               buttonVisible={step === 0}
               value={(Array.isArray(field.value) ? field.value : []) as CustomReportPage[]}
               onChange={(pages) => field.onChange(pages)}

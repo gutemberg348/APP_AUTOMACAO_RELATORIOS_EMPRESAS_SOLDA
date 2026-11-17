@@ -100,6 +100,8 @@ it.each(reportTypeCodes)(
         kind: 'photos',
         photosPerPage: 4,
         title: 'EXTRA OFFLINE',
+        position: 'afterSection',
+        afterSection: 'conclusion',
       }),
     ];
     input.values.drawings = [

@@ -59,6 +59,7 @@ import {
   drawingPointLabel,
   positionDrawingPointLabel,
   fitDrawingPageView,
+  fitDrawingImageToPage,
   croppedDrawingImageSize,
   drawingSymbols,
   drawingSymbolDefinition,
@@ -358,6 +359,7 @@ export function DrawingEditor({
   media,
   photoDraftKey,
   canUploadImages = false,
+  reportPage = false,
   annotationMode = false,
   onCloseAnnotation,
   onCancelAnnotation,
@@ -375,6 +377,7 @@ export function DrawingEditor({
   media?: ReportMedia[];
   photoDraftKey?: string;
   canUploadImages?: boolean;
+  reportPage?: boolean;
   value: ReportDrawing[];
   points: ReportPoint[];
   onChange(value: ReportDrawing[]): void;
@@ -574,6 +577,23 @@ export function DrawingEditor({
     drawing = value[activeIndex],
     data = drawing?.data;
   const pageBounds = drawingPageBounds(data);
+  const transformSelectionOnPage: typeof transformDrawingSelection = (
+    elements,
+    angle,
+    dx,
+    dy,
+    scale,
+    pivot,
+  ) =>
+    transformDrawingSelection(
+      elements,
+      angle,
+      dx,
+      dy,
+      scale,
+      pivot,
+      elements.some((element) => element.type === 'image') ? pageBounds : undefined,
+    );
   const previousPage = useRef(data?.page);
   useEffect(() => {
     imageRequest.current++;
@@ -800,7 +820,7 @@ export function DrawingEditor({
     const replacements = new Map(elements.map((e) => [e.id, e]));
     updateData({ ...data, elements: data.elements.map((e) => replacements.get(e.id) ?? e) });
   };
-  const imageActionForSelection = async (action: 'crop' | 'fill') => {
+  const imageActionForSelection = async (action: 'crop' | 'fit' | 'fill') => {
     if (!editable || !data || selectedElement?.type !== 'image') return;
     const uri = resolvedImages[selectedElement.mediaKey];
     if (!uri) {
@@ -816,31 +836,23 @@ export function DrawingEditor({
       setShowProperties(false);
       if (action === 'crop') setImageCrop({ id: selectedElement.id, uri, aspect });
       else {
-        const page = drawingPageBounds({ page: 'portrait' });
-        const image = {
-          ...selectedElement,
-          x: page.x + page.width / 2,
-          y: 400,
-          width: page.width,
-          height: page.height,
-          rotation: 0,
-          fit: 'cover' as const,
-          sourceAspectRatio: aspect,
-        };
+        const page = action === 'fill' && !reportPage ? 'portrait' : data.page;
+        const image = fitDrawingImageToPage(
+          { ...selectedElement, sourceAspectRatio: aspect },
+          { page },
+          action === 'fit' ? 'contain' : 'cover',
+        );
+        if (Math.min(image.width, image.height) < 10)
+          throw new Error('Esta imagem é muito estreita para encaixar na folha.');
+        const elements = data.elements.map((e) => (e.id === image.id ? image : e));
         const next = {
           ...data,
-          page: 'portrait' as const,
-          elements: drawingLayerChange(
-            data.elements.map((e) => (e.id === image.id ? image : e)),
-            [image.id],
-            false,
-          ),
+          page,
+          elements: action === 'fill' ? drawingLayerChange(elements, [image.id], false) : elements,
         };
         updateData(next);
         setView(fitDrawingPageView(next, width, height));
-        setMessage(
-          'Imagem preenchendo a folha até as bordas. Use Recortar para escolher a área visível.',
-        );
+        setMessage('');
       }
     } catch (cause) {
       if (token === imageRequest.current)
@@ -889,7 +901,7 @@ export function DrawingEditor({
     }
     const nextPoints = [...points],
       groupId = transformElements.length > 1 ? drawingId() : undefined;
-    const copies = transformDrawingSelection(transformElements, 0, 24, 24).map((e) => {
+    const copies = transformSelectionOnPage(transformElements, 0, 24, 24).map((e) => {
       const clone = { ...e, id: drawingId(), groupId };
       if (clone.type === 'point') {
         const point: ReportPoint = {
@@ -937,7 +949,7 @@ export function DrawingEditor({
   const shownAngle = normalizeDrawingAngle(selectionAngle + (rotationDelta ?? 0));
   const rotateSelection = (angle: number) => {
     if (!transformElements.length) return;
-    const result = transformDrawingSelection(transformElements, angle);
+    const result = transformSelectionOnPage(transformElements, angle);
     if (result === transformElements) {
       setMessage('Não há espaço para esse giro. Afaste a seleção da borda do desenho.');
       return;
@@ -946,7 +958,7 @@ export function DrawingEditor({
     setBlockAngle((old) => normalizeDrawingAngle(old + angle));
   };
   const resizeBlock = (factor: number) => {
-    const result = transformDrawingSelection(blockElements, 0, 0, 0, factor);
+    const result = transformSelectionOnPage(blockElements, 0, 0, 0, factor);
     if (JSON.stringify(result) === JSON.stringify(blockElements)) {
       setMessage(
         '⚠️ O bloco atingiu o limite da folha ou de um dos objetos. Para ampliar só a visualização, use o zoom com dois dedos.',
@@ -958,7 +970,7 @@ export function DrawingEditor({
   };
   const resizeSelectionPrecisely = (factor: number) => {
     if (!transformElements.length) return;
-    const result = transformDrawingSelection(transformElements, 0, 0, 0, factor);
+    const result = transformSelectionOnPage(transformElements, 0, 0, 0, factor);
     if (JSON.stringify(result) === JSON.stringify(transformElements)) {
       setMessage(
         '⚠️ A seleção atingiu o limite da folha ou do objeto. Para ampliar só a visualização, use o zoom com dois dedos sem seleção.',
@@ -1089,7 +1101,7 @@ export function DrawingEditor({
   const moveSnapped = (element: DrawingElement, dx: number, dy: number, show = true) => {
     const center = drawingSelectionBounds([element]).center;
     const target = smartSnap({ x: center.x + dx, y: center.y + dy }, [element.id], show);
-    return moveElement(element, target.x - center.x, target.y - center.y);
+    return moveElement(element, target.x - center.x, target.y - center.y, pageBounds);
   };
   const place = (raw: DrawingPosition, origin = start) => {
     if (!data) return;
@@ -1713,7 +1725,7 @@ export function DrawingEditor({
           const initial = pinch.current;
           if (initial.elements) {
             const delta = normalizeDrawingAngle(angle - initial.angle);
-            initial.results = transformDrawingSelection(
+            initial.results = transformSelectionOnPage(
               initial.elements,
               delta,
               ((center.x - initial.center.x) * initial.view.w) / initial.width,
@@ -1723,16 +1735,26 @@ export function DrawingEditor({
             setBlockDraft(initial.results);
             setRotationDelta(delta);
           } else if (initial.element) {
-            const delta = ((angle - initial.angle + 540) % 360) - 180;
+            const rawAngle = normalizeDrawingAngle(angle - initial.angle);
+            // Small twists are common when opening two fingers to resize an image.
+            const delta =
+              initial.element.type === 'image'
+                ? Math.sign(rawAngle) * Math.max(0, Math.abs(rawAngle) - 4)
+                : rawAngle;
             initial.result = transformDrawingElement(
               initial.element,
               delta,
               ((center.x - initial.center.x) * initial.view.w) / initial.width,
               ((center.y - initial.center.y) * initial.view.w) / initial.width,
               distance / initial.distance,
+              pageBounds,
             );
             setDraftElement(initial.result);
-            setRotationDelta(delta);
+            setRotationDelta(
+              initial.result.type === 'image' && initial.element.type === 'image'
+                ? normalizeDrawingAngle(initial.result.rotation - initial.element.rotation)
+                : delta,
+            );
           } else
             setView(
               zoomDrawingAt(
@@ -1779,7 +1801,7 @@ export function DrawingEditor({
             0.01,
             ((p.x - block.pivot.x) * x + (p.y - block.pivot.y) * y) / Math.max(1, x * x + y * y),
           );
-          block.result = transformDrawingSelection(block.elements, 0, 0, 0, scale, block.pivot);
+          block.result = transformSelectionOnPage(block.elements, 0, 0, 0, scale, block.pivot);
           setBlockDraft(block.result);
         } else if (block.mode === 'rotate') {
           const nextAngle = (Math.atan2(p.y - block.pivot.y, p.x - block.pivot.x) * 180) / Math.PI;
@@ -1787,7 +1809,7 @@ export function DrawingEditor({
           block.angle = nextAngle;
           const snapped = Math.round(block.delta / 15) * 15;
           const delta = Math.abs(snapped - block.delta) < 2 ? snapped : block.delta;
-          block.result = transformDrawingSelection(block.elements, delta, 0, 0, 1, block.pivot);
+          block.result = transformSelectionOnPage(block.elements, delta, 0, 0, 1, block.pivot);
           setBlockDraft(block.result);
           setRotationDelta(block.result === block.elements ? 0 : delta);
         } else if (block.elements.length) {
@@ -1799,7 +1821,7 @@ export function DrawingEditor({
             { x: center.x + dx * block.ratio, y: center.y + dy * block.ratio },
             block.elements.map((e) => e.id),
           );
-          block.result = transformDrawingSelection(
+          block.result = transformSelectionOnPage(
             block.elements,
             0,
             snapped.x - center.x,
@@ -1931,7 +1953,12 @@ export function DrawingEditor({
       }
       if (tool === 'select' && g.original)
         setDraftElement(
-          moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
+          moveElement(
+            g.original,
+            (state.dx / g.width) * g.view.w,
+            (state.dy / g.width) * g.view.w,
+            pageBounds,
+          ),
         );
     },
     onPanResponderRelease: (_event, state) => {
@@ -2082,7 +2109,12 @@ export function DrawingEditor({
         setStroke([]);
       } else if (tool === 'select' && g.original && Math.hypot(state.dx, state.dy) >= 3)
         updateElement(
-          moveElement(g.original, (state.dx / g.width) * g.view.w, (state.dy / g.width) * g.view.w),
+          moveElement(
+            g.original,
+            (state.dx / g.width) * g.view.w,
+            (state.dy / g.width) * g.view.w,
+            pageBounds,
+          ),
         );
       else if (
         data &&
@@ -2288,7 +2320,11 @@ export function DrawingEditor({
       insertDrawingSheet(
         value,
         {
-          data: { ...newDrawingData(), title: 'Desenho ' + String(number).padStart(2, '0') },
+          data: {
+            ...newDrawingData(),
+            ...(reportPage ? { page: 'portrait' as const, grid: data?.grid ?? 'none' } : {}),
+            title: 'Desenho ' + String(number).padStart(2, '0'),
+          },
         },
         position,
       ),
@@ -2374,7 +2410,7 @@ export function DrawingEditor({
                   : 'Linha';
   const contextWidth = Math.min(248, width - 16);
   const contextHeight = Math.min(392, height - 80);
-  const contextMiniWidth = selectedElement?.type === 'image' ? 88 : 44;
+  const contextMiniWidth = selectedElement?.type === 'image' ? 132 : 44;
   const selectionRight = transformBounds
     ? ((transformBounds.x + transformBounds.width - viewport.x) / viewport.w) * width + 18
     : 8;
@@ -2642,11 +2678,18 @@ export function DrawingEditor({
           >
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               {!contextOptionsOpen && selectedElement?.type === 'image' && (
-                <IconButton
-                  label="Recortar imagem selecionada"
-                  icon="crop"
-                  onPress={() => void imageActionForSelection('crop')}
-                />
+                <>
+                  <IconButton
+                    label="Encaixar imagem inteira"
+                    icon="expand"
+                    onPress={() => void imageActionForSelection('fit')}
+                  />
+                  <IconButton
+                    label="Recortar imagem selecionada"
+                    icon="crop"
+                    onPress={() => void imageActionForSelection('crop')}
+                  />
+                </>
               )}
               {contextOptionsOpen && (
                 <Text
@@ -2703,6 +2746,11 @@ export function DrawingEditor({
                       ? () => void imageActionForSelection('fill')
                       : undefined
                   }
+                  onFitPage={
+                    selectedElement?.type === 'image'
+                      ? () => void imageActionForSelection('fit')
+                      : undefined
+                  }
                   textColor={
                     editingSelection && selectedElement.type === 'text'
                       ? (selectedElement.color ?? '#285580')
@@ -2726,7 +2774,14 @@ export function DrawingEditor({
                           editingBlock
                             ? resizeBlock(scale)
                             : updateElement(
-                                transformDrawingElement(selectedElement!, 0, 0, 0, scale),
+                                transformDrawingElement(
+                                  selectedElement!,
+                                  0,
+                                  0,
+                                  0,
+                                  scale,
+                                  pageBounds,
+                                ),
                               )
                       : undefined
                   }
@@ -3211,21 +3266,23 @@ export function DrawingEditor({
             {selectedElement.type === 'image' && (
               <View style={{ gap: 8 }}>
                 <Button
+                  title="Encaixar imagem inteira"
+                  icon="expand"
+                  secondary
+                  onPress={() => void imageActionForSelection('fit')}
+                />
+                <Button
                   title="Recortar imagem"
                   icon="crop"
                   secondary
                   onPress={() => void imageActionForSelection('crop')}
                 />
                 <Button
-                  title="Preencher folha com imagem"
+                  title="Preencher até as bordas (recorta)"
                   icon="expand"
                   secondary
                   onPress={() => void imageActionForSelection('fill')}
                 />
-                <Text style={styles.muted}>
-                  Preencher mantém a proporção e recorta as bordas excedentes. Confira a área com a
-                  ferramenta Recortar.
-                </Text>
               </View>
             )}
             <SelectField
@@ -3529,7 +3586,9 @@ export function DrawingEditor({
                       label="Posição X"
                       value={selectedElement.x}
                       onChange={(x) =>
-                        updateElement(moveElement(selectedElement, x - selectedElement.x, 0))
+                        updateElement(
+                          moveElement(selectedElement, x - selectedElement.x, 0, pageBounds),
+                        )
                       }
                     />
                     <Numeric
@@ -3537,7 +3596,9 @@ export function DrawingEditor({
                       value={selectedElement.y}
                       max={800}
                       onChange={(y) =>
-                        updateElement(moveElement(selectedElement, 0, y - selectedElement.y))
+                        updateElement(
+                          moveElement(selectedElement, 0, y - selectedElement.y, pageBounds),
+                        )
                       }
                     />
                   </>
@@ -3561,7 +3622,9 @@ export function DrawingEditor({
                       title={m.name}
                       small
                       secondary
-                      onPress={() => updateElement(moveElement(selectedElement, m.x, m.y))}
+                      onPress={() =>
+                        updateElement(moveElement(selectedElement, m.x, m.y, pageBounds))
+                      }
                     />
                   ))}
                 </View>
@@ -3840,7 +3903,9 @@ export function DrawingEditor({
             small
             secondary
             icon="plus"
-            onPress={() => add({ ...moveElement(selectedElement, 25, 25), id: drawingId() })}
+            onPress={() =>
+              add({ ...moveElement(selectedElement, 25, 25, pageBounds), id: drawingId() })
+            }
           />
         )}
         {!!hatchCorners.length && (
@@ -4269,7 +4334,9 @@ export function DrawingEditor({
                     (selectedElement.type === 'text' && (selectedElement.size ?? 20) <= 10)
                   }
                   onPress={() =>
-                    updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1 / 1.15))
+                    updateElement(
+                      transformDrawingElement(selectedElement, 0, 0, 0, 1 / 1.15, pageBounds),
+                    )
                   }
                 />
                 <IconButton
@@ -4281,7 +4348,9 @@ export function DrawingEditor({
                     (selectedElement.type === 'text' && (selectedElement.size ?? 20) >= 40)
                   }
                   onPress={() =>
-                    updateElement(transformDrawingElement(selectedElement, 0, 0, 0, 1.15))
+                    updateElement(
+                      transformDrawingElement(selectedElement, 0, 0, 0, 1.15, pageBounds),
+                    )
                   }
                 />
               </>
@@ -4611,7 +4680,7 @@ export function DrawingEditor({
           const mediaKey = 'drawing-image-' + drawingId();
           progress('Guardando imagem no telefone…');
           const localAsset = await keepReportAsset(asset, mediaKey);
-          const element: DrawingElement = {
+          const element: Extract<DrawingElement, { type: 'image' }> = {
             id: drawingId(),
             type: 'image',
             mediaKey,
@@ -4621,7 +4690,10 @@ export function DrawingEditor({
             sourceAspectRatio: size.width / size.height,
             rotation: 0,
           };
-          if (!add(element)) throw new Error('Não foi possível inserir a imagem. Tente novamente.');
+          const fitted = reportPage ? fitDrawingImageToPage(element, data, 'contain', 12) : element;
+          if (Math.min(fitted.width, fitted.height) < 10)
+            throw new Error('Esta imagem é muito estreita para encaixar na folha.');
+          if (!add(fitted)) throw new Error('Não foi possível inserir a imagem. Tente novamente.');
           useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
             ...draft,
             photos: [

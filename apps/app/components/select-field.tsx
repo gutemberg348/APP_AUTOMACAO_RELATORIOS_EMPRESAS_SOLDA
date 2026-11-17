@@ -242,6 +242,7 @@ export function SelectField({
   icon = 'layers',
   placeholder = 'Selecione uma opção',
   clearable = true,
+  sheetSubtitle = 'Escolha a opção que corresponde ao seu registro.',
 }: {
   label: string;
   value: string;
@@ -253,6 +254,7 @@ export function SelectField({
   icon?: IconName;
   placeholder?: string;
   clearable?: boolean;
+  sheetSubtitle?: string;
 }) {
   const { styles } = useTheme();
   const [open, setOpen] = useState(false),
@@ -289,7 +291,7 @@ export function SelectField({
       <PickerSheet
         visible={open}
         title={'Selecionar ' + label.toLowerCase()}
-        subtitle="Escolha a opção que corresponde ao seu registro."
+        subtitle={sheetSubtitle}
         icon={icon}
         onClose={() => setOpen(false)}
         footer={

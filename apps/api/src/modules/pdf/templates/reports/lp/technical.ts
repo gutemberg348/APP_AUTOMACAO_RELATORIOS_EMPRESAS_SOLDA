@@ -1,13 +1,21 @@
-import { lpChoiceValue, lpPenetrantOptions, lpRemovalOptions } from '@weldcosta/shared';
+import {
+  customReportPages,
+  lpChoiceValue,
+  lpPenetrantOptions,
+  lpRemovalOptions,
+  type ReportSectionId,
+} from '@weldcosta/shared';
 import { annotations, band, displayDate, escape, value } from '../reference-layout';
 
 export function lpTechnical(data: Record<string, unknown>, omitted: string[] = []) {
   if (['generalData', 'materials', 'discontinuities'].every((id) => omitted.includes(id)))
     return '';
-  const overflow: string[] = [];
+  const overflow: { section: ReportSectionId; html: string }[] = [];
+  let section: ReportSectionId = 'generalData';
+  const stages: { section: ReportSectionId; html: string }[] = [];
   const cell = (raw: unknown, label: string, limit = 45) => {
     const text = String(raw ?? '');
-    if (text.length > limit) overflow.push(annotations(text, label));
+    if (text.length > limit) overflow.push({ section, html: annotations(text, label, section) });
     return escape(text.length > limit ? text.slice(0, limit) + '…' : text || '');
   };
   const choices = (kind: 'penetrant' | 'removal', raw: unknown) => {
@@ -33,9 +41,12 @@ export function lpTechnical(data: Record<string, unknown>, omitted: string[] = [
     ['METAL DE BASE', 'baseMetal'],
   ];
   const materials = ['cleaner', 'penetrant', 'remover', 'developer'];
-  let body = '<section class="lp-general-page">';
+  let body = '';
   if (!omitted.includes('generalData'))
     body += `<div class="lp-general-conditions"><table class="lp-form-table"><thead><tr>${conditions.map(([label]) => `<th>${label}</th>`).join('')}</tr></thead><tbody><tr>${conditions.map(([label, key]) => `<td>${cell(value(data, 'generalData.' + key), label!, 35)}</td>`).join('')}</tr></tbody></table></div>`;
+  stages.push({ section, html: body });
+  section = 'materials';
+  body = '';
   if (!omitted.includes('materials'))
     body += `<div class="lp-materials">${band('MATERIAIS UTILIZADOS')}<table class="lp-form-table lp-choices"><thead><tr><th>PENETRANTE</th><th>TÉCNICA DE REMOÇÃO</th></tr></thead><tbody><tr><td>${choices('penetrant', data.penetrantType)}</td><td>${choices('removal', data.removalTechnique)}</td></tr></tbody></table><table class="lp-form-table lp-material-table"><colgroup><col style="width:22%">${materials.map(() => '<col style="width:19.5%">').join('')}</colgroup><thead><tr><th></th><th>LIMPEZA<br>(SOLVENTE)</th><th>PENETRANTE</th><th>REMOVEDOR</th><th>REVELADOR</th></tr></thead><tbody>${[
       ['FABRICANTE', 'manufacturer'],
@@ -53,6 +64,9 @@ export function lpTechnical(data: Record<string, unknown>, omitted: string[] = [
             .join('')}</tr>`,
       )
       .join('')}</tbody></table></div>`;
+  stages.push({ section, html: body });
+  section = 'discontinuities';
+  body = '';
   if (omitted.includes('generalData')) data = { ...data, inspectionArea: '' };
   const indications = (data.discontinuities ?? []) as { code: string; description?: string }[];
   const indicationTable = (offset: number, firstPage: boolean) => {
@@ -70,9 +84,33 @@ export function lpTechnical(data: Record<string, unknown>, omitted: string[] = [
     ]
       .map((row) => `<tr>${row.map((text) => `<td>${text || '&nbsp;'}</td>`).join('')}</tr>`)
       .join('')}</tbody></table></div>`;
-  body += '</section>';
+  stages.push({ section, html: body });
+  body = '';
   if (!omitted.includes('discontinuities'))
     for (let offset = 12; offset < indications.length; offset += 12)
       body += indicationTable(offset, false);
-  return body + overflow.join('');
+  const splitStages = customReportPages(data).some(
+    (page) =>
+      page.position === 'afterSection' &&
+      stages.some((stage) => stage.section === page.afterSection),
+  );
+  if (splitStages)
+    return stages
+      .map(
+        (stage) =>
+          stage.html +
+          (stage.section === 'discontinuities' ? body : '') +
+          overflow
+            .filter((item) => item.section === stage.section)
+            .map((item) => item.html)
+            .join(''),
+      )
+      .join('');
+  return (
+    '<section class="lp-general-page">' +
+    stages.map((stage) => stage.html).join('') +
+    '</section>' +
+    body +
+    overflow.map((item) => item.html).join('')
+  );
 }

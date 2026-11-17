@@ -1,5 +1,7 @@
 import type { DrawingData, DrawingElement } from './drawings';
 
+type DrawingImage = Extract<DrawingElement, { type: 'image' }>;
+
 export interface DrawingCrop {
   x: number;
   y: number;
@@ -9,7 +11,7 @@ export interface DrawingCrop {
 export const fullDrawingCrop: DrawingCrop = { x: 0, y: 0, width: 1, height: 1 };
 
 /** Image geometry in local frame coordinates. Move/rotate the whole frame as one group. */
-export function drawingImageFrame(image: Extract<DrawingElement, { type: 'image' }>) {
+export function drawingImageFrame(image: DrawingImage) {
   const aspect = image.sourceAspectRatio ?? image.width / image.height;
   const crop = image.crop ?? fullDrawingCrop;
   const fit = image.fit === 'cover' ? Math.max : Math.min;
@@ -21,9 +23,46 @@ export function drawingImageFrame(image: Extract<DrawingElement, { type: 'image'
     height: scale,
   };
 }
+export function drawingImageClip(image: DrawingImage, frame: ReturnType<typeof drawingImageFrame>) {
+  const crop = image.crop ?? fullDrawingCrop;
+  if (crop.width === 1 && crop.height === 1 && image.fit !== 'cover') return undefined;
+  const x = Math.max(-image.width / 2, frame.x + crop.x * frame.width);
+  const y = Math.max(-image.height / 2, frame.y + crop.y * frame.height);
+  return {
+    x,
+    y,
+    width: Math.min(image.width / 2, frame.x + (crop.x + crop.width) * frame.width) - x,
+    height: Math.min(image.height / 2, frame.y + (crop.y + crop.height) * frame.height) - y,
+  };
+}
 export function drawingPageBounds(data?: Pick<DrawingData, 'page'>) {
   const width = data?.page === 'portrait' ? (800 * 196) / 239 : 1000;
   return { x: (1000 - width) / 2, y: 0, width, height: 800 };
+}
+export function fitDrawingImageToPage(
+  image: DrawingImage,
+  data: Pick<DrawingData, 'page'>,
+  fit: 'contain' | 'cover',
+  margin = 0,
+): DrawingImage {
+  const page = drawingPageBounds(data);
+  const aspect = image.sourceAspectRatio ?? image.width / image.height;
+  const crop = image.crop ?? fullDrawingCrop;
+  const ratio = (aspect * crop.width) / crop.height;
+  const availableWidth = page.width - margin * 2;
+  const availableHeight = page.height - margin * 2;
+  const width =
+    fit === 'cover' ? availableWidth : Math.min(availableWidth, availableHeight * ratio);
+  return {
+    ...image,
+    x: page.x + page.width / 2,
+    y: page.y + page.height / 2,
+    width,
+    height: fit === 'cover' ? availableHeight : width / ratio,
+    rotation: 0,
+    fit,
+    sourceAspectRatio: aspect,
+  };
 }
 export function drawingPageViewBox(data?: Pick<DrawingData, 'page'>) {
   const p = drawingPageBounds(data);

@@ -10,6 +10,10 @@ import {
   clampDrawingCrop,
   croppedDrawingImageSize,
   drawingImageFrame,
+  drawingImageClip,
+  fitDrawingImageToPage,
+  transformDrawingElement,
+  drawingSelectionBounds,
   moveElement,
 } from '@weldcosta/shared';
 
@@ -95,6 +99,43 @@ describe('drawing image crop and printed page', () => {
     expect(croppedDrawingImageSize(image, crop, 1.5)).toEqual({ width: 300, height: 400 });
     expect(croppedDrawingImageSize({ ...image, fit: 'cover' }, crop, 1.5)).toEqual({
       width: 600,
+      height: 400,
+    });
+  });
+
+  it('keeps an enlarged and slightly rotated image fully inside the portrait print area', () => {
+    const data = { ...newDrawingData(), page: 'portrait' as const };
+    const page = drawingPageBounds(data);
+    const selected = { ...image, x: 430, width: 420, height: 500, sourceAspectRatio: 0.84 };
+    const enlarged = transformDrawingElement(selected, 6, 0, 0, 2, page);
+    if (enlarged.type !== 'image') throw new Error('Expected image');
+    expect(enlarged.width).toBeGreaterThan(selected.width);
+    expect(enlarged.width / enlarged.height).toBeCloseTo(0.84);
+    expect(enlarged.rotation).toBe(6);
+    const dragged = moveElement(enlarged, 2000, -2000, page);
+    const bounds = drawingSelectionBounds([dragged]);
+    expect(bounds.x).toBeGreaterThanOrEqual(page.x - 1e-6);
+    expect(bounds.x + bounds.width).toBeCloseTo(page.x + page.width);
+    expect(bounds.y).toBeCloseTo(0);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(page.height + 1e-6);
+    expect(drawingDataSchema.safeParse({ ...data, elements: [dragged] }).success).toBe(true);
+  });
+
+  it('fits the whole photo or its explicit crop instead of silently trimming either frame', () => {
+    const data = { page: 'portrait' as const };
+    const page = drawingPageBounds(data);
+    const photo = fitDrawingImageToPage({ ...image, fit: 'cover' }, data, 'contain');
+    expect(photo.width).toBeCloseTo(page.width);
+    expect(photo.height).toBeCloseTo(page.width / 1.5);
+    expect(drawingImageClip(photo, drawingImageFrame(photo))).toBeUndefined();
+    const crop = { x: 0.25, y: 0, width: 0.5, height: 1 };
+    const resized = fitDrawingImageToPage({ ...image, crop }, data, 'contain');
+    expect(resized).toMatchObject({ width: 600, height: 800, crop, mediaKey: image.mediaKey });
+    const legacy = { ...image, crop };
+    expect(drawingImageClip(legacy, drawingImageFrame(legacy))).toEqual({
+      x: -150,
+      y: -200,
+      width: 300,
       height: 400,
     });
   });

@@ -8,6 +8,8 @@ import {
   type CustomReportPage,
   type ReportMedia,
   type CustomPagePoint,
+  type ReportSection,
+  type ReportSectionId,
 } from '@weldcosta/shared';
 import { Button, Field } from '../../components/ui';
 import { PickerSheet } from '../../components/picker-sheet';
@@ -17,6 +19,11 @@ import { useTheme } from '../../utils/theme';
 import { PointPhotos } from './point-photos';
 import { DrawingEditor } from './drawing-editor';
 import { useReportPhotoDrafts } from './report-photo-drafts';
+import {
+  customPagePositionOptions,
+  customPagePositionValue,
+  customPagePositionLabel,
+} from './custom-page-positions';
 
 const types = [
   { value: 'blank', label: 'Página em branco · imagem, texto e desenho livre' },
@@ -44,6 +51,7 @@ export function CustomReportPagesEditor({
   onPickingChange,
   correctionRequest,
   buttonVisible = true,
+  sections,
 }: {
   value: CustomReportPage[];
   onChange(value: CustomReportPage[]): void;
@@ -58,6 +66,7 @@ export function CustomReportPagesEditor({
   onPickingChange(busy: boolean): void;
   correctionRequest?: number;
   buttonVisible?: boolean;
+  sections: (ReportSection & { content?: string })[];
 }) {
   const { styles } = useTheme();
   const [open, setOpen] = useState(false);
@@ -147,20 +156,20 @@ export function CustomReportPagesEditor({
               />
               <SelectField
                 label="Posição no relatório"
-                value={active.position}
+                sheetSubtitle="Escolha onde esta página entra no PDF. O final fica depois das assinaturas."
+                clearable={false}
+                value={customPagePositionValue(active)}
                 disabled={!editable}
-                options={[
-                  { value: 'start', label: 'No início do PDF' },
-                  { value: 'afterIdentification', label: 'Após a identificação' },
-                  { value: 'beforeConclusion', label: 'Antes do laudo final' },
-                  { value: 'afterSignatures', label: 'Após as assinaturas' },
-                  { value: 'end', label: 'No final do PDF' },
-                  { value: 'afterPage', label: 'Após uma folha específica do modelo' },
-                ]}
+                options={customPagePositionOptions(sections, active)}
                 onChange={(position) =>
                   update({
                     id: active.id,
-                    position: position as CustomReportPage['position'],
+                    position: position.startsWith('section:')
+                      ? 'afterSection'
+                      : (position as CustomReportPage['position']),
+                    afterSection: position.startsWith('section:')
+                      ? (position.slice(8) as ReportSectionId)
+                      : undefined,
                   })
                 }
               />
@@ -182,8 +191,9 @@ export function CustomReportPagesEditor({
                 />
               )}
               <Text style={styles.muted}>
-                A posição é aplicada no PDF depois da paginação. No app, você prepara esta página na
-                etapa de Inspeção.
+                Escolha a etapa abaixo da qual esta página deve aparecer no PDF. “Final do
+                relatório” coloca a página depois das assinaturas. Essa escolha vale só para este
+                relatório.
               </Text>
               {['photos', 'points'].includes(active.kind) && (
                 <SelectField
@@ -202,13 +212,13 @@ export function CustomReportPagesEditor({
               {active.kind === 'photos' && <PointPhotos {...photoProps} customPageId={active.id} />}
               {active.kind === 'calculation' && (
                 <Text style={styles.muted}>
-                  Insira a foto do cálculo pelo botão de imagem na folha. Segure a imagem para
-                  selecionar, mover, recortar ou ajustar o tamanho. Você também pode escrever e
-                  desenhar por cima. O título e a posição no PDF são editáveis.
+                  Insira a foto do cálculo na folha. Selecione a foto e toque em Encaixar imagem
+                  inteira para aproveitar o espaço sem cortar a tabela.
                 </Text>
               )}
               {isCustomDrawingPage(active) && (
                 <DrawingEditor
+                  reportPage
                   value={active.drawings}
                   points={active.points.map((p) => ({
                     clientId: p.key,
@@ -351,18 +361,7 @@ export function CustomReportPagesEditor({
                   <Text style={styles.label}>
                     {index + 1}. {page.title || types.find((t) => t.value === page.kind)?.label}
                   </Text>
-                  <Text style={styles.muted}>
-                    {
-                      {
-                        afterIdentification: 'Após a identificação',
-                        beforeConclusion: 'Antes do laudo final',
-                        start: 'No início do PDF',
-                        end: 'No final do PDF',
-                        afterSignatures: 'Após as assinaturas',
-                        afterPage: `Após a folha ${page.afterPage ?? 1} do modelo`,
-                      }[page.position]
-                    }
-                  </Text>
+                  <Text style={styles.muted}>{customPagePositionLabel(sections, page)}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     <Button
                       title={editable ? 'Editar página' : 'Ver página'}

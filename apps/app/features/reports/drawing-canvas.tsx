@@ -2,6 +2,7 @@ import { memo, useId, useMemo } from 'react';
 import Svg, { ClipPath, Defs, G, Image, Rect, parse } from 'react-native-svg';
 import {
   drawingImageFrame,
+  drawingImageClip,
   drawingOrderedElements,
   drawingPageBounds,
   drawingSvg,
@@ -61,25 +62,27 @@ const CanvasElement = memo(function CanvasElement({
       </G>
     );
   const frame = drawingImageFrame(element);
+  const clip = drawingImageClip(element, frame);
   return (
     <G
       transform={`translate(${element.x} ${element.y}) rotate(${element.rotation})`}
       opacity={opacity}
     >
-      <Defs>
-        <ClipPath id={id}>
-          <Rect
-            x={-element.width / 2}
-            y={-element.height / 2}
-            width={element.width}
-            height={element.height}
-          />
-        </ClipPath>
-      </Defs>
+      {source && clip && (
+        <Defs>
+          <ClipPath id={id}>
+            <Rect {...clip} />
+          </ClipPath>
+        </Defs>
+      )}
       {source ? (
-        <G clipPath={`url(#${id})`}>
+        clip ? (
+          <G clipPath={`url(#${id})`}>
+            <Image href={source} {...frame} preserveAspectRatio="none" />
+          </G>
+        ) : (
           <Image href={source} {...frame} preserveAspectRatio="none" />
-        </G>
+        )
       ) : (
         <Rect
           x={-element.width / 2}

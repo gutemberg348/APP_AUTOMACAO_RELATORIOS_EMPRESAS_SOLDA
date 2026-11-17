@@ -60,6 +60,12 @@ export function reportFieldVisible(report: LayoutReport, path: string) {
   );
   return !section || reportSectionVisible(report, reportSectionId(section));
 }
+export function reportFieldSection(report: LayoutReport, path: string) {
+  const section = reportSections[report.reportType.code]?.find((s) =>
+    s.fields.some((f) => f.path === path),
+  );
+  return section ? reportSectionId(section) : 'technical';
+}
 /** Layout choices belong only to their report, never to defaults for a new inspection. */
 export function withoutReportLayout(data: Record<string, unknown>) {
   const result = { ...data };

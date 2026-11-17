@@ -42,6 +42,105 @@ export function paginateEvs() {
       `translate(${page.x + page.width / 2} ${page.y + page.height / 2}) scale(${scale}) translate(${-bounds.x - bounds.width / 2} ${-bounds.y - bounds.height / 2})`,
     );
   }
+  // Logical stages can share a model sheet. Mark their content before pagination
+  // so an extra page can separate two stages, including their continuation text.
+  const stages: [string, string][] = [
+    ['identification', '.evs-cover-block,.evs-data-title'],
+    ['drawings', '.evs-drawing,.rdo-drawing,.evs-drawing-caption'],
+    ['points', '.evs-weld,.reference-photo-row'],
+    ['testPhotos', '.lp-test-photo,.th-test-photo-row,.measurement-block'],
+    ['generalData', '.lp-general-conditions'],
+    ['materials', '.lp-materials'],
+    ['discontinuities', '.lp-indications,.lp-legend'],
+    ['inspectionRecords', '.evs-direct-records'],
+    ['conclusion', '.reference-conclusion,.evs-verdict,.evs-legend,.evs-result,.rdo-observation'],
+    ['signatures', '.evs-signers'],
+    ['data', '.rdo-repeated'],
+  ];
+  const normalSheets = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet:not([data-custom-id])'));
+  for (const sheet of normalSheets()) {
+    for (const [id, selector] of stages)
+      for (const block of sheet.querySelectorAll<HTMLElement>(selector))
+        block.dataset.reportSection ??= id;
+    const title = sheet.querySelector('.evs-heading')?.textContent?.trim();
+    const section =
+      title === 'DESENHO'
+        ? 'drawings'
+        : ['SOLDA', 'FOTOS ADICIONAIS'].includes(title ?? '')
+          ? 'points'
+          : sheet.matches('.measurement-sheet:not(.reference-final)')
+            ? 'testPhotos'
+            : undefined;
+    if (section)
+      for (const block of sheet.querySelector<HTMLElement>('.evs-flow')!.children)
+        (block as HTMLElement).dataset.reportSection ??= section;
+  }
+  const sectionOrder: Record<string, string[]> = {
+    EVS: ['identification', 'technical', 'drawings', 'points', 'conclusion', 'signatures'],
+    EVD: [
+      'identification',
+      'technical',
+      'inspectionRecords',
+      'drawings',
+      'points',
+      'conclusion',
+      'signatures',
+    ],
+    LP: [
+      'identification',
+      'technical',
+      'drawings',
+      'testPhotos',
+      'points',
+      'generalData',
+      'materials',
+      'discontinuities',
+      'conclusion',
+      'signatures',
+    ],
+    TH: ['identification', 'technical', 'manometer', 'testPhotos', 'conclusion', 'signatures'],
+    ME: ['identification', 'equipment', 'testPhotos', 'conclusion', 'signatures'],
+    RDO: ['data', 'drawings', 'points', 'conclusion', 'signatures'],
+  };
+  const lastStageBlock = (extra: HTMLElement) => {
+    const id = extra.dataset.customSection!;
+    const order = sectionOrder[extra.dataset.customReportType!] ?? [];
+    // An empty/removed optional stage has no printed block. Insert after the
+    // closest preceding stage instead of inventing a blank model page.
+    const preceding = [id, ...order.slice(0, Math.max(0, order.indexOf(id))).reverse()];
+    for (const candidate of preceding) {
+      const blocks = normalSheets().flatMap((sheet) =>
+        Array.from(sheet.querySelectorAll<HTMLElement>('[data-report-section]')),
+      );
+      const block = blocks.filter((block) => block.dataset.reportSection === candidate).at(-1);
+      if (block) return block;
+    }
+    return undefined;
+  };
+  const separated = new Set<string>();
+  for (const extra of document.querySelectorAll<HTMLElement>(
+    '[data-custom-position="afterSection"]',
+  )) {
+    const block = lastStageBlock(extra);
+    if (!block || separated.has(block.dataset.reportSection!)) continue;
+    separated.add(block.dataset.reportSection!);
+    const sheet = block.closest<HTMLElement>('.evs-sheet')!;
+    const flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
+    const tail = document.createRange();
+    if (flow.contains(block)) tail.setStartAfter(block);
+    else tail.setStart(flow, 0); // RDO's information table is before the flow.
+    tail.setEnd(flow, flow.childNodes.length);
+    const following = tail.cloneContents();
+    if (!following.textContent?.trim() && !following.querySelector('img,svg,table')) continue;
+    const continuation = sheet.cloneNode(true) as HTMLElement;
+    continuation.querySelector('.evs-flow')!.replaceChildren(tail.extractContents());
+    continuation.querySelector('.rdo-repeated')?.remove();
+    for (const part of [sheet, continuation])
+      for (const general of part.querySelectorAll<HTMLElement>('.lp-general-page'))
+        general.style.height = 'auto';
+    sheet.after(continuation);
+  }
   const sheets = Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet'));
   for (const original of sheets) {
     let sheet = original;
@@ -109,6 +208,8 @@ export function paginateEvs() {
         block.remove();
         const continuation = original.cloneNode(true) as HTMLElement;
         continuation.querySelector('.evs-flow')!.replaceChildren();
+        // Repeated RDO headers are context, not another occurrence of the stage.
+        continuation.querySelector('.rdo-repeated')?.removeAttribute('data-report-section');
         sheet.after(continuation);
         sheet = continuation;
         flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
@@ -161,15 +262,20 @@ export function paginateEvs() {
       const index =
         position === 'start'
           ? 0
-          : position === 'afterIdentification'
-            ? Math.min(standard.length, identification + 1)
-            : position === 'beforeConclusion'
-              ? conclusion
-              : position === 'afterPage'
-                ? Math.min(standard.length, Math.max(0, Number(extra.dataset.customAfter) || 1))
-                : position === 'afterSignatures'
-                  ? signatures + 1
-                  : standard.length;
+          : position === 'afterSection'
+            ? (() => {
+                const block = lastStageBlock(extra);
+                return block ? standard.indexOf(block.closest<HTMLElement>('.evs-sheet')!) + 1 : 0;
+              })()
+            : position === 'afterIdentification'
+              ? Math.min(standard.length, identification + 1)
+              : position === 'beforeConclusion'
+                ? conclusion
+                : position === 'afterPage'
+                  ? Math.min(standard.length, Math.max(0, Number(extra.dataset.customAfter) || 1))
+                  : position === 'afterSignatures'
+                    ? signatures + 1
+                    : standard.length;
       const group = before.get(index) ?? [];
       group.push(extra);
       before.set(index, group);

@@ -18,6 +18,7 @@ export function DrawingSelectionQuickOptions({
   onMore,
   onFullStyle,
   onCrop,
+  onFitPage,
   onFillPage,
   pointLabel,
 }: {
@@ -29,6 +30,7 @@ export function DrawingSelectionQuickOptions({
   onMore(): void;
   onFullStyle(): void;
   onCrop?: () => void;
+  onFitPage?: () => void;
   onFillPage?: () => void;
   pointLabel?: ReactNode;
 }) {
@@ -36,9 +38,18 @@ export function DrawingSelectionQuickOptions({
   return (
     <View style={{ gap: 8 }}>
       {pointLabel}
+      {onFitPage && (
+        <Button title="Encaixar imagem inteira" icon="expand" small secondary onPress={onFitPage} />
+      )}
       {onCrop && <Button title="Recortar imagem" icon="crop" small secondary onPress={onCrop} />}
       {onFillPage && (
-        <Button title="Preencher folha" icon="expand" small secondary onPress={onFillPage} />
+        <Button
+          title="Preencher até as bordas (recorta)"
+          icon="expand"
+          small
+          secondary
+          onPress={onFillPage}
+        />
       )}
       {textColor && onTextColor && (
         <>

@@ -9,7 +9,7 @@ export const referenceStyles = `
 .custom-point-heading{border-bottom:1px solid #111;color:#245aa1}
 .custom-drawing-sheet .evs-flow{display:flex;min-height:0}
 .custom-drawing{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center}
-.custom-drawing svg{width:100%;height:100%}
+.custom-drawing svg{display:block;width:100%;height:100%}
 .lp-report .evs-flow,.lp-report .evs-contact,.lp-report .reference-photo-tab span,
 .lp-report .lp-form-table td,.lp-report .lp-custom-choice{color:#111}
 .th-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
@@ -45,11 +45,11 @@ export const referenceStyles = `
 .lp-form-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;color:#111}
 .lp-form-table th,.lp-form-table td{border:1px solid #111;padding:1mm;overflow-wrap:anywhere;font-weight:normal;text-align:center;line-height:1.25}
 .lp-general-conditions th{height:10mm;font-size:11px}.lp-general-conditions td{height:8mm;color:#16789c}
-.lp-general-page .reference-band{padding:2mm;font-size:16px}
+.lp-general-page .reference-band,.lp-technical .reference-band{padding:2mm;font-size:16px}
 .lp-choices th{height:7mm}.lp-choices td{height:8mm;font-size:11px}
 .lp-check{display:inline-block;margin:0 2mm}.lp-custom-choice{color:#16789c;padding-top:1mm}
 .lp-material-table thead th{height:10mm;font-size:11px}.lp-material-table tbody th,.lp-material-table tbody td{height:6.5mm}.lp-material-table tbody td{color:#16789c}
-.lp-general-page .lp-indications{flex:1;min-height:88mm;display:flex;flex-direction:column;padding-top:3mm}
+.lp-general-page .lp-indications,.lp-technical .lp-indications{flex:1;min-height:88mm;display:flex;flex-direction:column;padding-top:3mm}
 .lp-indications .lp-form-table{flex:1;height:100%}.lp-indications .lp-inspection-area{vertical-align:top;padding:6mm 3mm;text-align:left}.lp-indications td{height:6mm}
 .lp-indication-description,.lp-indication-code{color:#16789c}.lp-indications-continuation{height:105mm;break-inside:avoid}
 .lp-legend td{text-align:left;height:7mm;font-size:11px}.lp-legend{padding-top:3mm}

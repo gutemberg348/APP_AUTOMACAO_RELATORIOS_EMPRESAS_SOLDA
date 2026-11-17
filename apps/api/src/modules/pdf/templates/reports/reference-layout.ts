@@ -1,6 +1,11 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
 import { drawingDataSchema, drawingSvg, lpWeldGroups } from '@weldcosta/shared';
-import { reportSectionVisible, reportFieldVisible } from '@weldcosta/shared';
+import {
+  reportSectionVisible,
+  reportFieldVisible,
+  reportFieldSection,
+  type ReportSectionId,
+} from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, clientSignatureCell, type PdfReport } from './layout';
 export { chunks } from './evs';
@@ -30,11 +35,11 @@ export function sheet(
 ) {
   return `<article class="evs-sheet reference-sheet ${kind}${report.reportType.code === 'LP' ? ' lp-report' : ''}">${header(report, title)}<main class="evs-flow">${blocks}</main>${contact ? footer : ''}</article>`;
 }
-export function annotations(text: unknown, label = '') {
+export function annotations(text: unknown, label = '', section?: ReportSectionId) {
   return chunks(text)
     .map(
       (part) =>
-        `<p class="evs-annotation">${label ? `<b>${escape(label)}:</b> ` : ''}${escape(part || '—')}</p>`,
+        `<p${section ? ` data-report-section="${section}"` : ''} class="evs-annotation">${label ? `<b>${escape(label)}:</b> ` : ''}${escape(part || '—')}</p>`,
     )
     .join('');
 }
@@ -79,7 +84,7 @@ export function identification(report: PdfReport, fields: [string, string][]) {
         chunks(value(report.specificData, path))
           .map(
             (part, i) =>
-              `<p class="evs-data-line"><b>${escape(label)}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
+              `<p data-report-section="${reportFieldSection(report, path)}" class="evs-data-line"><b>${escape(label)}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
           )
           .join(''),
       )
@@ -297,13 +302,18 @@ export function photoRows(
           entry.point
             ? 'Ponto ' + entry.point.number
             : 'Foto adicional ' + (i + pair.indexOf(entry) + 1),
+          'points',
         );
       if (entry.point) {
         const notes = pointNotes(entry.point);
-        if (notes) html += annotations(notes, 'Ponto ' + entry.point.number);
+        if (notes) html += annotations(notes, 'Ponto ' + entry.point.number, 'points');
         const d = entry.point.data as Record<string, unknown>;
         if (String(d.discontinuity || '').length > 50)
-          html += annotations(d.discontinuity, 'Descontinuidade · ponto ' + entry.point.number);
+          html += annotations(
+            d.discontinuity,
+            'Descontinuidade · ponto ' + entry.point.number,
+            'points',
+          );
       }
     }
   }

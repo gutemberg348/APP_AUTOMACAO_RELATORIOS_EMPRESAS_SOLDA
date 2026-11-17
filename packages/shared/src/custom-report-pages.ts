@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { drawingDataSchema, drawingId, newDrawingData } from './drawings';
+import { reportSectionIds } from './report-layout';
 
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,30}$/, 'Identificação da página inválida.');
 export const customPagePointSchema = z
@@ -25,9 +26,11 @@ export const customReportPageSchema = z
         'start',
         'end',
         'afterSignatures',
+        'afterSection',
       ])
       .default('beforeConclusion'),
     afterPage: z.number().int().min(1).max(10000).optional(),
+    afterSection: z.enum(reportSectionIds).optional(),
     photosPerPage: z
       .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(6)])
       .default(6),
@@ -44,7 +47,11 @@ export const customReportPageSchema = z
         'Os pontos desta página devem ter identificações diferentes.',
       ),
   })
-  .strict();
+  .strict()
+  .refine((page) => page.position !== 'afterSection' || page.afterSection !== undefined, {
+    path: ['afterSection'],
+    message: 'Escolha abaixo de qual etapa esta página deve aparecer.',
+  });
 export const customReportPagesSchema = z
   .array(customReportPageSchema)
   .max(20, 'Use até 20 páginas personalizadas.')
@@ -72,14 +79,15 @@ export function newCustomReportPage(
     id: drawingId(),
     kind,
     title: title.trim() || titles[kind],
-    position: 'beforeConclusion',
+    position: 'end',
     photosPerPage,
     drawings: isCustomDrawingPage({ kind })
       ? [
           {
             data: {
               ...newDrawingData(),
-              ...(kind !== 'drawing' ? { grid: 'none' as const, page: 'portrait' as const } : {}),
+              page: 'portrait',
+              ...(kind !== 'drawing' ? { grid: 'none' as const } : {}),
             },
           },
         ]

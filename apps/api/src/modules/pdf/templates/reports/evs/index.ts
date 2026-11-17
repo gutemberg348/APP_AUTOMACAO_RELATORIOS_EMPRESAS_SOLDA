@@ -4,6 +4,7 @@ import {
   drawingSvg,
   reportSectionVisible,
   reportFieldVisible,
+  reportFieldSection,
   type VisualInspectionRecord,
 } from '@weldcosta/shared';
 import {
@@ -148,7 +149,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
             chunks(data[key!] || (direct && key === 'inspectionType' ? 'EVS DIRETO' : ''))
               .map(
                 (part, i) =>
-                  `<p class="evs-data-line"><b>${label}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
+                  `<p data-report-section="${reportFieldSection(report, key!)}" class="evs-data-line"><b>${label}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
               )
               .join(''),
           )
@@ -195,7 +196,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
               overflow.push(
                 ...chunks(text).map(
                   (part) =>
-                    `<p class="evs-annotation">REGISTRO ${offset + index + 1} · ${label}: ${escape(part)}</p>`,
+                    `<p data-report-section="inspectionRecords" class="evs-annotation">REGISTRO ${offset + index + 1} · ${label}: ${escape(part)}</p>`,
                 ),
               );
             return `<td><div>${escape(text.length > limit ? text.slice(0, limit) + '…' : text)}</div></td>`;

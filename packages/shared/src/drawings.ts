@@ -12,7 +12,12 @@ import { drawingOrderedElements } from './drawing-professional';
 import { drawingSelectionBounds, transformDrawingSelection } from './drawing-selection';
 import { freehandPath } from './drawing-sketch';
 import { drawingBrush, drawingBrushLayers } from './drawing-brushes';
-import { drawingPageBounds, drawingPageViewBox, drawingImageFrame } from './drawing-image-layout';
+import {
+  drawingPageBounds,
+  drawingPageViewBox,
+  drawingImageFrame,
+  drawingImageClip,
+} from './drawing-image-layout';
 
 export const drawingWidth = 1000;
 export const drawingHeight = 800;
@@ -527,8 +532,13 @@ export function hitElement(
       return Math.hypot(e.x - p.x, e.y - p.y) < tolerance + 10;
     });
 }
-export function moveElement(e: DrawingElement, dx: number, dy: number): DrawingElement {
-  if (e.type === 'image') return transformDrawingSelection([e], 0, dx, dy)[0]!;
+export function moveElement(
+  e: DrawingElement,
+  dx: number,
+  dy: number,
+  page?: ReturnType<typeof drawingPageBounds>,
+): DrawingElement {
+  if (e.type === 'image') return transformDrawingSelection([e], 0, dx, dy, 1, undefined, page)[0]!;
   const coords =
     e.type === 'line' || e.type === 'dimension'
       ? [
@@ -571,9 +581,11 @@ export function transformDrawingElement(
   dx = 0,
   dy = 0,
   scale = 1,
+  page?: ReturnType<typeof drawingPageBounds>,
 ): DrawingElement {
   if (![angle, dx, dy, scale].every(Number.isFinite) || scale <= 0) return e;
-  if (e.type === 'image') return transformDrawingSelection([e], angle, dx, dy, scale)[0]!;
+  if (e.type === 'image')
+    return transformDrawingSelection([e], angle, dx, dy, scale, undefined, page)[0]!;
   const normalize = (value: number) => ((((value + 180) % 360) + 360) % 360) - 180;
   if (e.type === 'symbol' || e.type === 'text')
     return moveElement(
@@ -864,9 +876,13 @@ export function drawingSvg(
         const uri = options.images?.[e.mediaKey];
         const transform = `transform="translate(${e.x} ${e.y}) rotate(${e.rotation})"`;
         const frame = drawingImageFrame(e);
+        const clip = drawingImageClip(e, frame);
         const clipId = `drawing-image-${e.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const image =
+          uri &&
+          `<image x="${frame.x}" y="${frame.y}" width="${frame.width}" height="${frame.height}" preserveAspectRatio="none" href="${xml(uri)}"/>`;
         body += uri
-          ? `<g ${transform}><defs><clipPath id="${clipId}"><rect x="${-e.width / 2}" y="${-e.height / 2}" width="${e.width}" height="${e.height}"/></clipPath></defs><g clip-path="url(#${clipId})"><image x="${frame.x}" y="${frame.y}" width="${frame.width}" height="${frame.height}" preserveAspectRatio="none" href="${xml(uri)}"/></g></g>`
+          ? `<g ${transform}>${clip ? `<defs><clipPath id="${clipId}"><rect x="${clip.x}" y="${clip.y}" width="${clip.width}" height="${clip.height}"/></clipPath></defs><g clip-path="url(#${clipId})">${image}</g>` : image}</g>`
           : `<rect x="${-e.width / 2}" y="${-e.height / 2}" width="${e.width}" height="${e.height}" ${transform} fill="#E9EDF2" stroke="#64748B" stroke-dasharray="8 4"/>`;
       }
       if (e.type === 'line' || e.type === 'polyline') {

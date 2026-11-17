@@ -1,6 +1,7 @@
 import { type DrawingElement, type DrawingPosition } from './drawings';
 import { drawingSymbolDefinition } from './drawing-symbols';
 import { drawingReductionLabel } from './drawing-reduction';
+import { drawingPageBounds } from './drawing-image-layout';
 
 const rotate = (p: DrawingPosition, center: DrawingPosition, angle: number, scale = 1) => {
   const r = (angle * Math.PI) / 180,
@@ -150,12 +151,22 @@ export function transformDrawingSelection(
   dy = 0,
   scale = 1,
   pivot?: DrawingPosition,
+  page?: ReturnType<typeof drawingPageBounds>,
 ): DrawingElement[] {
   if (!elements.length || ![angle, dx, dy, scale].every(Number.isFinite) || scale <= 0)
     return elements;
   if (elements.some((e) => e.type === 'image' && e.locked)) return elements;
   const bounds = drawingSelectionBounds(elements),
     center = pivot ?? bounds.center;
+  const limits = page ?? drawingPageBounds();
+  const right = limits.x + limits.width;
+  const bottom = limits.y + limits.height;
+  const image = elements.length === 1 && elements[0]?.type === 'image' ? elements[0] : undefined;
+  const rotatingInPlace = angle !== 0 && dx === 0 && dy === 0 && (!page || scale === 1);
+  const rotatedBounds =
+    page && image && angle !== 0
+      ? drawingSelectionBounds([{ ...image, rotation: image.rotation + angle }])
+      : bounds;
   const minScale = Math.max(
     0.01,
     ...elements.map((e) =>
@@ -171,10 +182,10 @@ export function transformDrawingSelection(
   const maxScale = Math.min(
     100,
     // Use the rotated footprint rather than the image's unrotated height.
-    ...(angle === 0 && scale > 1
+    ...((angle === 0 && (scale > 1 || page)) || (page && image && scale !== 1)
       ? [
-          bounds.width > 0 ? 1000 / bounds.width : 100,
-          bounds.height > 0 ? 800 / bounds.height : 100,
+          rotatedBounds.width > 0 ? limits.width / rotatedBounds.width : 100,
+          rotatedBounds.height > 0 ? limits.height / rotatedBounds.height : 100,
         ]
       : []),
     ...elements.map((e) =>
@@ -242,20 +253,19 @@ export function transformDrawingSelection(
     return { ...e, ...p, ...(label ? { labelX: label.x, labelY: label.y } : {}) };
   });
   const nextBounds = drawingSelectionBounds(next);
-  if (nextBounds.width > 1000 + 1e-6 || nextBounds.height > 800 + 1e-6) return elements;
+  if (nextBounds.width > limits.width + 1e-6 || nextBounds.height > limits.height + 1e-6)
+    return elements;
   // Rotation in place must not silently translate the selection away from its pivot.
   if (
-    angle !== 0 &&
-    dx === 0 &&
-    dy === 0 &&
-    (nextBounds.x < -1e-6 ||
-      nextBounds.y < -1e-6 ||
-      nextBounds.x + nextBounds.width > 1000 + 1e-6 ||
-      nextBounds.y + nextBounds.height > 800 + 1e-6)
+    rotatingInPlace &&
+    (nextBounds.x < limits.x - 1e-6 ||
+      nextBounds.y < limits.y - 1e-6 ||
+      nextBounds.x + nextBounds.width > right + 1e-6 ||
+      nextBounds.y + nextBounds.height > bottom + 1e-6)
   )
     return elements;
-  dx = Math.max(-nextBounds.x, Math.min(1000 - nextBounds.x - nextBounds.width, dx));
-  dy = Math.max(-nextBounds.y, Math.min(800 - nextBounds.y - nextBounds.height, dy));
+  dx = Math.max(limits.x - nextBounds.x, Math.min(right - nextBounds.x - nextBounds.width, dx));
+  dy = Math.max(limits.y - nextBounds.y, Math.min(bottom - nextBounds.y - nextBounds.height, dy));
   return next.map((e) => {
     if (e.type === 'polyline')
       return { ...e, points: e.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };

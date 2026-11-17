@@ -3,7 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import puppeteer, { type Browser } from 'puppeteer-core';
-import { newCustomReportPage } from '@weldcosta/shared';
+import sharp from 'sharp';
+import { fitDrawingImageToPage, newCustomReportPage } from '@weldcosta/shared';
 import { render } from '../../src/modules/pdf/templates/reports/thickness';
 import { renderWithCustomPages } from '../../src/modules/pdf/templates/reports/custom-pages';
 import { reportForPdf } from '../../src/modules/pdf/pdf-snapshot';
@@ -22,25 +23,28 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => browser?.close());
-it.each(['notAdded', 'blank', 'photo'])(
+it.each(['notAdded', 'blank', 'photo', 'fittedPhoto'])(
   'prints only the optional calculation page when selected: %s',
   async (mode) => {
     const custom = newCustomReportPage('calculation');
-    if (mode === 'photo') {
+    const hasPhoto = mode === 'photo' || mode === 'fittedPhoto';
+    if (hasPhoto) {
       custom.title = 'MEMORIAL DO CLIENTE';
-      custom.drawings[0]!.data.elements = [
-        {
-          id: 'image',
-          type: 'image',
-          mediaKey: 'drawing-image-calculation',
-          x: 540,
-          y: 350,
-          width: 500,
-          height: 380,
-          rotation: 15,
-        },
-        { id: 'ink', type: 'line', x1: 100, y1: 150, x2: 250, y2: 210, strokeColor: '#dc2626' },
-        { id: 'text', type: 'text', x: 200, y: 240, text: 'ANOTACAO TESTE' },
+      const data = custom.drawings[0]!.data;
+      const image = {
+        id: 'image',
+        type: 'image' as const,
+        mediaKey: 'drawing-image-calculation',
+        x: 540,
+        y: 350,
+        width: 500,
+        height: 380,
+        rotation: 15,
+      };
+      data.elements = [
+        mode === 'fittedPhoto' ? fitDrawingImageToPage(image, data, 'contain') : image,
+        { id: 'ink', type: 'line', x1: 200, y1: 92, x2: 375, y2: 92, strokeColor: '#dc2626' },
+        { id: 'text', type: 'text', x: 200, y: 80, text: 'ANOTACAO TESTE' },
       ];
     }
     const report = {
@@ -53,28 +57,33 @@ it.each(['notAdded', 'blank', 'photo'])(
       points: [],
       drawings: [],
       signatures: [],
-      media:
-        mode === 'photo'
-          ? [
-              {
-                id: 'photo',
-                clientUploadId: 'drawing-image-calculation',
-                sectionKey: 'drawing',
-                reportPointId: null,
-                mimeType: 'image/png',
-                originalName: 'calculation.png',
-              },
-            ]
-          : [],
+      media: hasPhoto
+        ? [
+            {
+              id: 'photo',
+              clientUploadId: 'drawing-image-calculation',
+              sectionKey: 'drawing',
+              reportPointId: null,
+              mimeType: 'image/png',
+              originalName: 'calculation.png',
+            },
+          ]
+        : [],
       specificData: {
         calculationMinimumThickness: '3,33',
         ...(mode === 'notAdded' ? {} : { customPages: [custom] }),
       },
     } as unknown as PdfReport;
     const uri =
-      'data:image/svg+xml;base64,' +
-      Buffer.from(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="380"><rect width="500" height="380" fill="#e4edf5"/><text x="80" y="180" font-size="24">FOTO DO CALCULO</text></svg>',
+      'data:image/png;base64,' +
+      (
+        await sharp(
+          Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="380"><rect width="500" height="380" fill="#e4edf5"/><rect x="1" y="1" width="498" height="378" fill="none" stroke="#263b70" stroke-width="2"/><text x="12" y="60" font-size="16">INÍCIO DA TABELA</text><text x="488" y="298" text-anchor="end" font-size="16">FIM DA TABELA</text><path d="M0 80H500M0 160H500M0 240H500M0 320H500M250 80V380" stroke="#263b70"/></svg>',
+          ),
+        )
+          .png()
+          .toBuffer()
       ).toString('base64');
     const html = renderWithCustomPages(reportForPdf(report), new Map([['photo', uri]]), render);
     const page = await browser.newPage();
@@ -95,8 +104,26 @@ it.each(['notAdded', 'blank', 'photo'])(
         );
         expect(await page.$$('.custom-report-sheet .evs-header')).toHaveLength(1);
         expect(await page.$$('.custom-drawing [data-print-drawing-content]')).toHaveLength(0);
-        if (mode === 'photo') {
-          expect(await page.$eval('.custom-drawing image', (e) => Number(e.getAttribute('width')))).toBeCloseTo(500, 5);
+        if (hasPhoto) {
+          const printed = await page.$eval('.custom-drawing image', (image) => {
+            const { x, y, right, bottom, width, height } = image.getBoundingClientRect();
+            const area = image.closest('.evs-flow')!.getBoundingClientRect();
+            return {
+              width,
+              height,
+              widthUsed: width / area.width,
+              fits: x >= area.x && y >= area.y && right <= area.right && bottom <= area.bottom,
+            };
+          });
+          if (mode === 'fittedPhoto') {
+            expect(printed.fits).toBe(true);
+            expect(printed.widthUsed).toBeGreaterThan(0.98);
+            expect(printed.width / printed.height).toBeCloseTo(500 / 380, 5);
+          } else {
+            expect(
+              await page.$eval('.custom-drawing image', (e) => Number(e.getAttribute('width'))),
+            ).toBeCloseTo(500, 5);
+          }
           expect(await page.$eval('.custom-drawing', (e) => e.textContent)).toContain(
             'ANOTACAO TESTE',
           );
@@ -104,9 +131,14 @@ it.each(['notAdded', 'blank', 'photo'])(
             new URL('../../../../artifacts/custom-pages', import.meta.url),
           );
           await mkdir(directory, { recursive: true });
-          await (await page.$('.custom-report-sheet'))!.screenshot({
-            path: directory + '/calculation-photo-page.png',
-          });
+          if (mode === 'fittedPhoto') {
+            await page.pdf({
+              path: directory + '/calculation-fitted-preview.pdf',
+              printBackground: true,
+              preferCSSPageSize: true,
+              pageRanges: '4',
+            });
+          }
         }
       }
     } finally {

@@ -49,7 +49,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   if (general.length) groups.push({ label: '', points: [], photos: general });
   let content =
     data.equipment && reportSectionVisible(report, 'equipment')
-      ? annotations(data.equipment, 'EQUIPAMENTO')
+      ? annotations(data.equipment, 'EQUIPAMENTO', 'equipment')
       : '';
   const cards: { photoIndex: number; offset: number; html: string }[] = [];
   for (const group of groups) {
@@ -176,7 +176,12 @@ export function render(report: PdfReport, images: Map<string, string>) {
   if (content && reportSectionVisible(report, 'testPhotos'))
     html += sheet(report, 'PARTE DO EQUIPAMENTO<br>OU LINHA', content, true, 'measurement-sheet');
   else if (data.equipment && reportSectionVisible(report, 'equipment'))
-    html += sheet(report, 'EQUIPAMENTO', annotations(data.equipment, 'EQUIPAMENTO'), true);
+    html += sheet(
+      report,
+      'EQUIPAMENTO',
+      annotations(data.equipment, 'EQUIPAMENTO', 'equipment'),
+      true,
+    );
   return (
     html +
     conclusion(report, data.finalReport, ['TÉCNICO INSPEÇÃO', 'INSPETOR', 'CLIENTE'], true).replace(

@@ -32,7 +32,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   const overflow: string[] = [];
   const summary = (raw: unknown, label: string) => {
     const text = String(raw ?? '') || '—';
-    if (text.length > 80) overflow.push(annotations(text, label));
+    if (text.length > 80) overflow.push(annotations(text, label, 'data'));
     return escape(text.length > 80 ? text.slice(0, 80) + '…' : text);
   };
   const info = reportSectionVisible(report, 'data')
@@ -56,7 +56,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
         { images: drawingImageSources(report, images), pointStatusColors: false },
-      )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision);
+      )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision, '', 'drawings');
     if (separateDrawings) fullDrawingPages += sheet(report, 'DESENHO', drawingContent);
     else content += drawingContent;
   }
@@ -69,7 +69,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   ))
     content +=
       `<div class="rdo-drawing"><img src="${images.get(m.id) || ''}"></div>` +
-      (m.caption ? annotations(m.caption) : '');
+      (m.caption ? annotations(m.caption, '', 'drawings') : '');
   content += photoRows(report, images, 'RDO');
   if (reportSectionVisible(report, 'conclusion'))
     content += chunks(data.observation)
