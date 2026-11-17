@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { reportSections } from './report-fields';
 import { isVisualWeldReport } from './enums';
 import { validateSpecificData } from './schemas/reports';
+import { reportSectionVisible } from './report-layout';
 import { drawingDataSchema } from './drawings';
 import type { ReportStatus } from './enums';
 
@@ -51,12 +52,20 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
       warnings.push(`${label}: ${issue.message}`);
     }
   }
-  const sourcePoints = ['TH', 'ME'].includes(report.reportType.code) ? [] : (report.points ?? []);
+  const sourcePoints =
+    ['TH', 'ME'].includes(report.reportType.code) || !reportSectionVisible(report, 'points')
+      ? []
+      : (report.points ?? []);
   const groups = report.reportType.code === 'LP' ? lpWeldGroups(sourcePoints) : undefined;
   const points = groups
     ? groups.map((group) => ({ ...sourcePoints[group.index]!, number: group.number }))
     : sourcePoints;
-  if (report.points && !points.length && !['RDO', 'TH', 'ME'].includes(report.reportType.code))
+  if (
+    reportSectionVisible(report, 'points') &&
+    report.points &&
+    !points.length &&
+    !['RDO', 'TH', 'ME'].includes(report.reportType.code)
+  )
     warnings.push('Nenhum ponto foi registrado nesta inspeção.');
   const numbered = (items: typeof points) => items.map((point) => point.number).join(', ');
   const unchecked = points.filter(
@@ -77,7 +86,11 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
     );
     if (withoutPhotos.length) warnings.push('Pontos sem fotos: ' + numbered(withoutPhotos) + '.');
   }
-  if (!['TH', 'ME'].includes(report.reportType.code) && report.drawings?.length) {
+  if (
+    reportSectionVisible(report, 'drawings') &&
+    !['TH', 'ME'].includes(report.reportType.code) &&
+    report.drawings?.length
+  ) {
     const marked = new Set(
       report.drawings.flatMap((drawing, index) => {
         const parsed = drawingDataSchema.safeParse(drawing.data);
@@ -97,6 +110,7 @@ export function reportReviewWarnings(report: ReviewReport): string[] {
     if (missing.length) warnings.push('Pontos sem marcação no desenho: ' + numbered(missing) + '.');
   }
   if (
+    reportSectionVisible(report, 'signatures') &&
     report.signatures?.some(
       (signer) => !signer.name.trim() || (!signer.signatureAssetId && !signer.signatureImagePath),
     )

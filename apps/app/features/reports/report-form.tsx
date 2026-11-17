@@ -1,4 +1,8 @@
-import { isHydrostaticTestPhoto, measurementPhotoDefaults } from '@weldcosta/shared';
+import {
+  isHydrostaticTestPhoto,
+  measurementPhotoDefaults,
+  isCustomPagePhoto,
+} from '@weldcosta/shared';
 import { ReportPhotoSaveError } from './report-photo-error';
 import { cleanReportDraft } from './report-draft-clean';
 import { useTheme } from '../../utils/theme';
@@ -53,6 +57,10 @@ import { todayISO } from '../../utils/dates';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { DrawingEditor } from './drawing-editor';
 import { PointPhotos } from './point-photos';
+import { CustomReportPagesEditor } from './custom-report-pages-editor';
+import type { CustomReportPage } from '@weldcosta/shared';
+import { reportSectionId, withoutReportLayout, type ReportSectionId } from '@weldcosta/shared';
+import { ReportSectionsManager } from './report-sections-manager';
 import { usePageScroll } from '../../components/page-scroll';
 import { prepareCurrentReportPdf } from './report-current-pdf';
 import { ReportActions } from './report-actions';
@@ -283,8 +291,42 @@ function ReportFormContent({
       })),
     },
   ];
+  const {
+    control,
+    handleSubmit,
+    reset,
+    clearErrors,
+    setError: setFieldError,
+    getFieldState,
+    getValues,
+    watch,
+    setValue,
+    formState: { isDirty, errors },
+  } = useForm<Values>({
+    defaultValues: offlineDraft?.values ?? {
+      number: '',
+      title: initialTitle,
+      reportDate: todayISO(),
+      specificData: withFieldDefaults(
+        {
+          ...(type.code === 'LP' ? { discontinuities: [] } : {}),
+          ...(type.code === 'EVD' ? { inspectionType: 'EVS DIRETO', inspectionRecords: [] } : {}),
+          ...withoutReportLayout(initialData),
+          ...(type.code === 'RDO' ? { date: todayISO(), inspector: user.name } : {}),
+        },
+        baseSections,
+      ),
+      points: [],
+      signatures: [],
+      drawings: [],
+    },
+  });
+  const removedSections = useWatch({ control, name: 'specificData.omittedSections' });
   type Section = ReportFormSection;
-  const sections = reportFormSections(type.code, baseSections);
+  const allSections = reportFormSections(type.code, baseSections);
+  const sections = allSections.filter(
+    (s) => !Array.isArray(removedSections) || !removedSections.includes(reportSectionId(s)),
+  );
   const stages = [{ title: 'Inspeção' }, { title: 'Concluir' }];
   const sectionStage = (section: Section) =>
     section.content === 'signatures' || ['Laudo', 'Observação'].includes(section.title) ? 1 : 0;
@@ -330,36 +372,6 @@ function ReportFormContent({
     editable = config.editableFieldsByRoleCode[user.role.code] ?? [];
   const canEditPath = (path: string) => !report || allFields || editable.includes(path);
   const canEdit = (path: string) => !editingBusy && canEditPath(path);
-  const {
-    control,
-    handleSubmit,
-    reset,
-    clearErrors,
-    setError: setFieldError,
-    getFieldState,
-    getValues,
-    watch,
-    setValue,
-    formState: { isDirty, errors },
-  } = useForm<Values>({
-    defaultValues: offlineDraft?.values ?? {
-      number: '',
-      title: initialTitle,
-      reportDate: todayISO(),
-      specificData: withFieldDefaults(
-        {
-          ...(type.code === 'LP' ? { discontinuities: [] } : {}),
-          ...(type.code === 'EVD' ? { inspectionType: 'EVS DIRETO', inspectionRecords: [] } : {}),
-          ...initialData,
-          ...(type.code === 'RDO' ? { date: todayISO(), inspector: user.name } : {}),
-        },
-        baseSections,
-      ),
-      points: [],
-      signatures: [],
-      drawings: [],
-    },
-  });
   const hasChanges = isDirty || hasPhotoDrafts || !!localEntry;
   const localContext = useRef({ report, project, photoDraftKey, saving: saving || syncingLocally });
   localContext.current = { report, project, photoDraftKey, saving: saving || syncingLocally };
@@ -586,14 +598,18 @@ function ReportFormContent({
       const count =
         (report?.media ?? []).filter(
           (photo) =>
+            !isCustomPagePhoto(photo) &&
             (['TH', 'ME'].includes(type.code)
               ? isHydrostaticTestPhoto(photo)
-              : photo.sectionKey === 'test-photos') && !photoDrafts.removedIds.includes(photo.id),
+              : photo.sectionKey === 'test-photos') &&
+            !photoDrafts.removedIds.includes(photo.id),
         ).length +
-        photoDrafts.photos.filter((photo) =>
-          ['TH', 'ME'].includes(type.code)
-            ? isHydrostaticTestPhoto(photo)
-            : photo.sectionKey === 'test-photos',
+        photoDrafts.photos.filter(
+          (photo) =>
+            !isCustomPagePhoto(photo) &&
+            (['TH', 'ME'].includes(type.code)
+              ? isHydrostaticTestPhoto(photo)
+              : photo.sectionKey === 'test-photos'),
         ).length;
       if (type.code === 'ME') return `${count} fotos · círculos numerados e medições por foto`;
       return count
@@ -633,7 +649,7 @@ function ReportFormContent({
           setValue(path as `specificData.${string}`, value, { shouldDirty: true });
       }
     };
-    apply(source);
+    apply(withoutReportLayout(source));
     setReapply(false);
   };
   const discardPhotos = useCallback(() => {
@@ -703,7 +719,12 @@ function ReportFormContent({
     Keyboard.dismiss();
     setIssuesOpen(false);
     const first = issue.path;
-    const target = sections.findIndex((section) =>
+    if (first[0] === 'specificData' && first[1] === 'customPages') {
+      setStep(0);
+      setCorrection({ ...issue, request: Date.now() });
+      return;
+    }
+    const target = allSections.findIndex((section) =>
       section.content
         ? section.content === first[0] ||
           (['discontinuities', 'inspectionRecords'].includes(section.content) &&
@@ -718,8 +739,19 @@ function ReportFormContent({
                   .startsWith(field.path + '.')),
           ),
     );
-    if (target >= 0) openSection(target);
-    else {
+    if (target >= 0) {
+      const section = allSections[target]!;
+      const id = reportSectionId(section);
+      if (Array.isArray(removedSections) && removedSections.includes(id))
+        setValue(
+          'specificData.omittedSections',
+          removedSections.filter((removed) => removed !== id),
+          { shouldDirty: true },
+        );
+      setStep(sectionStage(section));
+      setIdentityOpen(false);
+      setOpenSectionTitle(section.title);
+    } else {
       setIdentityOpen(true);
       setOpenSectionTitle(null);
       setStep(0);
@@ -753,21 +785,25 @@ function ReportFormContent({
       );
       setSaveIssues([
         {
-          path: ['TH', 'ME'].includes(type.code)
-            ? ['testPhotos']
-            : cause.location.drawing
-              ? ['drawings']
-              : cause.location.testPhotos
-                ? ['testPhotos']
-                : pointIndex >= 0
-                  ? ['points', String(pointIndex)]
-                  : ['points'],
+          path: cause.location.customPage
+            ? ['specificData', 'customPages']
+            : ['TH', 'ME'].includes(type.code)
+              ? ['testPhotos']
+              : cause.location.drawing
+                ? ['drawings']
+                : cause.location.testPhotos
+                  ? ['testPhotos']
+                  : pointIndex >= 0
+                    ? ['points', String(pointIndex)]
+                    : ['points'],
           label: cause.location.label,
           message: cause.message,
           guidance:
-            (['TH', 'ME'].includes(type.code) || cause.location.testPhotos
-              ? 'Abra Fotos do ensaio e confira a foto indicada. Ela continua no telefone. Corrija o arquivo ou retire somente esta foto e salve novamente.'
-              : cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
+            (cause.location.customPage
+              ? 'Abra Páginas personalizadas no topo, edite a página indicada e confira sua foto. O arquivo continua no telefone; tente novamente após corrigir.'
+              : ['TH', 'ME'].includes(type.code) || cause.location.testPhotos
+                ? 'Abra Fotos do ensaio e confira a foto indicada. Ela continua no telefone. Corrija o arquivo ou retire somente esta foto e salve novamente.'
+                : cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
             'Abra o ponto e a foto indicados. As fotos pendentes continuam no telefone; confira o motivo acima e toque em Salvar para tentar o envio novamente.',
         },
       ]);
@@ -1169,6 +1205,46 @@ function ReportFormContent({
         </View>
       </Card>
       <View style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
+        <Controller
+          control={control}
+          name="specificData.omittedSections"
+          render={({ field }) => (
+            <ReportSectionsManager
+              sections={allSections}
+              value={(Array.isArray(field.value) ? field.value : []) as ReportSectionId[]}
+              editable={canEdit('specificData.omittedSections')}
+              onChange={(removed) => {
+                field.onChange(removed);
+                setOpenSectionTitle(undefined);
+                setIdentityOpen(false);
+                setStep(0);
+              }}
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="specificData.customPages"
+          render={({ field }) => (
+            <CustomReportPagesEditor
+              buttonVisible={step === 0}
+              value={(Array.isArray(field.value) ? field.value : []) as CustomReportPage[]}
+              onChange={(pages) => field.onChange(pages)}
+              editable={canEdit('specificData.customPages')}
+              canUpload={user.permissions.includes('media.upload')}
+              canDraw={user.permissions.includes('drawing.edit')}
+              canRemove={user.permissions.includes('media.delete')}
+              reportId={report?.id}
+              projectId={projectId}
+              media={report?.media ?? []}
+              draftKey={photoDraftKey}
+              onPickingChange={setPickingPhoto}
+              correctionRequest={
+                correction?.path[1] === 'customPages' ? correction.request : undefined
+              }
+            />
+          )}
+        />
         {sections.some((section) => section.content === 'points') && (
           <Button
             title="Pontos e fotos"

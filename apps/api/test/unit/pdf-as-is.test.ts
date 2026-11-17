@@ -1,6 +1,13 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
-import { newDrawingData, reportTypeCodes, type CurrentUser } from '@weldcosta/shared';
+import {
+  newDrawingData,
+  reportTypeCodes,
+  customReportPageSchema,
+  customPhotoPrefix,
+  customReportPages,
+  type CurrentUser,
+} from '@weldcosta/shared';
 import { preparePdfAsIs, pdfAsIsSchema } from '../../src/modules/pdf/pdf-as-is';
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
 import { PdfExportDownloads } from '../../src/modules/pdf/pdf-export-downloads';
@@ -44,6 +51,97 @@ const base = (code: string) =>
 beforeEach(() => {
   vi.clearAllMocks();
 });
+it.each(reportTypeCodes)(
+  'includes pending custom photos and drawing images when downloading %s as filled',
+  async (code) => {
+    const bytes = await sharp({
+      create: { width: 60, height: 90, channels: 3, background: '#1764c0' },
+    })
+      .png()
+      .toBuffer();
+    mocks.get.mockResolvedValue(bytes);
+    const drawing = customReportPageSchema.parse({
+      id: 'extra-draw',
+      kind: 'drawing',
+      drawings: [
+        {
+          data: {
+            ...newDrawingData(),
+            elements: [
+              {
+                id: 'image',
+                type: 'image',
+                mediaKey: 'drawing-image-custom',
+                x: 500,
+                y: 400,
+                width: 300,
+                height: 200,
+                rotation: 0,
+              },
+              {
+                id: 'missing',
+                type: 'image',
+                mediaKey: 'drawing-image-missing',
+                x: 200,
+                y: 100,
+                width: 100,
+                height: 100,
+                rotation: 0,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const photos = customReportPageSchema.parse({
+      id: 'extra-photos',
+      kind: 'photos',
+      photosPerPage: 4,
+    });
+    const prepared = await preparePdfAsIs(
+      base(code),
+      pdfAsIsSchema.parse({
+        values: {
+          number: '001',
+          title: 'CUSTOM',
+          specificData: { customPages: [drawing, photos] },
+        },
+        photos: [
+          {
+            id: 'drawing-image-custom',
+            pointKey: null,
+            sectionKey: 'drawing',
+            caption: '',
+            name: 'drawing.png',
+            fileIndex: 0,
+          },
+          {
+            id: customPhotoPrefix(photos.id) + 'photo',
+            pointKey: null,
+            sectionKey: 'test-photos',
+            caption: '',
+            name: 'extra.png',
+            fileIndex: 0,
+          },
+        ],
+      }),
+      [bytes],
+      user,
+    );
+    const pages = customReportPages(prepared.report.specificData);
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.drawings[0]!.data.elements).toHaveLength(1);
+    expect(prepared.warnings.join(' ')).toContain('Página personalizada');
+    expect(prepared.report.media.some((m) => m.clientUploadId === 'drawing-image-custom')).toBe(
+      true,
+    );
+    expect(
+      prepared.report.media.some(
+        (m) => m.clientUploadId === customPhotoPrefix(photos.id) + 'photo',
+      ),
+    ).toBe(true);
+  },
+);
 it.each(reportTypeCodes)(
   'includes current values, local and orphan photos in %s despite a bad point and a broken image',
   async (code) => {
@@ -120,16 +218,18 @@ it.each(reportTypeCodes)(
     );
     expect(report.title).toBe('CURRENT TITLE');
     expect(report.number).toBe('CURRENT-2');
-    expect(report.points[1]).toMatchObject({
-      label: 'KEEP LABEL',
-      value: null,
-      data: { notes: 'KEEP NOTES' },
-    });
+    if (code === 'TH') expect(report.points).toEqual([]);
+    else
+      expect(report.points[1]).toMatchObject({
+        label: 'KEEP LABEL',
+        value: null,
+        data: { notes: 'KEEP NOTES' },
+      });
     expect(report.media).toHaveLength(3);
     expect(images.size).toBe(3);
-    expect(report.media.find((m) => m.clientUploadId === 'local')?.reportPointId).toBe(
-      report.points[1]!.id,
-    );
+    const photoPointId = report.media.find((m) => m.clientUploadId === 'local')?.reportPointId;
+    if (code === 'TH') expect(photoPointId).toBeTruthy();
+    else expect(photoPointId).toBe(report.points[1]!.id);
     expect(report.media.find((m) => m.clientUploadId === 'orphan')?.reportPointId).toBeNull();
     expect(warnings.join(' ')).toContain('Ponto 2: leitura inválido');
     expect(warnings.join(' ')).toContain('orphan.jpg');
@@ -137,7 +237,8 @@ it.each(reportTypeCodes)(
     expect(warnings.join(' ')).toContain('broken.jpg');
     expect(warnings.join(' ')).toContain('Somente esta foto ficará fora');
     expect(JSON.stringify(report.drawings)).not.toContain('PRIVATE');
-    expect(JSON.stringify(report.drawings)).toContain('PUBLIC TEXT');
+    if (['TH', 'ME'].includes(code)) expect(report.drawings).toEqual([]);
+    else expect(JSON.stringify(report.drawings)).toContain('PUBLIC TEXT');
     expect(original).toEqual(before);
   },
 );

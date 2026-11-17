@@ -8,8 +8,10 @@ export type ReportFormSection = ReportSection & {
 // The model defines the complete form. Company/project defaults only supply values.
 export function reportFormSections(code: string, base: ReportSection[]): ReportFormSection[] {
   const sections: ReportFormSection[] = [...base];
-  const conclusion = sections.findIndex((section) =>
-    ['Laudo', 'Observação'].includes(section.title),
+  const conclusion = sections.findIndex(
+    (section) =>
+      ['Laudo', 'Observação'].includes(section.title) ||
+      (code === 'ME' && section.title === 'Cálculo · memorial de tubulação'),
   );
   sections.splice(
     conclusion < 0 ? sections.length : conclusion,

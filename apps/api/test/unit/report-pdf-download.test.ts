@@ -21,10 +21,17 @@ vi.doMock(appRequire.resolve('expo-sharing'), () => ({
 }));
 vi.doMock(appRequire.resolve('expo-file-system'), () => ({
   Paths: { cache: 'cache' },
-  File: class {
+  Directory: class {
     uri: string;
     constructor(...parts: string[]) {
       this.uri = parts.join('/');
+    }
+    create() {}
+  },
+  File: class {
+    uri: string;
+    constructor(...parts: (string | { uri: string })[]) {
+      this.uri = parts.map((p) => (typeof p === 'string' ? p : p.uri)).join('/');
     }
     create() {}
     write(bytes: Uint8Array) {
@@ -53,14 +60,16 @@ it('opens each fresh PDF using a new URI even when downloading the same report i
       }
     },
   );
-  mocks.blob.mockResolvedValue(new Blob(['%PDF-new']));
+  mocks.blob.mockResolvedValue(
+    Object.assign(new Blob(['%PDF-new']), { downloadName: 'REL 001 - TH - COLETOR DE VAPOR.pdf' }),
+  );
   await downloadReportPdf('report-id', true);
   await downloadReportPdf('report-id', true);
   const first = mocks.share.mock.calls[0]![0],
     second = mocks.share.mock.calls[1]![0];
   expect(first).not.toBe(second);
-  expect(first).toContain('report-id-previa.pdf');
-  expect(second).toContain('report-id-previa.pdf');
+  expect(first.split('/').at(-1)).toBe('REL 001 - TH - COLETOR DE VAPOR.pdf');
+  expect(second.split('/').at(-1)).toBe('REL 001 - TH - COLETOR DE VAPOR.pdf');
   expect(mocks.blob).toHaveBeenCalledTimes(2);
   expect(mocks.write.mock.calls.map(([, bytes]) => new TextDecoder().decode(bytes))).toEqual([
     '%PDF-new',

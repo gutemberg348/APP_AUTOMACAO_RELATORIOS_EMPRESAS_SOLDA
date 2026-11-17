@@ -1,5 +1,21 @@
 // Executed inside Chromium after fonts/images load, so continuation pages use actual sizes.
 export function paginateEvs() {
+  for (const heading of document.querySelectorAll<HTMLElement>(
+    '.custom-report-sheet .evs-heading',
+  )) {
+    const text = document.createElement('span');
+    text.textContent = heading.textContent;
+    heading.replaceChildren(text);
+    let size = 23;
+    while (
+      size > 8 &&
+      (text.getBoundingClientRect().height > heading.clientHeight - 12 ||
+        text.getBoundingClientRect().width > heading.clientWidth - 12)
+    ) {
+      size -= 0.5;
+      text.style.fontSize = `${size}px`;
+    }
+  }
   // Keep the three header rows fixed even when the report number wraps.
   for (const cell of document.querySelectorAll<HTMLElement>('.evs-report-number')) {
     const text = cell.querySelector<HTMLElement>('span')!;
@@ -32,7 +48,7 @@ export function paginateEvs() {
     let flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
     const blocks = Array.from(flow.children);
     const measurement = original.classList.contains('measurement-sheet');
-    const maxPhotoRows = measurement ? 2 : 3;
+    const maxPhotoRows = 3;
     const photoBlocks = blocks.filter((block) => block.querySelector('.report-photo-frame'));
     if (photoBlocks.length) {
       // Every pair keeps the same image height, including a half-empty last row.
@@ -58,17 +74,17 @@ export function paginateEvs() {
         }
         return {
           height,
+          header: top - block.getBoundingClientRect().top,
           overhead: block.getBoundingClientRect().height - height + followingHeight,
         };
       });
       const leadingHeight = blocks
         .slice(0, blocks.indexOf(photoBlocks[0]!))
         .reduce((height, block) => height + block.getBoundingClientRect().height, 0);
-      const pairedOverhead = Math.max(
-        ...measures.map((m, i) => m.overhead + (measures[i + 1]?.overhead ?? 0)),
-      );
       const available = measurement
-        ? (flow.getBoundingClientRect().height - leadingHeight - pairedOverhead) / 2 - 2
+        ? (flow.getBoundingClientRect().height - leadingHeight) / 3 -
+          Math.max(...measures.map((m) => m.header)) -
+          2
         : flow.getBoundingClientRect().height / 3 -
           Math.max(...measures.map((m) => m.overhead)) -
           1;
@@ -105,6 +121,69 @@ export function paginateEvs() {
         throw new Error(
           'Um campo excedeu o espaço de uma página do relatório. Divida o texto em campos menores.',
         );
+    }
+  }
+  // Distribute TH identification after pagination, using only the spare space.
+  // Long fields keep their natural height and continuation pages remain readable.
+  for (const flow of document.querySelectorAll<HTMLElement>('.th-identification .evs-flow')) {
+    const blocks = Array.from(flow.children);
+    if (blocks.length < 2) continue;
+    const style = getComputedStyle(flow);
+    const available =
+      flow.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    const used = blocks.reduce((sum, block) => sum + block.getBoundingClientRect().height, 0);
+    const gap = Math.max(0, Math.min(30, (available * 0.9 - used) / (blocks.length - 1)));
+    flow.style.gap = `${gap}px`;
+  }
+  // Position extras after pagination so a chosen model page includes continuation sheets.
+  const standard = Array.from(
+    document.querySelectorAll<HTMLElement>('.evs-sheet:not([data-custom-id])'),
+  );
+  const extras = Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet[data-custom-id]'));
+  if (extras.length) {
+    const before = new Map<number, HTMLElement[]>();
+    let identification = 0;
+    standard.forEach((s, i) => {
+      if (s.classList.contains('evs-identification')) identification = i;
+    });
+    let conclusion = standard.findIndex(
+      (s) =>
+        s.classList.contains('reference-final') ||
+        s.querySelector('.evs-heading')?.textContent?.trim() === 'LAUDO FINAL',
+    );
+    if (conclusion < 0) conclusion = Math.max(0, standard.length - 1);
+    let signatures = standard.length - 1;
+    standard.forEach((s, i) => {
+      if (s.querySelector('.evs-signers')) signatures = i;
+    });
+    for (const extra of extras) {
+      const position = extra.dataset.customPosition;
+      const index =
+        position === 'start'
+          ? 0
+          : position === 'afterIdentification'
+            ? Math.min(standard.length, identification + 1)
+            : position === 'beforeConclusion'
+              ? conclusion
+              : position === 'afterPage'
+                ? Math.min(standard.length, Math.max(0, Number(extra.dataset.customAfter) || 1))
+                : position === 'afterSignatures'
+                  ? signatures + 1
+                  : standard.length;
+      const group = before.get(index) ?? [];
+      group.push(extra);
+      before.set(index, group);
+    }
+    for (let i = 0; i <= standard.length; i++) {
+      const group = before.get(i) ?? [];
+      group.sort(
+        (a, b) =>
+          Number(a.dataset.customPosition === 'end') - Number(b.dataset.customPosition === 'end') ||
+          Number(b.dataset.customPosition === 'start') -
+            Number(a.dataset.customPosition === 'start'),
+      );
+      for (const extra of group) document.body.append(extra);
+      if (standard[i]) document.body.append(standard[i]!);
     }
   }
   const all = Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet'));

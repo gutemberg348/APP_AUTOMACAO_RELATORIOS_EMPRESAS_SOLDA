@@ -16,6 +16,8 @@ import {
   reportReviewWarnings,
   reportSections,
   type CurrentUser,
+  customReportPages,
+  isCustomPagePhoto,
 } from '@weldcosta/shared';
 import type { PdfReport } from './templates/reports/layout';
 import { reportForPdf } from './pdf-snapshot';
@@ -234,11 +236,13 @@ export async function preparePdfAsIs(
         .toBuffer();
       images.set(
         item.id,
-        await (item.sectionKey === 'drawing' ? photoWithAnnotations : photoForPdf)(
-          normalized,
-          'image/jpeg',
-          item.annotations,
-        ),
+        await (
+          item.sectionKey === 'drawing' ||
+            isCustomPagePhoto(item) ||
+            (original.reportType.code === 'LP' && item.sectionKey === 'test-photos')
+            ? photoWithAnnotations
+            : photoForPdf
+        )(normalized, 'image/jpeg', item.annotations),
       );
       media.push(item);
     } catch {
@@ -415,6 +419,22 @@ export async function preparePdfAsIs(
       signedAt: parsed.signedAt ? new Date(String(parsed.signedAt)) : null,
     } as PdfReport['signatures'][number]);
   }
+  if (specificData.customPages)
+    specificData.customPages = customReportPages(specificData).map((custom) => ({
+      ...custom,
+      drawings: custom.drawings.map((drawing) => ({
+        data: {
+          ...drawing.data,
+          elements: drawing.data.elements.filter((element) => {
+            if (element.type !== 'image' || availableImages.has(element.mediaKey)) return true;
+            warn(
+              `Página personalizada “${custom.title}”: uma imagem não está disponível. Os demais elementos serão incluídos no PDF.`,
+            );
+            return false;
+          }),
+        },
+      })),
+    }));
   const report = reportForPdf({
     ...original,
     number,

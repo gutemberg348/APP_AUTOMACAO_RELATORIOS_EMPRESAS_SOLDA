@@ -19,7 +19,10 @@ reportsRoutes.get('/:id/pdf/preview', requirePermission('pdf.download'), async (
   res
     .type('application/pdf')
     .set('Cache-Control', 'no-store')
-    .set('Content-Disposition', `attachment; filename="weldcosta-${id}-previa.pdf"`)
+    .set(
+      'Content-Disposition',
+      `attachment; filename="relatorio.pdf"; filename*=UTF-8''${encodeURIComponent(await pdf.downloadName(id))}`,
+    )
     .send(await pdf.preview(id));
 });
 reportsRoutes.get('/:id/pdf', requirePermission('pdf.download'), async (req, res) => {
@@ -27,7 +30,10 @@ reportsRoutes.get('/:id/pdf', requirePermission('pdf.download'), async (req, res
   res
     .type('application/pdf')
     .set('Cache-Control', 'private, no-store')
-    .set('Content-Disposition', `attachment; filename="weldcosta-${id}.pdf"`)
+    .set(
+      'Content-Disposition',
+      `attachment; filename="relatorio.pdf"; filename*=UTF-8''${encodeURIComponent(await pdf.downloadName(id))}`,
+    )
     .send(await pdf.download(id));
 });
 reportsRoutes.post('/:id/pdf', requirePermission('pdf.download'), c.generatePdf);

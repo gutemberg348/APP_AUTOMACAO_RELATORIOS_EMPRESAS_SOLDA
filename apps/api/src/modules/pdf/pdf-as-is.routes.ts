@@ -48,7 +48,7 @@ pdfAsIsRoutes.post(
       );
       res.set('Cache-Control', 'private, no-store');
       send(res, {
-        token: pdfExportDownloads.create(req.user!.id, idParam(req), result.bytes),
+        token: pdfExportDownloads.create(req.user!.id, idParam(req), result.bytes, result.fileName),
         warnings: result.warnings,
       });
     } finally {
@@ -62,6 +62,9 @@ pdfAsIsRoutes.get('/:token', requirePermission('pdf.download'), (req, res) => {
   res
     .type('application/pdf')
     .set('Cache-Control', 'private, no-store')
-    .set('Content-Disposition', `attachment; filename="weldcosta-${id}.pdf"`)
+    .set(
+      'Content-Disposition',
+      `attachment; filename="relatorio.pdf"; filename*=UTF-8''${encodeURIComponent(pdfExportDownloads.name(req.user!.id, id, token))}`,
+    )
     .send(pdfExportDownloads.get(req.user!.id, id, token));
 });

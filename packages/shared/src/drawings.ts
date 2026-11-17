@@ -718,6 +718,8 @@ export function drawingSvg(
     selectedId?: string;
     viewBox?: string;
     centerContent?: boolean;
+    /** Print a uniform blue point/label without changing the inspection result. */
+    pointStatusColors?: boolean;
     showGrid?: boolean;
     showBackground?: boolean;
     renderElements?: boolean;
@@ -923,13 +925,14 @@ export function drawingSvg(
           number = e.type === 'marker' ? e.number : point?.number || '?',
           status = e.type === 'marker' ? e.acceptable : point?.data?.acceptable;
         const { x, y, anchor } = drawingPointLabel(e, number);
-        const tone = selected
-          ? '#1764C0'
-          : status === false
-            ? '#AF302B'
-            : status === true
-              ? '#16725B'
-              : '#1764C0';
+        const tone =
+          selected || options.pointStatusColors === false
+            ? '#1764C0'
+            : status === false
+              ? '#AF302B'
+              : status === true
+                ? '#16725B'
+                : '#1764C0';
         body += `<circle cx="${e.x}" cy="${e.y}" r="5" fill="${tone}"/><text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial" font-size="18" font-weight="bold" fill="${tone}">${esc(number)}</text>`;
       }
     }

@@ -1,5 +1,11 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
-import { drawingDataSchema, drawingSvg, type VisualInspectionRecord } from '@weldcosta/shared';
+import {
+  drawingDataSchema,
+  drawingSvg,
+  reportSectionVisible,
+  reportFieldVisible,
+  type VisualInspectionRecord,
+} from '@weldcosta/shared';
 import {
   escape,
   displayDate,
@@ -83,21 +89,23 @@ export function render(report: PdfReport, images: Map<string, string>) {
   const reportHeading = direct ? 'RELATÓRIO DE ENSAIO<br>VISUAL DIRETO' : title;
   const sheet = (heading: string, blocks: string, contact = false, className = '') =>
     `<article class="evs-sheet ${className}">${header(report, heading)}<main class="evs-flow">${blocks}</main>${contact ? footer : ''}</article>`;
-  let html = sheet(
-    reportHeading,
-    ['client', 'factory']
-      .map((key) =>
-        chunks(data[key], 300)
-          .map(
-            (part, i) =>
-              `<div class="evs-cover-block"><b>${key === 'client' ? 'CLIENTE' : 'FÁBRICA'}${i ? ' (continuação)' : ''}:</b><p>${escape(part || '—')}</p></div>`,
+  let html = reportSectionVisible(report, 'identification')
+    ? sheet(
+        reportHeading,
+        ['client', 'factory']
+          .map((key) =>
+            chunks(data[key], 300)
+              .map(
+                (part, i) =>
+                  `<div class="evs-cover-block"><b>${key === 'client' ? 'CLIENTE' : 'FÁBRICA'}${i ? ' (continuação)' : ''}:</b><p>${escape(part || '—')}</p></div>`,
+              )
+              .join(''),
           )
           .join(''),
+        true,
+        'evs-cover',
       )
-      .join(''),
-    true,
-    'evs-cover',
-  );
+    : '';
   const fields = direct
     ? [
         ['PROPRIETÁRIO', 'owner'],
@@ -128,25 +136,27 @@ export function render(report: PdfReport, images: Map<string, string>) {
         ['CRITÉRIO DE ACEITAÇÃO', 'acceptanceCriteria'],
         ['NORMA DE REF.', 'referenceStandard'],
       ];
-  html += sheet(
-    reportHeading,
-    chunks(inspectionTitle(report))
-      .map((part) => `<h1 class="evs-data-title">${escape(part)}</h1>`)
-      .join('') +
-      fields
-        .map(([label, key]) =>
-          chunks(data[key!] || (direct && key === 'inspectionType' ? 'EVS DIRETO' : ''))
-            .map(
-              (part, i) =>
-                `<p class="evs-data-line"><b>${label}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
-            )
-            .join(''),
-        )
-        .join(''),
-    true,
-    'evs-identification',
-  );
-  if (direct) {
+  const visibleFields = fields.filter(([, key]) => reportFieldVisible(report, key!));
+  if (visibleFields.length)
+    html += sheet(
+      reportHeading,
+      chunks(inspectionTitle(report))
+        .map((part) => `<h1 class="evs-data-title">${escape(part)}</h1>`)
+        .join('') +
+        visibleFields
+          .map(([label, key]) =>
+            chunks(data[key!] || (direct && key === 'inspectionType' ? 'EVS DIRETO' : ''))
+              .map(
+                (part, i) =>
+                  `<p class="evs-data-line"><b>${label}${i ? ' (continuação)' : ''}:</b> ${escape(part || '—')}</p>`,
+              )
+              .join(''),
+          )
+          .join(''),
+      true,
+      'evs-identification',
+    );
+  if (direct && reportSectionVisible(report, 'inspectionRecords')) {
     const records = (data.inspectionRecords ?? []) as VisualInspectionRecord[];
     const columns: {
       key: keyof VisualInspectionRecord;
@@ -199,7 +209,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
       );
     }
   }
-  for (const drawing of report.drawings) {
+  for (const drawing of report.drawings.filter(() => reportSectionVisible(report, 'drawings'))) {
     const cad = drawingDataSchema.parse(drawing.data);
     html += sheet(
       'DESENHO',
@@ -210,12 +220,20 @@ export function render(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: p.data as { acceptable?: boolean },
         })),
-        { images: drawingImageSources(report, images), centerContent: true },
+        {
+          images: drawingImageSources(report, images),
+          centerContent: true,
+          pointStatusColors: false,
+        },
       )}</div><p class="evs-drawing-caption">${escape(cad.title)} · Rev. ${escape(cad.revision)} · Sem escala</p>`,
     );
   }
   for (const drawing of report.media.filter(
-    (m) => m.sectionKey === 'drawing' && !m.reportPointId && !isEmbeddedDrawingImage(m),
+    (m) =>
+      reportSectionVisible(report, 'drawings') &&
+      m.sectionKey === 'drawing' &&
+      !m.reportPointId &&
+      !isEmbeddedDrawingImage(m),
   ))
     html += sheet(
       'DESENHO',
@@ -228,7 +246,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
     const p = (point?.data ?? {}) as Record<string, unknown>;
     return `<div class="evs-weld"><table class="evs-weld-tab"><tr><th>${point ? 'SOLDA -' : 'FOTO ADICIONAL'}</th><td>${escape(point?.number ?? '')}</td><th>DIMENSÃO</th><td>${escape(String(p.dimension || '—').slice(0, 60))}</td></tr><tr><th>DESCONT.</th><td>${escape(String(p.discontinuity || '—').slice(0, 60))}</td><th>ACEITÁVEL</th><td>${p.acceptable === true ? 'SIM' : p.acceptable === false ? 'NÃO' : '—'}</td></tr></table><div class="evs-photo-pair">${[0, 1].map((i) => `<div class="report-photo-frame">${pair[i] ? `<img src="${images.get(pair[i]!.id) || ''}" alt="Foto ${i + 1}">` : `<span>${!pair.length && i === 0 ? 'Sem foto anexada' : ''}</span>`}</div>`).join('')}</div></div>`;
   };
-  if (report.points.length) {
+  if (report.points.length && reportSectionVisible(report, 'points')) {
     let blocks = '';
     for (const point of report.points) {
       const photos = report.media.filter((m) => m.reportPointId === point.id);
@@ -267,7 +285,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
     html += sheet('SOLDA', blocks);
   }
   const extras = report.media.filter((m) => !m.reportPointId && m.sectionKey !== 'drawing');
-  if (extras.length) {
+  if (extras.length && reportSectionVisible(report, 'points')) {
     let blocks = '';
     for (let i = 0; i < extras.length; i += 2) {
       const pair = extras.slice(i, i + 2);
@@ -303,23 +321,36 @@ export function render(report: PdfReport, images: Map<string, string>) {
         : 'REVIEWER',
     ) +
     signatureCell('CLIENTE', 'CLIENT');
-  let ending = chunks(data.finalReport)
-    .map(
-      (part, i) =>
-        `<div class="evs-verdict ${i ? 'evs-verdict-continuation' : ''}">${escape(part || 'Laudo não informado.')}</div>`,
-    )
-    .join('');
-  ending += `<div class="evs-legend"><h2>DESCONTINUIDADE</h2><div>${legend.map((col) => `<div>${col.map((text) => `<p>${text}</p>`).join('')}</div>`).join('')}</div></div>`;
-  ending += `<div class="evs-signoff"><div class="evs-result">${[
+  let ending = reportSectionVisible(report, 'conclusion')
+    ? chunks(data.finalReport)
+        .map(
+          (part, i) =>
+            `<div class="evs-verdict ${i ? 'evs-verdict-continuation' : ''}">${escape(part || 'Laudo não informado.')}</div>`,
+        )
+        .join('')
+    : '';
+  if (reportSectionVisible(report, 'conclusion'))
+    ending += `<div class="evs-legend"><h2>DESCONTINUIDADE</h2><div>${legend.map((col) => `<div>${col.map((text) => `<p>${text}</p>`).join('')}</div>`).join('')}</div></div>`;
+  const result = `<div class="evs-result">${[
     ['APPROVED', 'APROVADO'],
     ['REJECTED', 'REPROVADO'],
     ['COMPLEMENTARY_EXAM', 'EXAME COMPLEMENTAR'],
   ]
     .map(([value, label]) => `<b>${label} (${data.finalResult === value ? 'X' : ' '})</b>`)
-    .join('')}</div><div class="evs-signers">${signers}</div></div>`;
-  for (const signer of report.signatures.filter((s) => !used.has(s.id)))
+    .join('')}</div>`;
+  const signoff =
+    (reportSectionVisible(report, 'conclusion') ? result : '') +
+    (reportSectionVisible(report, 'signatures') ? `<div class="evs-signers">${signers}</div>` : '');
+  if (signoff) ending += `<div class="evs-signoff">${signoff}</div>`;
+  for (const signer of report.signatures.filter(
+    (s) => reportSectionVisible(report, 'signatures') && !used.has(s.id),
+  ))
     ending += `<div class="evs-signers">${signatureCell(signer.role === 'REVIEWER' ? 'REVISOR' : 'RESPONSÁVEL', signer.role)}</div>`;
-  html += sheet('LAUDO FINAL', ending);
+  if (ending)
+    html += sheet(
+      reportSectionVisible(report, 'conclusion') ? 'LAUDO FINAL' : 'RESPONSÁVEIS',
+      ending,
+    );
   return html;
 }
 

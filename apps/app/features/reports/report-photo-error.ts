@@ -27,6 +27,7 @@ export class ReportPhotoSaveError extends Error {
       photoId?: string;
       drawing?: boolean;
       testPhotos?: boolean;
+      customPage?: boolean;
       label: string;
     },
     public code?: string,

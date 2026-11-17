@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { Text, View, Pressable } from 'react-native';
 import type { ReportMedia, PhotoAnnotations } from '@weldcosta/shared';
-import { drawingId, isHydrostaticTestPhoto } from '@weldcosta/shared';
+import {
+  drawingId,
+  isHydrostaticTestPhoto,
+  nextPhotoMeasurementNumber,
+  customPhotoPrefix,
+  isCustomPagePhoto,
+} from '@weldcosta/shared';
 import { MediaSourcePicker } from '../../components/media-source-picker';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Button, Field, Notice } from '../../components/ui';
@@ -32,6 +38,8 @@ export function PointPhotos({
   linkedPointIds,
   measurement = false,
   measurementDefaults,
+  customPageId,
+  customPointKey,
 }: {
   draftKey: string;
   pointId: string | null;
@@ -51,6 +59,8 @@ export function PointPhotos({
   linkedPointIds?: string[];
   measurement?: boolean;
   measurementDefaults?: Record<string, PhotoAnnotations['measurementDetails']>;
+  customPageId?: string;
+  customPointKey?: string;
 }) {
   const { tokens: t, styles } = useTheme();
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -75,14 +85,22 @@ export function PointPhotos({
   ) => useReportPhotoDrafts.getState().update(draftKey, change);
   const belongsToGroup = (key?: string | null) =>
     inspectionGallery || key === pointId || (!!key && !!linkedPointIds?.includes(key));
+  const belongsToPage = (photo: { id: string; clientUploadId?: string | null }) =>
+    customPageId
+      ? (photo.clientUploadId ?? photo.id).startsWith(
+          customPhotoPrefix(customPageId, customPointKey),
+        )
+      : !isCustomPagePhoto(photo);
   const pending = draft.photos.filter(
     (photo) =>
+      belongsToPage(photo) &&
       belongsToGroup(photo.pointKey) &&
       photo.sectionKey !== 'drawing' &&
       inSection(photo.sectionKey),
   );
   const existing = media.filter(
     (photo) =>
+      belongsToPage(photo) &&
       belongsToGroup(photo.reportPointId) &&
       (!inspectionGallery || isHydrostaticTestPhoto(photo)) &&
       inSection(photo.sectionKey) &&
@@ -150,7 +168,7 @@ export function PointPhotos({
                 action={
                   (editable
                     ? measurement
-                      ? 'Marcar pontos / valores na foto '
+                      ? 'Editar lado / pontos da foto '
                       : 'Ver e pintar foto '
                     : 'Ver foto ') +
                   (index + 1)
@@ -208,7 +226,7 @@ export function PointPhotos({
                 action={
                   (editable
                     ? measurement
-                      ? 'Marcar pontos / valores na foto '
+                      ? 'Editar lado / pontos da foto '
                       : 'Ver e pintar foto '
                     : 'Ver foto ') +
                   (existing.length + index + 1)
@@ -300,28 +318,32 @@ export function PointPhotos({
       )}
       {!existing.length && !pending.length && (
         <Text style={styles.muted}>
-          {additional
-            ? testPhotos
-              ? measurement
-                ? 'Adicione as fotos dos lados do equipamento. Toque em cada foto para informar lado, descontinuidade, resultado e espessura de projeto. Marque os círculos numerados e preencha as medições abaixo. Fotos de apoio podem ficar sem pontos.'
-                : hydrostatic
-                  ? 'Escolha uma ou várias imagens do ensaio. O PDF organiza até seis fotos por folha, duas lado a lado. As próximas ocupam os espaços livres. Sem fotos, essa folha não aparece.'
-                  : 'Opcional. Escolha várias fotos do ensaio, sem vinculá-las aos pontos. O PDF organiza três fotos por folha após os desenhos. Sem fotos, essas folhas não aparecem.'
-              : 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
-            : groupedWelds
-              ? 'Uma foto pode mostrar várias soldas. Informe todas na ficha; as fotos continuam vinculadas ao grupo ao editar sua identificação.'
-              : 'Adicione as fotos deste ponto aqui. O vínculo acompanha o número do ponto.'}
+          {customPageId
+            ? 'Adicione uma ou várias fotos. A quantidade por folha é definida nesta página personalizada.'
+            : additional
+              ? testPhotos
+                ? measurement
+                  ? 'Toque em cada foto para escolher Lado ou Pontos acima dela no PDF. Os círculos seguem a numeração das outras fotos, e cada leitura fica abaixo da sua imagem. Fotos de apoio não precisam de leituras. Até três duplas por folha, conforme o espaço das medições.'
+                  : hydrostatic
+                    ? 'Escolha uma ou várias imagens do ensaio. O PDF organiza até seis fotos por folha, duas lado a lado. As próximas ocupam os espaços livres. Sem fotos, essa folha não aparece.'
+                    : 'Opcional. Escolha várias fotos do ensaio, sem vinculá-las aos pontos. O PDF organiza três fotos por folha após os desenhos. Sem fotos, essas folhas não aparecem.'
+                : 'Opcional. Adicione imagens gerais da obra ou detalhes complementares. As fotos das soldas ficam dentro de cada ponto.'
+              : groupedWelds
+                ? 'Uma foto pode mostrar várias soldas. Informe todas na ficha; as fotos continuam vinculadas ao grupo ao editar sua identificação.'
+                : 'Adicione as fotos deste ponto aqui. O vínculo acompanha o número do ponto.'}
         </Text>
       )}
       {editable && (additional || count >= (groupedWelds ? 1 : 2)) && (
         <View style={styles.row}>
           <Button
             title={
-              testPhotos
-                ? 'Selecionar fotos do ensaio'
-                : additional
-                  ? 'Adicionar foto adicional'
-                  : 'Adicionar outra foto'
+              customPageId
+                ? 'Adicionar fotos nesta página'
+                : testPhotos
+                  ? 'Selecionar fotos do ensaio'
+                  : additional
+                    ? 'Adicionar foto adicional'
+                    : 'Adicionar outra foto'
             }
             small
             secondary
@@ -333,23 +355,27 @@ export function PointPhotos({
       <MediaSourcePicker
         visible={sourceOpen}
         contextLabel={
-          testPhotos
-            ? 'Fotos do ensaio · seleção múltipla'
-            : additional
-              ? 'Adicionar imagens complementares'
-              : (groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto ') + number
+          customPageId
+            ? 'Fotos da página personalizada'
+            : testPhotos
+              ? 'Fotos do ensaio · seleção múltipla'
+              : additional
+                ? 'Adicionar imagens complementares'
+                : (groupedWelds ? 'Fotos das soldas ' : 'Fotos do ponto ') + number
         }
         maxSelections={testPhotos || groupedWelds ? 100 : additional ? 1 : Math.max(1, 2 - count)}
         selectionDescription={
-          testPhotos
-            ? measurement
-              ? 'Escolha as fotos na ordem desejada: duas lado a lado no PDF. Depois, toque em cada foto para marcar os pontos e preencher os valores.'
-              : hydrostatic
-                ? 'Escolha as imagens na ordem desejada. Você pode adicionar mais depois. O PDF organiza duas por linha, até seis por folha.'
-                : 'Escolha várias fotos na ordem desejada. Você pode adicionar mais depois. O PDF divide automaticamente em três fotos por folha.'
-            : groupedWelds
-              ? 'Selecione uma ou várias fotos das soldas desta ficha. Não é obrigatório adicionar duas fotos.'
-              : undefined
+          customPageId
+            ? 'Selecione uma ou várias fotos. O PDF usará a quantidade por folha definida nesta página; você pode adicionar mais fotos depois.'
+            : testPhotos
+              ? measurement
+                ? 'Escolha as fotos na ordem desejada: duas lado a lado no PDF. Depois, toque em cada foto para marcar os pontos e preencher os valores.'
+                : hydrostatic
+                  ? 'Escolha as imagens na ordem desejada. Você pode adicionar mais depois. O PDF organiza duas por linha, até seis por folha.'
+                  : 'Escolha várias fotos na ordem desejada. Você pode adicionar mais depois. O PDF divide automaticamente em três fotos por folha.'
+              : groupedWelds
+                ? 'Selecione uma ou várias fotos das soldas desta ficha. Não é obrigatório adicionar duas fotos.'
+                : undefined
         }
         onClose={closeSource}
         onSelect={async (asset, onProgress) => {
@@ -362,7 +388,9 @@ export function PointPhotos({
             { pointId, reportId, persistedPointId, projectId },
             onProgress,
           );
-          const id = drawingId();
+          const id = customPageId
+            ? customPhotoPrefix(customPageId, customPointKey) + drawingId().slice(-10)
+            : drawingId();
           onProgress?.('Guardando foto no telefone…');
           const localAsset = await keepReportAsset(asset, id);
           update((draft) => ({
@@ -420,6 +448,10 @@ export function PointPhotos({
           source={editingPhoto.source}
           editable={editingPhoto.editable}
           measurement={measurement}
+          measurementStartNumber={nextPhotoMeasurementNumber([
+            ...existing.map((p) => draft.annotationEdits?.[p.id] ?? p.annotations),
+            ...pending.map((p) => p.annotations),
+          ])}
           measurementDefaults={measurementDefaults?.[editingPhoto.id] ?? measurementDefaults?.['*']}
           value={
             (editingPhoto.pending

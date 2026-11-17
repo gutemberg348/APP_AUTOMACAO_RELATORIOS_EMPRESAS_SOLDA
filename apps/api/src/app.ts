@@ -20,7 +20,11 @@ app.disable('x-powered-by');
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
 app.use(helmet());
 app.use(
-  cors({ origin: env.CORS_ORIGIN.split(',').map((value) => value.trim()), credentials: false }),
+  cors({
+    origin: env.CORS_ORIGIN.split(',').map((value) => value.trim()),
+    credentials: false,
+    exposedHeaders: ['Content-Disposition'],
+  }),
 );
 app.use(express.json({ limit: '1mb' }));
 app.get('/health', (_req, res) => send(res, { status: 'ok' }));

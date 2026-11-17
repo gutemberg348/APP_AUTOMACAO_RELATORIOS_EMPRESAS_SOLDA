@@ -17,6 +17,7 @@ export function PhotoAnnotationEditor({
   onClose,
   measurement = false,
   measurementDefaults,
+  measurementStartNumber = 1,
 }: {
   source: PhotoSource;
   value: PhotoAnnotations;
@@ -25,12 +26,17 @@ export function PhotoAnnotationEditor({
   onClose(): void;
   measurement?: boolean;
   measurementDefaults?: PhotoAnnotations['measurementDetails'];
+  measurementStartNumber?: number;
 }) {
   const [annotations, setAnnotations] = useState(() =>
     measurement
       ? {
           ...value,
-          measurementDetails: { ...measurementDefaults, ...value.measurementDetails },
+          measurementDetails: {
+            ...measurementDefaults,
+            ...(value.measurements?.length ? { pointNumbers: '' } : {}),
+            ...value.measurementDetails,
+          },
         }
       : value,
   );
@@ -59,6 +65,7 @@ export function PhotoAnnotationEditor({
   if (measurement && !painting)
     return (
       <PhotoMeasurementsEditor
+        startNumber={measurementStartNumber}
         source={source}
         value={annotations}
         editable={editable}

@@ -55,6 +55,9 @@ const labels: Record<string, string> = {
   testPhotos: 'Fotos do ensaio',
   mediaKey: 'Imagem',
   inspectionRecords: 'Registros de inspeção',
+  customPages: 'Páginas personalizadas',
+  photosPerPage: 'Quantidade de fotos por folha',
+  reading: 'Leitura / dimensão',
   item: 'Item',
   drawingReference: 'Desenho nº / revisão',
   diameter: 'Diâmetro',
@@ -81,54 +84,62 @@ export function reportCorrections(
     const technical = fields.find((f) => 'specificData.' + f.path === path.join('.'));
     const key = path.at(-1) ?? '';
     const date = key === 'reportDate' || key === 'signedAt' || technical?.kind === 'date';
-    const prefix = /^\d+$/.test(path[1] ?? '')
-      ? path[0] === 'points'
-        ? `Ponto ${points[Number(path[1])]?.number || Number(path[1]) + 1} · `
-        : path[0] === 'signatures'
-          ? `Responsável ${Number(path[1]) + 1} · `
-          : path[0] === 'drawings'
-            ? `Desenho ${Number(path[1]) + 1} · `
-            : ''
-      : path[0] === 'specificData' && path[1] === 'discontinuities' && /^\d+$/.test(path[2] ?? '')
-        ? `Descontinuidade ${Number(path[2]) + 1} · `
-        : path[0] === 'specificData' &&
-            path[1] === 'inspectionRecords' &&
-            /^\d+$/.test(path[2] ?? '')
-          ? `Registro ${Number(path[2]) + 1} · `
-          : '';
+    const prefix =
+      path[0] === 'specificData' && path[1] === 'customPages' && /^\d+$/.test(path[2] ?? '')
+        ? `Página personalizada ${Number(path[2]) + 1} · `
+        : /^\d+$/.test(path[1] ?? '')
+          ? path[0] === 'points'
+            ? `Ponto ${points[Number(path[1])]?.number || Number(path[1]) + 1} · `
+            : path[0] === 'signatures'
+              ? `Responsável ${Number(path[1]) + 1} · `
+              : path[0] === 'drawings'
+                ? `Desenho ${Number(path[1]) + 1} · `
+                : ''
+          : path[0] === 'specificData' &&
+              path[1] === 'discontinuities' &&
+              /^\d+$/.test(path[2] ?? '')
+            ? `Descontinuidade ${Number(path[2]) + 1} · `
+            : path[0] === 'specificData' &&
+                path[1] === 'inspectionRecords' &&
+                /^\d+$/.test(path[2] ?? '')
+              ? `Registro ${Number(path[2]) + 1} · `
+              : '';
     const section = technical ? sections.find((s) => s.fields.includes(technical)) : undefined;
     const label =
       prefix + (technical?.label ?? labels[key] ?? labels[path[0] ?? ''] ?? 'Dados do relatório');
     const message = date ? 'Informe uma data válida em DD/MM/AAAA.' : issue.message;
-    const guidance = date
-      ? 'Digite dia, mês e ano, por exemplo 29/10/2026. Confira se a data existe.'
-      : key === 'number'
-        ? path[0] === 'points'
-          ? 'Preencha o número deste ponto. Cada ponto deve ter um número diferente no relatório.'
-          : 'Abra Identificação e informe o número usado para identificar este relatório, por exemplo 001.'
-        : path[0] === 'testPhotos'
-          ? 'Abra Fotos do ensaio, confira a imagem indicada e selecione-a novamente ou retire somente essa foto. Salve o relatório e tente baixar o PDF outra vez.'
-          : key === 'photos'
-            ? 'Abra as fotos deste ponto. Envie novamente ou substitua a foto indicada, salve e tente baixar o PDF outra vez.'
-            : key === 'mediaKey'
-              ? 'Abra este desenho, confira a imagem indicada e conclua o desenho. Toque em Salvar e aguarde o envio antes de baixar o PDF.'
-              : path[0] === 'specificData' && path[1] === 'discontinuities'
-                ? 'Abra Descontinuidades e revise o código ou a descrição da linha indicada. O código aceita até 100 caracteres e a descrição até 10.000.'
-                : path[0] === 'specificData' && path[1] === 'inspectionRecords'
-                  ? 'Abra Registros de inspeção e revise o item indicado. Confira o desenho, a junta e os sinetes; em Laudo escolha uma das opções disponíveis.'
-                  : path[0] === 'drawings'
-                    ? 'Abra este desenho e ajuste o item indicado nas propriedades. Depois conclua o desenho e salve o relatório.'
-                    : key === 'value'
-                      ? 'Informe apenas uma leitura numérica válida, por exemplo 2,5. A unidade fica no campo Unidade.'
-                      : key === 'acceptable'
-                        ? 'Escolha Sim, Não ou Não informado na opção Aceitável do ponto.'
-                        : issue.code === 'too_big'
-                          ? 'Reduza o conteúdo ou a quantidade de itens até o limite informado acima.'
-                          : issue.code === 'invalid_value'
-                            ? 'Selecione uma das opções disponíveis neste campo.'
-                            : path[0] === 'signatures'
-                              ? 'Confira os dados deste responsável. Se a assinatura não estiver disponível, selecione a pessoa ou envie a assinatura novamente.'
-                              : `Revise o campo ${technical?.label ?? labels[key] ?? 'indicado'}${section ? ' em ' + section.title : ''} e salve novamente.`;
+    const guidance =
+      path[0] === 'specificData' && path[1] === 'customPages'
+        ? 'Toque em Adicionar página personalizada no topo do relatório, abra a página indicada e revise este campo. Depois conclua a página e salve o relatório.'
+        : date
+          ? 'Digite dia, mês e ano, por exemplo 29/10/2026. Confira se a data existe.'
+          : key === 'number'
+            ? path[0] === 'points'
+              ? 'Preencha o número deste ponto. Cada ponto deve ter um número diferente no relatório.'
+              : 'Abra Identificação e informe o número usado para identificar este relatório, por exemplo 001.'
+            : path[0] === 'testPhotos'
+              ? 'Abra Fotos do ensaio, confira a imagem indicada e selecione-a novamente ou retire somente essa foto. Salve o relatório e tente baixar o PDF outra vez.'
+              : key === 'photos'
+                ? 'Abra as fotos deste ponto. Envie novamente ou substitua a foto indicada, salve e tente baixar o PDF outra vez.'
+                : key === 'mediaKey'
+                  ? 'Abra este desenho, confira a imagem indicada e conclua o desenho. Toque em Salvar e aguarde o envio antes de baixar o PDF.'
+                  : path[0] === 'specificData' && path[1] === 'discontinuities'
+                    ? 'Abra Descontinuidades e revise o código ou a descrição da linha indicada. O código aceita até 100 caracteres e a descrição até 10.000.'
+                    : path[0] === 'specificData' && path[1] === 'inspectionRecords'
+                      ? 'Abra Registros de inspeção e revise o item indicado. Confira o desenho, a junta e os sinetes; em Laudo escolha uma das opções disponíveis.'
+                      : path[0] === 'drawings'
+                        ? 'Abra este desenho e ajuste o item indicado nas propriedades. Depois conclua o desenho e salve o relatório.'
+                        : key === 'value'
+                          ? 'Informe apenas uma leitura numérica válida, por exemplo 2,5. A unidade fica no campo Unidade.'
+                          : key === 'acceptable'
+                            ? 'Escolha Sim, Não ou Não informado na opção Aceitável do ponto.'
+                            : issue.code === 'too_big'
+                              ? 'Reduza o conteúdo ou a quantidade de itens até o limite informado acima.'
+                              : issue.code === 'invalid_value'
+                                ? 'Selecione uma das opções disponíveis neste campo.'
+                                : path[0] === 'signatures'
+                                  ? 'Confira os dados deste responsável. Se a assinatura não estiver disponível, selecione a pessoa ou envie a assinatura novamente.'
+                                  : `Revise o campo ${technical?.label ?? labels[key] ?? 'indicado'}${section ? ' em ' + section.title : ''} e salve novamente.`;
     return { path, label, message, guidance };
   });
 }

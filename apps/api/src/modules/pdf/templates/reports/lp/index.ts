@@ -9,9 +9,11 @@ import {
   type PdfReport,
 } from '../reference-layout';
 import { lpTechnical } from './technical';
+import { reportSectionVisible, omittedReportSections } from '@weldcosta/shared';
 
 /** Optional, independent evidence: three photos on each sheet, after all drawings. */
 export function testPhotoSheets(report: PdfReport, images: Map<string, string>) {
+  if (!reportSectionVisible(report, 'testPhotos')) return '';
   const photos = report.media.filter((media) => media.sectionKey === 'test-photos');
   let html = '';
   for (let offset = 0; offset < photos.length; offset += 3) {
@@ -54,6 +56,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   const photos = photoRows(report, images, 'LP');
   if (photos) html += sheet(report, 'SOLDA', photos);
   const data = report.specificData as Record<string, unknown>;
-  html += sheet(report, 'DADOS GERAIS', lpTechnical(data), false, 'lp-technical');
+  const technical = lpTechnical(data, omittedReportSections(data));
+  if (technical) html += sheet(report, 'DADOS GERAIS', technical, false, 'lp-technical');
   return html + conclusion(report, data.finalReport);
 }

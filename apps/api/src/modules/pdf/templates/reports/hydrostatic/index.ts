@@ -1,4 +1,8 @@
-import { isHydrostaticTestPhoto } from '@weldcosta/shared';
+import {
+  isHydrostaticTestPhoto,
+  reportSectionVisible,
+  reportFieldVisible,
+} from '@weldcosta/shared';
 import {
   cover,
   identification,
@@ -41,12 +45,16 @@ export function render(report: PdfReport, images: Map<string, string>) {
       overflow.join('')
     );
   };
-  const row = (items: [string, string][], caption = '', joined = false) =>
-    fields(
-      items.map(([label, path]) => [label, value(data, path)]),
-      caption,
-      joined,
-    );
+  const row = (items: [string, string][], caption = '', joined = false) => {
+    items = items.filter(([, path]) => reportFieldVisible(report, path));
+    return items.length
+      ? fields(
+          items.map(([label, path]) => [label, value(data, path)]),
+          caption,
+          joined,
+        )
+      : '';
+  };
   let technical = row([
     ['CLIENTE', 'client'],
     ['PROCEDIMENTO / REVISÃO', 'procedureRevision'],
@@ -60,15 +68,16 @@ export function render(report: PdfReport, images: Map<string, string>) {
     ['ART Nº', 'artNumber'],
   ]);
   const date = value(data, 'manometer.calibrationDate');
-  technical += fields(
-    [
-      ['FABRICANTE', value(data, 'manometer.manufacturer')],
-      ['CERTIFICADO Nº', value(data, 'manometer.certificateNumber')],
-      ['DATA DA AFERIÇÃO', date ? displayDate(String(date)) : ''],
-      ['SÉRIE Nº', value(data, 'manometer.serialNumber')],
-    ],
-    'MANÔMETRO',
-  );
+  if (reportSectionVisible(report, 'manometer'))
+    technical += fields(
+      [
+        ['FABRICANTE', value(data, 'manometer.manufacturer')],
+        ['CERTIFICADO Nº', value(data, 'manometer.certificateNumber')],
+        ['DATA DA AFERIÇÃO', date ? displayDate(String(date)) : ''],
+        ['SÉRIE Nº', value(data, 'manometer.serialNumber')],
+      ],
+      'MANÔMETRO',
+    );
   technical += row(
     [
       ['TEMP. DE TRAB.', 'generalData.workingTemperature'],
@@ -90,7 +99,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
   );
   if (value(data, 'generalData.manufacturer'))
     technical += row([['FABRICANTE DO EQUIPAMENTO', 'generalData.manufacturer']], '', true);
-  html += sheet(report, titles.TH!, technical, false, 'th-technical');
+  if (technical) html += sheet(report, titles.TH!, technical, false, 'th-technical');
   html += hydrostaticPhotoSheets(report, images);
   return (
     html +
@@ -106,6 +115,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
 
 /** Six real images per sheet. Empty legacy points never reserve a photo slot. */
 export function hydrostaticPhotoSheets(report: PdfReport, images: Map<string, string>) {
+  if (!reportSectionVisible(report, 'testPhotos')) return '';
   const photos = report.media.filter(isHydrostaticTestPhoto);
   let html = '';
   for (let offset = 0; offset < photos.length; offset += 6) {

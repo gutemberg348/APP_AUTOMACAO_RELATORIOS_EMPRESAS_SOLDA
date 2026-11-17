@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   displayReportStatus,
+  reportPdfName,
   reportReviewWarnings,
   type Report,
   type ReportStatus,
@@ -219,6 +220,7 @@ export function ReportActions({
           {
             signal: pdfController.current.signal,
             exportToken,
+            fileName: reportPdfName(saved),
             onProgress: (stage) => {
               setPdfStage(
                 stage === 'download'

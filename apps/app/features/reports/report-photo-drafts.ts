@@ -1,7 +1,7 @@
 import { ReportPhotoSaveError, photoSaveReason } from './report-photo-error';
 import { create } from 'zustand';
 import type { Report, ReportPoint, PhotoAnnotations } from '@weldcosta/shared';
-import { pointKey } from '@weldcosta/shared';
+import { pointKey, customReportPages } from '@weldcosta/shared';
 import { api as authenticatedApi, ApiError, jsonBody } from '../../services/api';
 import { appendUploadFile } from '../../services/upload-file';
 import type { TransferState } from '../../components/transfer-progress';
@@ -101,6 +101,15 @@ export async function saveReportPhotos(
       pointNumber: number,
       drawing: media?.sectionKey === 'drawing',
       testPhotos: media?.sectionKey === 'test-photos',
+      customPage:
+        media?.clientUploadId?.startsWith('custom-page:') ||
+        customReportPages(current.specificData).some((p) =>
+          p.drawings.some((d) =>
+            d.data.elements.some(
+              (e) => e.type === 'image' && e.mediaKey === (media?.clientUploadId ?? id),
+            ),
+          ),
+        ),
       label:
         action +
         (number ? ' · Ponto ' + number : '') +
@@ -172,14 +181,22 @@ export async function saveReportPhotos(
         photoId: photo.id,
         drawing: photo.sectionKey === 'drawing',
         testPhotos: photo.sectionKey === 'test-photos',
+        customPage:
+          photo.id.startsWith('custom-page:') ||
+          customReportPages(current.specificData).some((p) =>
+            p.drawings.some((d) =>
+              d.data.elements.some((e) => e.type === 'image' && e.mediaKey === photo.id),
+            ),
+          ),
         label:
           'Enviar foto' + (pointNumber ? ' · Ponto ' + pointNumber : '') + ' · ' + photo.asset.name,
       };
       if (
         photo.sectionKey === 'drawing' &&
-        !current.drawings?.some((d) =>
-          d.data.elements.some((e) => e.type === 'image' && e.mediaKey === photo.id),
-        )
+        ![
+          ...(current.drawings ?? []),
+          ...customReportPages(current.specificData).flatMap((p) => p.drawings),
+        ].some((d) => d.data.elements.some((e) => e.type === 'image' && e.mediaKey === photo.id))
       ) {
         store.update(nextKey, (remaining) => ({
           ...remaining,

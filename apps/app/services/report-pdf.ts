@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { apiBlob, ApiError } from './api';
 let downloadSequence = 0;
@@ -16,6 +16,7 @@ export async function downloadReportPdf(
     signal?: AbortSignal;
     onProgress?(stage: PdfProgress): void;
     exportToken?: string;
+    fileName?: string;
   } = {},
 ) {
   options.onProgress?.('download');
@@ -31,7 +32,10 @@ export async function downloadReportPdf(
   checkCancelled(options.signal);
   options.onProgress?.('prepare');
   if (!blob.size) throw new Error('O PDF recebido está vazio. Tente baixar novamente.');
-  const name = `weldcosta-${id}${preview ? '-previa' : ''}.pdf`;
+  const name = (blob.downloadName || options.fileName || 'RELATORIO.pdf')
+    // eslint-disable-next-line no-control-regex -- Strip control characters from filenames.
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+    .trim();
   if (Platform.OS === 'web') {
     if (share && typeof navigator.share === 'function') {
       const file = new globalThis.File([blob], name, { type: 'application/pdf' });
@@ -54,8 +58,10 @@ export async function downloadReportPdf(
   const bytes = await pdfBytes(blob, options.signal);
   checkCancelled(options.signal);
   // Unique paths avoid stale previews in WhatsApp and native PDF viewers.
-  const file = new File(Paths.cache, `${Date.now()}-${++downloadSequence}-${name}`);
+  const folder = new Directory(Paths.cache, `pdf-${Date.now()}-${++downloadSequence}`);
+  const file = new File(folder, name);
   try {
+    folder.create({ intermediates: true });
     file.create({ overwrite: true });
     file.write(bytes);
   } catch {

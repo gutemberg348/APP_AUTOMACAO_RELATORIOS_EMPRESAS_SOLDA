@@ -114,6 +114,7 @@ describe('LP grouped welds and faithful form', () => {
       const before = structuredClone(saved);
       const printable = reportForPdf(saved);
       if (code === 'LP') expect(printable.points[0]!.data).not.toHaveProperty('dimension');
+      else if (code === 'TH') expect(printable.points).toEqual([]);
       else expect(printable.points[0]!.data).toHaveProperty('dimension', 'OLD-DIMENSION');
       expect(printable.specificData).toEqual(saved.specificData);
       expect(saved).toEqual(before);
@@ -152,7 +153,7 @@ describe('LP grouped welds and faithful form', () => {
         { ...report, reportType: { ...report.reportType, code: 'TH' } } as PdfReport,
         new Map(),
       ),
-    ).toContain('OLD-DIMENSION');
+    ).not.toContain('OLD-DIMENSION');
   });
   it('preserves legacy custom values, escapes table data and continues beyond twelve indications', () => {
     const data = {

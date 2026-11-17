@@ -92,6 +92,16 @@ async function request<T>(
               'INVALID_PDF',
               'O PDF recebido está vazio. Tente baixar novamente.',
             );
+          const encodedName = response.headers
+            .get('content-disposition')
+            ?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+          if (encodedName) {
+            try {
+              Object.assign(blob, { downloadName: decodeURIComponent(encodedName) });
+            } catch {
+              /* Use the report name if the header is malformed. */
+            }
+          }
           return blob as T;
         }
         let body: ApiResponse<T>;
@@ -199,4 +209,5 @@ export const jsonBody = (method: string, data: unknown): RequestInit => ({
   method,
   body: JSON.stringify(data),
 });
-export const apiBlob = (path: string, init: RequestInit = {}) => api<Blob>(path, init, true, true);
+export const apiBlob = (path: string, init: RequestInit = {}) =>
+  api<Blob & { downloadName?: string }>(path, init, true, true);

@@ -2,6 +2,8 @@ import {
   photoAnnotationsSchema,
   isHydrostaticTestPhoto,
   measurementPhotoDefaults,
+  measurementPhotoHeading,
+  reportSectionVisible,
 } from '@weldcosta/shared';
 import {
   cover,
@@ -14,6 +16,7 @@ import {
   escape,
   type PdfReport,
 } from '../reference-layout';
+import { calculation } from './calculation';
 
 export function render(report: PdfReport, images: Map<string, string>) {
   const data = report.specificData as Record<string, unknown>;
@@ -45,8 +48,11 @@ export function render(report: PdfReport, images: Map<string, string>) {
   }
   const general = report.media.filter((m) => !m.reportPointId && isHydrostaticTestPhoto(m));
   if (general.length) groups.push({ label: '', points: [], photos: general });
-  let content = data.equipment ? annotations(data.equipment, 'EQUIPAMENTO') : '';
-  const cards: { photoIndex: number; offset: number; support: boolean; html: string }[] = [];
+  let content =
+    data.equipment && reportSectionVisible(report, 'equipment')
+      ? annotations(data.equipment, 'EQUIPAMENTO')
+      : '';
+  const cards: { photoIndex: number; offset: number; html: string }[] = [];
   for (const group of groups) {
     const first = (group.points[0]?.data ?? {}) as Record<string, unknown>;
     const thickness = String(first.projectThickness || data.projectThickness || '').trim();
@@ -99,9 +105,20 @@ export function render(report: PdfReport, images: Map<string, string>) {
         ...(index === 0 ? measurementPhotoDefaults(group.points[0], data.projectThickness) : {}),
         ...parsed?.measurementDetails,
       };
+      if (parsed?.measurements?.length && !parsed.measurementDetails?.pointNumbers)
+        details.pointNumbers = '';
+      if (!details.pointNumbers && !parsed?.measurements?.length)
+        details.pointNumbers = group.points.map((p) => p.number).join(', ');
+      const heading = measurementPhotoHeading({
+        measurementDetails: details,
+        measurements: parsed?.measurements,
+      });
+      const pointNumbers =
+        parsed?.measurements?.map((m) => m.number).join(', ') || details.pointNumbers || '';
       const photoThickness = String(details.projectThickness ?? data.projectThickness ?? '').trim();
       for (const [label, text] of [
         ['Lado', details.side],
+        ['Pontos', heading.label === 'PONTOS' ? heading.value : ''],
         ['Descontinuidade', details.discontinuity],
         ['Espessura de projeto', photoThickness],
       ]) {
@@ -118,18 +135,14 @@ export function render(report: PdfReport, images: Map<string, string>) {
           : index === 0
             ? legacyRows
             : [];
-      const showHeader =
-        !!rows.length ||
-        !!details.side ||
-        !!details.discontinuity ||
-        typeof details.acceptable === 'boolean';
+      const showResults =
+        !!rows.length || !!details.discontinuity || typeof details.acceptable === 'boolean';
       const result = details.acceptable == null ? '' : details.acceptable ? 'SIM' : 'NÃO';
       for (let offset = 0; offset < Math.max(1, rows.length); offset += 5) {
         cards.push({
           photoIndex: index,
           offset,
-          support: !showHeader && !rows.length,
-          html: `<div class="measurement-cell${rows.length ? ' measurement-with-readings' : ''}">${showHeader ? `<div class="reference-photo-tab">LADO: <span>${escape(String(details.side ?? group.label).slice(0, 80))}${offset ? ' (continuação)' : ''}</span></div><div class="measurement-metadata"><div>DESCONT.: <span>${escape(String(details.discontinuity ?? '').slice(0, 80))}</span></div><div>ACEITÁVEL: <span>${result}</span></div></div>` : ''}${media ? `<div class="measurement-photo report-photo-frame"><img alt="Imagem do ensaio" src="${images.get(media.id) || ''}"></div>` : ''}${rows.length ? `<div class="reference-photo-tab">PONTOS</div><div class="measurement-metadata"><div>ESPESSURA DE PROJETO: <span>${escape(photoThickness.slice(0, 80))}</span></div><div>ACEITÁVEL: <span>${result}</span></div></div>` : ''}${rows.slice(offset, offset + 5).join('')}</div>`,
+          html: `<div class="measurement-cell${rows.length ? ' measurement-with-readings' : ''}"><div class="reference-photo-tab">${heading.label}: <span>${escape(heading.value.slice(0, 80) || '—')}${offset ? ' (continuação)' : ''}</span></div>${showResults ? `<div class="measurement-metadata"><div>DESCONT.: <span>${escape(String(details.discontinuity ?? '').slice(0, 80))}</span></div><div>ACEITÁVEL: <span>${result}</span></div></div>` : ''}${media ? `<div class="measurement-photo report-photo-frame"><img alt="Imagem do ensaio" src="${images.get(media.id) || ''}"></div>` : ''}${rows.length ? `<div class="reference-photo-tab">PONTOS: <span>${escape(pointNumbers)}</span></div><div class="measurement-metadata"><div>ESPESSURA DE PROJETO: <span>${escape(photoThickness.slice(0, 80))}</span></div><div>ACEITÁVEL: <span>${result}</span></div></div>` : ''}${rows.slice(offset, offset + 5).join('')}</div>`,
         });
       }
     }
@@ -159,12 +172,15 @@ export function render(report: PdfReport, images: Map<string, string>) {
   }
   cards.sort((a, b) => a.photoIndex - b.photoIndex || a.offset - b.offset);
   for (let i = 0; i < cards.length; i += 2) {
-    content += `<div class="measurement-block">${cards[i]!.support && (!cards[i + 1] || cards[i + 1]!.support) ? '' : band('IMAGENS DO ENSAIO')}<div class="measurement-columns">${cards[i]!.html}${cards[i + 1]?.html ?? '<div class="measurement-cell"></div>'}</div></div>`;
+    content += `<div class="measurement-block">${band('IMAGENS DO ENSAIO')}<div class="measurement-columns">${cards[i]!.html}${cards[i + 1]?.html ?? '<div class="measurement-cell"></div>'}</div></div>`;
   }
-  if (content)
+  if (content && reportSectionVisible(report, 'testPhotos'))
     html += sheet(report, 'PARTE DO EQUIPAMENTO<br>OU LINHA', content, true, 'measurement-sheet');
+  else if (data.equipment && reportSectionVisible(report, 'equipment'))
+    html += sheet(report, 'EQUIPAMENTO', annotations(data.equipment, 'EQUIPAMENTO'), true);
   return (
     html +
+    calculation(report) +
     conclusion(report, data.finalReport, ['TÉCNICO INSPEÇÃO', 'INSPETOR', 'CLIENTE'], true).replace(
       'reference-final',
       'reference-final measurement-sheet',

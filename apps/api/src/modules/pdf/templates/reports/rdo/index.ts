@@ -1,6 +1,6 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from '../layout';
 import { signatureImage, clientSignatureCell } from '../layout';
-import { drawingDataSchema, drawingSvg } from '@weldcosta/shared';
+import { drawingDataSchema, drawingSvg, reportSectionVisible } from '@weldcosta/shared';
 import {
   sheet,
   photoRows,
@@ -35,7 +35,9 @@ export function render(report: PdfReport, images: Map<string, string>) {
     if (text.length > 80) overflow.push(annotations(text, label));
     return escape(text.length > 80 ? text.slice(0, 80) + '…' : text);
   };
-  const info = `<div class="rdo-repeated"><table class="reference-table"><tbody><tr><th>DATA</th><td>${data.date ? displayDate(String(data.date)) : displayDate(report.reportDate)}</td><th>INSPETOR</th><td>${summary(data.inspector, 'Inspetor')}</td><th>VISTO</th><td>${summary(data.visa, 'Visto')}</td></tr>${fields.map((row) => `<tr>${row.map(([label, key]) => `<th>${label}</th><td>${summary(data[key!], label!)}</td>`).join('')}${row.length < 3 ? '<th></th><td></td>' : ''}</tr>`).join('')}</tbody></table></div>`;
+  const info = reportSectionVisible(report, 'data')
+    ? `<div class="rdo-repeated"><table class="reference-table"><tbody><tr><th>DATA</th><td>${data.date ? displayDate(String(data.date)) : displayDate(report.reportDate)}</td><th>INSPETOR</th><td>${summary(data.inspector, 'Inspetor')}</td><th>VISTO</th><td>${summary(data.visa, 'Visto')}</td></tr>${fields.map((row) => `<tr>${row.map(([label, key]) => `<th>${label}</th><td>${summary(data[key!], label!)}</td>`).join('')}${row.length < 3 ? '<th></th><td></td>' : ''}</tr>`).join('')}</tbody></table></div>`
+    : '';
   let content = overflow.join('');
   let fullDrawingPages = '';
   // A mix of full-page and inline drawings must still follow the saved order.
@@ -43,7 +45,7 @@ export function render(report: PdfReport, images: Map<string, string>) {
     (drawing) => drawingDataSchema.parse(drawing.data).page === 'portrait',
   );
   // A daily report has no cover or separate verdict page.
-  for (const drawing of report.drawings) {
+  for (const drawing of report.drawings.filter(() => reportSectionVisible(report, 'drawings'))) {
     const cad = drawingDataSchema.parse(drawing.data);
     const drawingContent =
       `<div class="${cad.page === 'portrait' ? 'evs-drawing evs-drawing-page' : 'rdo-drawing'}">${drawingSvg(
@@ -53,25 +55,32 @@ export function render(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
-        { images: drawingImageSources(report, images) },
+        { images: drawingImageSources(report, images), pointStatusColors: false },
       )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision);
     if (separateDrawings) fullDrawingPages += sheet(report, 'DESENHO', drawingContent);
     else content += drawingContent;
   }
   for (const m of report.media.filter(
-    (m) => m.sectionKey === 'drawing' && !m.reportPointId && !isEmbeddedDrawingImage(m),
+    (m) =>
+      reportSectionVisible(report, 'drawings') &&
+      m.sectionKey === 'drawing' &&
+      !m.reportPointId &&
+      !isEmbeddedDrawingImage(m),
   ))
     content +=
       `<div class="rdo-drawing"><img src="${images.get(m.id) || ''}"></div>` +
       (m.caption ? annotations(m.caption) : '');
   content += photoRows(report, images, 'RDO');
-  content += chunks(data.observation)
-    .map(
-      (part, i) =>
-        `<div class="rdo-observation"><b>OBS${i ? ' (continuação)' : ''}:</b><br>${escape(part || '—')}</div>`,
-    )
-    .join('');
-  for (const signer of report.signatures.filter((signer) => signer.role !== 'CLIENT')) {
+  if (reportSectionVisible(report, 'conclusion'))
+    content += chunks(data.observation)
+      .map(
+        (part, i) =>
+          `<div class="rdo-observation"><b>OBS${i ? ' (continuação)' : ''}:</b><br>${escape(part || '—')}</div>`,
+      )
+      .join('');
+  for (const signer of report.signatures.filter(
+    (signer) => reportSectionVisible(report, 'signatures') && signer.role !== 'CLIENT',
+  )) {
     content +=
       `<div class="evs-signers"><div class="evs-signer"><div class="evs-signature-space">${signatureImage(report, signer)}</div>` +
       annotations(
@@ -92,7 +101,8 @@ export function render(report: PdfReport, images: Map<string, string>) {
       ) +
       '</div></div>';
   }
-  content += `<div class="evs-signers">${clientSignatureCell(report)}</div>`;
+  if (reportSectionVisible(report, 'signatures'))
+    content += `<div class="evs-signers">${clientSignatureCell(report)}</div>`;
   return (
     fullDrawingPages +
     sheet(report, 'RELATÓRIO DIÁRIO DE INSPEÇÃO', content, true, 'rdo-sheet').replace(

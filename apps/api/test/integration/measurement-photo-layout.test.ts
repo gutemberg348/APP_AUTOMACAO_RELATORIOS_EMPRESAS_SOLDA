@@ -25,16 +25,19 @@ beforeAll(async () => {
 });
 afterAll(async () => browser?.close());
 
-it.each([0, 1, 4, 7, 12])(
-  'ME lays out %i photos with per-photo readings, no drawing or empty support rows',
-  async (count) => {
+it.each([
+  ...[0, 1, 4, 7, 12].map((count) => ({ count, overview: true })),
+  ...[6, 7, 12].map((count) => ({ count, overview: false })),
+])(
+  'ME lays out $count photos, overview=$overview, with labels and no clipped readings',
+  async ({ count, overview }) => {
     const media = Array.from({ length: count }, (_, i) => ({
       id: 'photo-' + i,
       sectionKey: 'test-photos',
       reportPointId: null,
       annotations: {
         elements: [],
-        ...(i < 2
+        ...(overview && i < 2
           ? {
               measurementDetails: {
                 side: i ? 'DIREITO' : 'ESQUERDO',
@@ -50,7 +53,12 @@ it.each([0, 1, 4, 7, 12])(
                 value: n === 0 ? 0 : 5.9,
               })),
             }
-          : {}),
+          : {
+              measurementDetails: {
+                headerMode: 'points' as const,
+                pointNumbers: String(i + 1).padStart(2, '0'),
+              },
+            }),
       },
     }));
     const report = {
@@ -115,15 +123,37 @@ it.each([0, 1, 4, 7, 12])(
         media.map((m) => m.annotations.measurements?.length ?? 0),
       );
       expect(await page.$$eval('.evs-sheet', (sheets) => sheets.length)).toBe(
-        3 + Math.ceil(count / 4),
+        4 +
+          (overview
+            ? count
+              ? 1 + Math.ceil(Math.max(0, count - 4) / 6)
+              : 0
+            : Math.ceil(count / 6)),
       );
       photos.forEach((photo, i) => {
         expect(photo.width).toBeGreaterThan(300);
-        expect(photo.height).toBeGreaterThan(220);
+        expect(photo.height).toBeGreaterThan(180);
         expect(photo.fit).toBe('fill');
         expect(photo.overflow).toBeLessThanOrEqual(1);
-        if (i >= 2) expect(photo.text?.trim()).toBe('');
+        if (!overview || i >= 2)
+          expect(photo.text?.trim()).toBe('PONTOS: ' + String(i + 1).padStart(2, '0'));
       });
+      if (!overview) {
+        const counts = await page.$$eval('.measurement-sheet:not(.reference-final)', (sheets) =>
+          sheets.map((s) => s.querySelectorAll('.measurement-photo').length),
+        );
+        expect(counts[0]).toBe(6);
+        expect(counts.every((n) => n <= 6)).toBe(true);
+      }
+      if (count === 6) {
+        const directory = fileURLToPath(
+          new URL('../../../../artifacts/me-comparison', import.meta.url),
+        );
+        await mkdir(directory, { recursive: true });
+        await (await page.$('article.measurement-sheet:not(.reference-final)'))!.screenshot({
+          path: directory + '/six-photos-labelled.png',
+        });
+      }
       if (count === 4) {
         const directory = fileURLToPath(
           new URL('../../../../artifacts/me-comparison', import.meta.url),

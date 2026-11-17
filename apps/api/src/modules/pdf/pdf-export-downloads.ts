@@ -5,13 +5,13 @@ import { AppError } from '../../errors/app-error';
 export class PdfExportDownloads {
   private entries = new Map<
     string,
-    { userId: string; reportId: string; expires: number; bytes: Buffer }
+    { userId: string; reportId: string; expires: number; bytes: Buffer; fileName?: string }
   >();
   private clean() {
     for (const [key, value] of this.entries)
       if (value.expires <= Date.now()) this.entries.delete(key);
   }
-  create(userId: string, reportId: string, bytes: Buffer) {
+  create(userId: string, reportId: string, bytes: Buffer, fileName?: string) {
     this.clean();
     if (bytes.length > 64 * 1024 * 1024)
       throw new AppError(
@@ -27,8 +27,12 @@ export class PdfExportDownloads {
       size -= value.bytes.length;
     }
     const token = randomUUID();
-    this.entries.set(token, { userId, reportId, bytes, expires: Date.now() + 5 * 60000 });
+    this.entries.set(token, { userId, reportId, bytes, fileName, expires: Date.now() + 5 * 60000 });
     return token;
+  }
+  name(userId: string, reportId: string, token: string) {
+    this.get(userId, reportId, token);
+    return this.entries.get(token)!.fileName || 'relatorio.pdf';
   }
   get(userId: string, reportId: string, token: string) {
     this.clean();

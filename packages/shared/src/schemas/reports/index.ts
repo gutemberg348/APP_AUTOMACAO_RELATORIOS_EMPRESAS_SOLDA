@@ -5,6 +5,8 @@ import { lpDraftSchema, lpSubmissionSchema } from './lp.schema';
 import { hydrostaticDraftSchema, hydrostaticSubmissionSchema } from './hydrostatic.schema';
 import { thicknessDraftSchema, thicknessSubmissionSchema } from './thickness.schema';
 import { rdoDraftSchema, rdoSubmissionSchema } from './rdo.schema';
+import { customReportPagesSchema } from '../../custom-report-pages';
+import { omittedReportSectionsSchema, reportFieldVisible } from '../../report-layout';
 export const reportSchemaRegistry: Record<string, { draft: z.ZodType; submission: z.ZodType }> = {
   EVS: { draft: evsDraftSchema, submission: evsSubmissionSchema },
   EVD: { draft: evdDraftSchema, submission: evdSubmissionSchema },
@@ -41,9 +43,24 @@ export function validateSpecificData(
   const schema =
     registered?.[mode] ?? (settings.customFields ? z.object(fields).strict() : undefined);
   if (!schema) throw new Error(`REPORT_TYPE_SCHEMA_MISSING:${code}`);
-  const parsed = schema.parse(data) as Record<string, unknown>;
+  let input = data;
+  let layout: { customPages?: unknown; omittedSections?: unknown } = {};
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const { customPages: raw, omittedSections, ...rest } = data as Record<string, unknown>;
+    const result = z
+      .object({
+        customPages: customReportPagesSchema.optional(),
+        omittedSections: omittedReportSectionsSchema.optional(),
+      })
+      .parse({ customPages: raw, omittedSections });
+    layout = Object.fromEntries(Object.entries(result).filter(([, v]) => v !== undefined));
+    input = rest;
+  }
+  const parsed = schema.parse(input) as Record<string, unknown>;
+  Object.assign(parsed, layout);
   if (mode === 'submission') {
     for (const key of settings.submissionRequiredKeys) {
+      if (!reportFieldVisible({ reportType: { code }, specificData: parsed }, key)) continue;
       const value = key
         .split('.')
         .reduce<unknown>(

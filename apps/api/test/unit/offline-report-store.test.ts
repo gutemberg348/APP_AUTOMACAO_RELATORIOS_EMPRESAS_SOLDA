@@ -1,4 +1,9 @@
-import { newDrawingData, reportTypeCodes } from '@weldcosta/shared';
+import {
+  newDrawingData,
+  reportTypeCodes,
+  customReportPageSchema,
+  customPhotoPrefix,
+} from '@weldcosta/shared';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 const memory = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('../../../app/services/offline-disk', () => ({
@@ -89,6 +94,14 @@ it.each(reportTypeCodes)(
   async (code) => {
     const input = draft();
     input.type = { ...input.type, code };
+    input.values.specificData.customPages = [
+      customReportPageSchema.parse({
+        id: 'extra-page',
+        kind: 'photos',
+        photosPerPage: 4,
+        title: 'EXTRA OFFLINE',
+      }),
+    ];
     input.values.drawings = [
       {
         data: {
@@ -129,6 +142,8 @@ it.each(reportTypeCodes)(
           caption: 'LEGENDA',
           annotations: {
             measurementDetails: {
+              headerMode: 'points',
+              pointNumbers: '05 - 09',
               side: 'LATERAL',
               discontinuity: '-',
               acceptable: false,
@@ -140,6 +155,13 @@ it.each(reportTypeCodes)(
             measurements: [{ id: 'reading', number: '1', x: 0.4, y: 0.5, value: 5.9 }],
           },
           asset: { uri: 'cache://temporary', name: 'foto.jpg', offlineFileId: 'photo-a.jpg' },
+        },
+        {
+          id: customPhotoPrefix('extra-page') + 'local-photo',
+          pointKey: null,
+          sectionKey: 'test-photos',
+          caption: 'FOTO EXTRA',
+          asset: { uri: 'cache://extra', name: 'extra.jpg', offlineFileId: 'extra.jpg' },
         },
       ],
       removedIds: ['removed'],
@@ -157,12 +179,24 @@ it.each(reportTypeCodes)(
     expect(photos.photos[0]?.pointKey).toBe('p-local');
     expect(photos.photos[0]?.caption).toBe('LEGENDA');
     expect(photos.photos[0]?.annotations).toMatchObject({
-      measurementDetails: { side: 'LATERAL', acceptable: false, projectThickness: '6 mm' },
+      measurementDetails: {
+        headerMode: 'points',
+        pointNumbers: '05 - 09',
+        side: 'LATERAL',
+        acceptable: false,
+        projectThickness: '6 mm',
+      },
       elements: [{ id: 'paint', strokeColor: '#1764C0' }],
       measurements: [{ number: '1', value: 5.9 }],
     });
     expect(photos.removedIds).toEqual(['removed']);
     expect(photos.captionEdits).toEqual({ old: 'NOVA' });
+    expect(photos.photos[1]).toMatchObject({
+      id: customPhotoPrefix('extra-page') + 'local-photo',
+      pointKey: null,
+      sectionKey: 'test-photos',
+      asset: { uri: 'restored://extra.jpg' },
+    });
   },
 );
 it('persists the remapped destination before removing the old queue and makes replay harmless', async () => {

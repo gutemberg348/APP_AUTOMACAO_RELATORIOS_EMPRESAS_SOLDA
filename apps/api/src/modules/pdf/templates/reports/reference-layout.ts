@@ -1,5 +1,6 @@
 import { drawingImageSources, isEmbeddedDrawingImage } from './layout';
 import { drawingDataSchema, drawingSvg, lpWeldGroups } from '@weldcosta/shared';
+import { reportSectionVisible, reportFieldVisible } from '@weldcosta/shared';
 import { chunks, header, footer } from './evs';
 import { escape, displayDate, signatureImage, clientSignatureCell, type PdfReport } from './layout';
 export { chunks } from './evs';
@@ -27,7 +28,7 @@ export function sheet(
   contact = false,
   kind = '',
 ) {
-  return `<article class="evs-sheet reference-sheet ${kind}">${header(report, title)}<main class="evs-flow">${blocks}</main>${contact ? footer : ''}</article>`;
+  return `<article class="evs-sheet reference-sheet ${kind}${report.reportType.code === 'LP' ? ' lp-report' : ''}">${header(report, title)}<main class="evs-flow">${blocks}</main>${contact ? footer : ''}</article>`;
 }
 export function annotations(text: unknown, label = '') {
   return chunks(text)
@@ -38,6 +39,7 @@ export function annotations(text: unknown, label = '') {
     .join('');
 }
 export function cover(report: PdfReport) {
+  if (!reportSectionVisible(report, 'identification')) return '';
   const data = report.specificData as Record<string, unknown>;
   return sheet(
     report,
@@ -57,8 +59,19 @@ export function cover(report: PdfReport) {
   );
 }
 export function identification(report: PdfReport, fields: [string, string][]) {
+  const hadFields = fields.length > 0;
+  fields = fields.filter(([, key]) => reportFieldVisible(report, key));
+  if (!fields.length && (hadFields || !reportSectionVisible(report, 'identification'))) return '';
+  const inspectionArea = value(report.specificData, 'inspectionArea');
+  const title =
+    report.reportType.code === 'LP' &&
+    reportFieldVisible(report, 'inspectionArea') &&
+    typeof inspectionArea === 'string' &&
+    inspectionArea.trim()
+      ? inspectionArea.trim()
+      : report.title || report.project.name;
   const body =
-    chunks(report.title || report.project.name)
+    chunks(title)
       .map((part) => `<h1 class="evs-data-title">${escape(part)}</h1>`)
       .join('') +
     fields
@@ -71,9 +84,16 @@ export function identification(report: PdfReport, fields: [string, string][]) {
           .join(''),
       )
       .join('');
-  return sheet(report, titles[report.reportType.code]!, body, true, 'evs-identification');
+  return sheet(
+    report,
+    titles[report.reportType.code]!,
+    body,
+    true,
+    'evs-identification' + (report.reportType.code === 'TH' ? ' th-identification' : ''),
+  );
 }
 export function drawings(report: PdfReport, images: Map<string, string>) {
+  if (!reportSectionVisible(report, 'drawings')) return '';
   let html = '';
   for (const drawing of report.drawings) {
     const cad = drawingDataSchema.parse(drawing.data);
@@ -87,7 +107,11 @@ export function drawings(report: PdfReport, images: Map<string, string>) {
           number: p.number,
           data: (p.data ?? {}) as { acceptable?: boolean },
         })),
-        { images: drawingImageSources(report, images), centerContent: true },
+        {
+          images: drawingImageSources(report, images),
+          centerContent: true,
+          pointStatusColors: false,
+        },
       )}</div>` + annotations(cad.title + ' · Rev. ' + cad.revision + ' · Sem escala'),
     );
   }
@@ -153,14 +177,17 @@ export function resultAndSignatures(
     cell(labels[0]!, signer('INSPECTOR')) +
     cell(labels[1]!, signer('TECHNICAL_RESPONSIBLE') || signer('REVIEWER')) +
     clientSignatureCell(report);
-  let html = `<div class="evs-signoff"><div class="evs-result">${[
+  const result = `<div class="evs-result">${[
     ['APPROVED', 'APROVADO'],
     ['REJECTED', 'REPROVADO'],
     ['COMPLEMENTARY_EXAM', 'EXAME COMPLEMENTAR'],
   ]
     .map(([code, name]) => `<b>${name} (${data.finalResult === code ? 'X' : ' '})</b>`)
-    .join('')}</div><div class="evs-signers">${main}</div></div>`;
-  for (const person of report.signatures.filter((s) => !used.has(s.id)))
+    .join('')}</div>`;
+  let html = `<div class="evs-signoff">${reportSectionVisible(report, 'conclusion') ? result : ''}${reportSectionVisible(report, 'signatures') ? `<div class="evs-signers">${main}</div>` : ''}</div>`;
+  for (const person of report.signatures.filter(
+    (s) => reportSectionVisible(report, 'signatures') && !used.has(s.id),
+  ))
     html += `<div class="evs-signers">${cell(person.role === 'REVIEWER' ? 'REVISOR' : 'RESPONSÁVEL', person)}</div>`;
   return html;
 }
@@ -171,17 +198,20 @@ export function conclusion(
   contact = false,
   observation = false,
 ) {
+  if (!reportSectionVisible(report, 'conclusion') && !reportSectionVisible(report, 'signatures'))
+    return '';
   return sheet(
     report,
-    'LAUDO FINAL',
-    (observation ? band('OBSERVAÇÃO') : '') +
-      chunks(text)
-        .map(
-          (part, i) =>
-            `<div class="reference-conclusion ${i ? 'continuation' : ''}">${escape(part || 'Laudo não informado.')}</div>`,
-        )
-        .join('') +
-      resultAndSignatures(report, labels),
+    reportSectionVisible(report, 'conclusion') ? 'LAUDO FINAL' : 'RESPONSÁVEIS',
+    (reportSectionVisible(report, 'conclusion')
+      ? (observation ? band('OBSERVAÇÃO') : '') +
+        chunks(text)
+          .map(
+            (part, i) =>
+              `<div class="reference-conclusion ${i ? 'continuation' : ''}">${escape(part || 'Laudo não informado.')}</div>`,
+          )
+          .join('')
+      : '') + resultAndSignatures(report, labels),
     contact,
     'reference-final',
   );
@@ -217,6 +247,7 @@ export function photoRows(
   images: Map<string, string>,
   mode: 'LP' | 'TH' | 'RDO',
 ) {
+  if (!reportSectionVisible(report, 'points')) return '';
   type Entry = { point?: PdfReport['points'][number]; image?: PdfReport['media'][number] };
   const pointGroups =
     mode === 'LP'

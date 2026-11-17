@@ -24,6 +24,7 @@ import { PdfService, type PdfProvider } from '../pdf/pdf.service';
 import { LocalStorageProvider } from '../../services/storage/local-storage-provider';
 import { env } from '../../config/env';
 import { reportScope, assertCompanyAccess, signatureScope } from '../../middlewares/access-scope';
+import { assertCustomDrawingAccess } from './reports.custom-pages';
 const reportListInclude = { company: true, project: true, reportType: true } as const;
 const reportNumberRequired = reportCreateSchema.pick({ number: true });
 export const reportInclude = {
@@ -339,6 +340,7 @@ export class ReportsService {
         { ...project, reportDefaults: project.reportDefaults as ReportDefaults },
         company,
       );
+      assertCustomDrawingAccess(user, data.specificData);
       const report = await tx.report.create({
         data: {
           ...fields,
@@ -431,6 +433,8 @@ export class ReportsService {
         report.reportType.config,
         user,
       );
+      if (input.specificData !== undefined)
+        assertCustomDrawingAccess(user, input.specificData, report.specificData);
       const data: Prisma.ReportUpdateManyMutationInput = {
         lastClientMutationId: clientMutationId ?? null,
         number: input.number,

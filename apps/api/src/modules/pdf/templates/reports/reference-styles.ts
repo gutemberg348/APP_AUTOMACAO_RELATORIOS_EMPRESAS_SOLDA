@@ -1,4 +1,17 @@
 export const referenceStyles = `
+.custom-report-sheet .evs-heading{min-width:0;min-height:0;overflow-wrap:anywhere}
+.custom-photo-sheet .evs-flow{display:flex;flex-direction:column}
+.custom-photo-grid{height:100%;min-height:0;display:grid;grid-template-columns:repeat(var(--custom-columns),minmax(0,1fr));grid-template-rows:repeat(var(--custom-rows),minmax(0,1fr))}
+.custom-photo-cell{margin:0;min-width:0;min-height:0;border-right:1px solid #111;border-bottom:1px solid #111;display:flex;flex-direction:column}
+.custom-photo-image{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;color:#777}
+.custom-photo-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+.custom-photo-cell figcaption,.custom-point-heading{padding:1mm;font-size:14px;line-height:1.2;overflow-wrap:anywhere;white-space:pre-wrap}
+.custom-point-heading{border-bottom:1px solid #111;color:#245aa1}
+.custom-drawing-sheet .evs-flow{display:flex;min-height:0}
+.custom-drawing{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center}
+.custom-drawing svg{width:100%;height:100%}
+.lp-report .evs-flow,.lp-report .evs-contact,.lp-report .reference-photo-tab span,
+.lp-report .lp-form-table td,.lp-report .lp-custom-choice{color:#111}
 .th-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
 .th-test-photo-row{min-height:0;display:flex;flex-direction:column;border-bottom:1px solid #111}
 .th-test-photo-row>.reference-band{flex:none;font-size:17px;padding:2mm}
@@ -12,8 +25,8 @@ export const referenceStyles = `
 .lp-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
 .lp-test-photo{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .lp-test-photo+.lp-test-photo{border-top:1px solid #111}
-.lp-test-photo-image{position:relative;flex:1;min-height:0;overflow:hidden}
-.lp-test-photo-image img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill}
+.lp-test-photo-image{position:relative;flex:none;align-self:center;width:102mm;max-width:100%;height:68mm;overflow:hidden;background:#fff}
+.lp-test-photo-image img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .lp-test-photo figcaption{flex:none;padding:1mm 2mm;font-size:12px;line-height:1.25;white-space:pre-wrap;overflow-wrap:anywhere}
 .reference-band{margin:0;padding:3mm 2mm;text-align:center;font-size:17px;font-weight:normal;border-top:1px solid #111;border-bottom:1px solid #111}
 .reference-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px}
@@ -64,6 +77,19 @@ export const referenceStyles = `
 .measurement-reading{padding:2mm 1mm;border-bottom:1px solid #111;min-height:10mm;font-size:16px;overflow-wrap:anywhere}
 .measurement-with-readings:after{content:'';flex:1;min-height:0;background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(10mm - 1px),#111 calc(10mm - 1px),#111 10mm)}
 .measurement-reading span{color:#16789c}.measurement-block{break-inside:avoid;border-bottom:1px solid #111}
+.measurement-calculation{margin:23mm 2mm 0;break-inside:avoid;border:1px solid #111;text-transform:none}
+.measurement-calculation h2{margin:0;padding:1.5mm;text-align:center;font-size:21px;border-bottom:1px solid #111}
+.measurement-formula h3{margin:0;padding:2mm;text-align:center;font-size:17px}
+.measurement-equation{display:flex;align-items:center;justify-content:center;gap:3mm;padding:12mm 2mm 10mm;font:32px Georgia,serif}
+.measurement-fraction{display:flex;flex-direction:column;align-items:stretch;text-align:center;font-size:25px;line-height:1.6}
+.measurement-fraction>span:first-child{border-bottom:2px solid #111}
+.measurement-calculation table,.measurement-calculation-row{width:100%;table-layout:fixed;border-collapse:collapse;font:18px Georgia,serif;text-transform:none}
+.measurement-calculation-row{width:calc(100% - 4mm);margin:0 2mm;break-inside:avoid}
+.measurement-calculation th,.measurement-calculation td,.measurement-calculation-row th,.measurement-calculation-row td{border:1px solid #111;padding:1.1mm;overflow-wrap:anywhere;line-height:1.2}
+.measurement-calculation thead th{font-size:22px;background:#eee;text-align:center}
+.measurement-calculation-row th{text-align:left;font-weight:bold}
+.measurement-calculation-row td{text-align:center;font-weight:bold}
+.measurement-calculation-result{color:#16789c}
 .rdo-sheet .evs-header{height:22mm;grid-template-columns:22% 48% 30%}.rdo-sheet .evs-heading{font-size:19px}
 .rdo-sheet .evs-header table{font-size:12px}.rdo-repeated{flex-shrink:0}
 .rdo-repeated th{font-size:10px;text-align:left;width:12%}.rdo-repeated td{font-size:12px;color:#245aa1;padding:1mm}

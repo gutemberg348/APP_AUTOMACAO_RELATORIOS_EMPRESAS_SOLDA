@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
 import {
   measurementPhotoDefaults,
+  measurementPhotoHeading,
+  nextPhotoMeasurementNumber,
   photoAnnotationsSchema,
   reportSections,
 } from '@weldcosta/shared';
@@ -22,6 +24,8 @@ it('keeps per-photo metadata, null acceptance and zero values across local JSON 
   const annotations = {
     elements: [],
     measurementDetails: {
+      headerMode: 'points',
+      pointNumbers: '01, 02',
       side: 'LATERAL',
       discontinuity: '-',
       acceptable: false,
@@ -36,6 +40,48 @@ it('keeps per-photo metadata, null acceptance and zero values across local JSON 
     measurementPhotoDefaults({ label: 'LATERAL', data: { acceptable: false } }, '6 mm'),
   ).toMatchObject({ side: 'LATERAL', acceptable: false, projectThickness: '6 mm' });
   expect(measurementPhotoDefaults(undefined)).toMatchObject({ side: '', acceptable: null });
+});
+
+it('continues after the highest point across saved and offline photos without changing marks', () => {
+  const first = photoAnnotationsSchema.parse({
+    elements: [],
+    measurements: [1, 2, 3, 4].map((n) => ({
+      id: String(n),
+      number: String(n).padStart(2, '0'),
+      x: 0.5,
+      y: 0.5,
+    })),
+  });
+  expect(nextPhotoMeasurementNumber([first])).toBe(5);
+  const second = photoAnnotationsSchema.parse({
+    elements: [],
+    measurements: [5, 6, 7, 8, 9].map((n) => ({
+      id: String(n),
+      number: String(n),
+      x: 0.5,
+      y: 0.5,
+    })),
+  });
+  const before = structuredClone([first, second]);
+  expect(nextPhotoMeasurementNumber([first, undefined, second])).toBe(10);
+  expect([first, second]).toEqual(before);
+  expect(nextPhotoMeasurementNumber([])).toBe(1);
+  expect(measurementPhotoHeading(first)).toEqual({ label: 'PONTOS', value: '01, 02, 03, 04' });
+  expect(
+    measurementPhotoHeading({
+      measurementDetails: { headerMode: 'side', side: '', pointNumbers: '05 - 09' },
+    }),
+  ).toEqual({ label: 'PONTOS', value: '05 - 09' });
+  expect(
+    measurementPhotoHeading({
+      measurementDetails: { headerMode: 'points', side: 'CENTRAL', pointNumbers: ' ' },
+    }),
+  ).toEqual({ label: 'LADO', value: 'CENTRAL' });
+  expect(
+    measurementPhotoHeading({
+      measurementDetails: { headerMode: 'points', side: 'CENTRAL', pointNumbers: '03' },
+    }),
+  ).toEqual({ label: 'PONTOS', value: '03' });
 });
 
 it('renders per-photo details without drawings, phantom points or empty support details', () => {

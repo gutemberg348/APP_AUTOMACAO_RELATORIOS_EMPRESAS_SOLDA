@@ -12,6 +12,8 @@ import {
   drawingId,
   photoAnnotationsSchema,
   photoAnnotationsSvg,
+  nextPhotoMeasurementNumber,
+  measurementPhotoHeading,
   type PhotoAnnotations,
   type PhotoMeasurement,
 } from '@weldcosta/shared';
@@ -53,6 +55,7 @@ export function PhotoMeasurementsEditor({
   onSave,
   onClose,
   onPaint,
+  startNumber = 1,
 }: {
   source: PhotoSource;
   value: PhotoAnnotations;
@@ -60,11 +63,15 @@ export function PhotoMeasurementsEditor({
   onSave(value: PhotoAnnotations): void;
   onClose(): void;
   onPaint(value: PhotoAnnotations): void;
+  startNumber?: number;
 }) {
   const { styles, tokens: t } = useTheme();
   const window = useWindowDimensions();
   const [items, setItems] = useState<PhotoMeasurement[]>(value.measurements ?? []);
   const [details, setDetails] = useState(value.measurementDetails ?? {});
+  const [nextNumber, setNextNumber] = useState(
+    String(Math.max(startNumber, nextPhotoMeasurementNumber([value]))),
+  );
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       (value.measurements ?? []).map((m) => [
@@ -137,6 +144,18 @@ export function PhotoMeasurementsEditor({
       }
     >
       <View style={{ gap: 12 }}>
+        <SelectField
+          label="Identificação acima da foto no PDF"
+          disabled={!editable}
+          value={details.headerMode ?? (details.side ? 'side' : 'points')}
+          options={[
+            { value: 'side', label: 'Lado' },
+            { value: 'points', label: 'Pontos' },
+          ]}
+          onChange={(v) =>
+            setDetails((old) => ({ ...old, headerMode: v === 'side' ? 'side' : 'points' }))
+          }
+        />
         <Field
           label="Lado / parte do equipamento"
           value={details.side ?? ''}
@@ -145,6 +164,22 @@ export function PhotoMeasurementsEditor({
           placeholder="Ex.: lateral direita"
           onChangeText={(side) => setDetails((old) => ({ ...old, side }))}
         />
+        <Field
+          label="Pontos identificados nesta foto"
+          value={details.pointNumbers ?? ''}
+          editable={editable}
+          maxLength={500}
+          placeholder="Ex.: 01, 02, 03 ou deixe vazio para usar as marcações"
+          onChangeText={(pointNumbers) => setDetails((old) => ({ ...old, pointNumbers }))}
+        />
+        <Text style={styles.muted}>
+          Acima da foto:{' '}
+          {measurementPhotoHeading({ measurementDetails: details, measurements: items }).label}
+          {' — '}
+          {measurementPhotoHeading({ measurementDetails: details, measurements: items }).value ||
+            'não informado'}
+          {'. Se a opção escolhida estiver vazia, usamos a outra informação preenchida.'}
+        </Text>
         <Field
           label="Descontinuidade"
           value={details.discontinuity ?? ''}
@@ -174,6 +209,18 @@ export function PhotoMeasurementsEditor({
           onChangeText={(projectThickness) => setDetails((old) => ({ ...old, projectThickness }))}
         />
         <Text style={styles.label}>Toque na foto para colocar os círculos numerados</Text>
+        <Field
+          label="Número do próximo ponto"
+          value={nextNumber}
+          editable={editable}
+          keyboardType="number-pad"
+          maxLength={4}
+          onChangeText={setNextNumber}
+        />
+        <Text style={styles.muted}>
+          A numeração continua entre as fotos. Você pode alterar o próximo número ou editar cada
+          ponto abaixo.
+        </Text>
         <View ref={photoRef} collapsable={false}>
           <Pressable
             ref={touchRef}
@@ -213,12 +260,25 @@ export function PhotoMeasurementsEditor({
                   return;
                 }
                 const id = drawingId();
+                const number = Number(nextNumber);
+                if (
+                  !/^\d{1,4}$/.test(nextNumber) ||
+                  number < 1 ||
+                  number > 9999 ||
+                  items.some((m) => Number(m.number) === number)
+                ) {
+                  setError(
+                    'Informe um próximo número de 1 a 9999 que ainda não esteja marcado nesta foto.',
+                  );
+                  return;
+                }
                 setItems((old) => {
-                  if (old.length >= 100) return old;
-                  let number = 1;
-                  while (old.some((m) => Number(m.number) === number)) number++;
+                  if (old.length >= 100 || old.some((m) => Number(m.number) === number)) return old;
                   return [...old, { id, number: String(number), x, y, value: null }];
                 });
+                let following = number + 1;
+                while (items.some((m) => Number(m.number) === following)) following++;
+                setNextNumber(String(following));
                 setError(undefined);
               });
             }}

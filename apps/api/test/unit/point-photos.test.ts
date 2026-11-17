@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportTypeCodes, type Report, type ReportPoint } from '@weldcosta/shared';
+import {
+  reportTypeCodes,
+  newDrawingData,
+  customReportPageSchema,
+  customPhotoPrefix,
+  type Report,
+  type ReportPoint,
+} from '@weldcosta/shared';
 import { api, ApiError } from '../../../app/services/api';
 import {
   ReportPhotoSaveError,
@@ -49,6 +56,67 @@ beforeEach(() => {
   useReportPhotoDrafts.setState({ reports: {} });
 });
 describe('Photos selected in the point form', () => {
+  it('uploads custom drawing images instead of dropping them as unreferenced files', async () => {
+    const id = 'drawing-image-custom';
+    const report = {
+      ...saved,
+      specificData: {
+        customPages: [
+          customReportPageSchema.parse({
+            id: 'extra',
+            kind: 'drawing',
+            drawings: [
+              {
+                data: {
+                  ...newDrawingData(),
+                  elements: [
+                    {
+                      id: 'image',
+                      type: 'image',
+                      mediaKey: id,
+                      x: 500,
+                      y: 400,
+                      width: 300,
+                      height: 200,
+                      rotation: 0,
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        ],
+      },
+    };
+    useReportPhotoDrafts
+      .getState()
+      .update('user:new', () => ({
+        photos: [{ ...draft(id), pointKey: null, sectionKey: 'drawing' }],
+        removedIds: [],
+      }));
+    apiMock.mockResolvedValueOnce({ id }).mockResolvedValueOnce({ ...report, version: 2 });
+    await saveReportPhotos('user:new', report, points);
+    const body = apiMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(body.get('clientUploadId')).toBe(id);
+    expect(body.get('sectionKey')).toBe('drawing');
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']!.photos).toHaveLength(0);
+  });
+  it('keeps custom page identity and opens the custom-page correction after a failed upload', async () => {
+    const id = customPhotoPrefix('extra') + 'photo';
+    useReportPhotoDrafts
+      .getState()
+      .update('user:new', () => ({
+        photos: [{ ...draft(id), pointKey: null, sectionKey: 'test-photos' }],
+        removedIds: [],
+      }));
+    apiMock
+      .mockRejectedValueOnce(new ApiError(0, 'NETWORK_ERROR', 'Sem internet'))
+      .mockResolvedValueOnce(saved);
+    await saveReportPhotos('user:new', saved, points);
+    const queued = useReportPhotoDrafts.getState().reports['user:report-1']!;
+    expect(queued.photos[0]!.id).toBe(id);
+    expect(queued.error).toMatchObject({ location: { customPage: true } });
+  });
   it('explains the rejected photo field instead of only repeating the generic API message', () => {
     const reason = photoSaveReason({
       code: 'VALIDATION_ERROR',
@@ -321,12 +389,10 @@ it.each(reportTypeCodes)(
 );
 
 it('recovers a restored local point using its saved number when its client ID is no longer in the form', async () => {
-  useReportPhotoDrafts
-    .getState()
-    .update('user:report-1', () => ({
-      photos: [{ ...draft('restored'), pointNumber: 'S-42' }],
-      removedIds: [],
-    }));
+  useReportPhotoDrafts.getState().update('user:report-1', () => ({
+    photos: [{ ...draft('restored'), pointNumber: 'S-42' }],
+    removedIds: [],
+  }));
   apiMock.mockResolvedValueOnce({ id: 'restored' }).mockResolvedValueOnce(saved);
   await saveReportPhotos('user:report-1', saved, saved.points!);
   expect((apiMock.mock.calls[0]![1]!.body as FormData).get('reportPointId')).toBe(

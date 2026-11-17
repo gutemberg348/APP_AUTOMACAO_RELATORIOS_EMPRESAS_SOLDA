@@ -5,6 +5,8 @@ export const photoAnnotationsSchema = z
   .object({
     measurementDetails: z
       .object({
+        headerMode: z.enum(['side', 'points']).optional(),
+        pointNumbers: z.string().max(500).optional(),
         side: z.string().max(500).optional(),
         discontinuity: z.string().max(500).optional(),
         acceptable: z.boolean().nullable().optional(),

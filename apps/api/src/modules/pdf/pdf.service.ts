@@ -1,3 +1,4 @@
+import { reportPdfName } from '@weldcosta/shared';
 import { randomUUID } from 'node:crypto';
 import { preparePdfAsIs, type PdfAsIsInput } from './pdf-as-is';
 import type { CurrentUser } from '@weldcosta/shared';
@@ -20,6 +21,8 @@ import { render as lp } from './templates/reports/lp';
 import { render as hydrostatic } from './templates/reports/hydrostatic';
 import { render as thickness } from './templates/reports/thickness';
 import { render as rdo } from './templates/reports/rdo';
+import { renderWithCustomPages } from './templates/reports/custom-pages';
+import { customReportPages, isCustomPagePhoto } from '@weldcosta/shared';
 const renderers: Record<string, (report: PdfReport, images: Map<string, string>) => string> = {
   EVS: evs,
   EVD: evs,
@@ -156,6 +159,40 @@ export class PdfService implements PdfProvider {
             'Esta imagem do desenho ainda não foi enviada. Salve e aguarde o envio; se ela continuar indisponível, selecione a imagem novamente.',
           );
     }
+    const customImagePaths = new Map<string, (string | number)[]>();
+    for (const [pageIndex, custom] of customReportPages(report.specificData).entries()) {
+      for (const [drawingIndex, drawing] of custom.drawings.entries()) {
+        for (const [elementIndex, element] of drawing.data.elements.entries()) {
+          if (element.type === 'image')
+            customImagePaths.set(element.mediaKey, [
+              'specificData',
+              'customPages',
+              pageIndex,
+              'drawings',
+              drawingIndex,
+              'data',
+              'elements',
+              elementIndex,
+              'mediaKey',
+            ]);
+          if (element.type === 'image' && !availableImages.has(element.mediaKey))
+            invalid(
+              [
+                'specificData',
+                'customPages',
+                pageIndex,
+                'drawings',
+                drawingIndex,
+                'data',
+                'elements',
+                elementIndex,
+                'mediaKey',
+              ],
+              `Página personalizada “${custom.title}”: a imagem ainda não foi enviada. Salve o relatório e aguarde o envio da foto.`,
+            );
+        }
+      }
+    }
     report.signatureImages = {};
     for (const [index, signer] of report.signatures.entries()) {
       signal.throwIfAborted();
@@ -177,13 +214,16 @@ export class PdfService implements PdfProvider {
       const drawingIndex = imageDrawings.get(media.clientUploadId ?? media.id) ?? -1;
       const pointIndex = report.points.findIndex((point) => point.id === media.reportPointId);
       const path =
-        ['TH', 'ME'].includes(report.reportType.code) || media.sectionKey === 'test-photos'
-          ? ['testPhotos']
-          : drawingIndex >= 0
-            ? ['drawings', drawingIndex]
-            : pointIndex >= 0
-              ? ['points', pointIndex, 'photos']
-              : ['points'];
+        customImagePaths.get(media.clientUploadId ?? media.id) ??
+        (isCustomPagePhoto(media)
+          ? ['specificData', 'customPages']
+          : ['TH', 'ME'].includes(report.reportType.code) || media.sectionKey === 'test-photos'
+            ? ['testPhotos']
+            : drawingIndex >= 0
+              ? ['drawings', drawingIndex]
+              : pointIndex >= 0
+                ? ['points', pointIndex, 'photos']
+                : ['points']);
       if (!(await this.storage.exists(media.filePath)))
         invalid(
           path,
@@ -192,11 +232,13 @@ export class PdfService implements PdfProvider {
       try {
         images.set(
           media.id,
-          await (media.sectionKey === 'drawing' ? photoWithAnnotations : photoForPdf)(
-            await this.storage.get(media.filePath),
-            media.mimeType,
-            media.annotations,
-          ),
+          await (
+            media.sectionKey === 'drawing' ||
+              isCustomPagePhoto(media) ||
+              (report.reportType.code === 'LP' && media.sectionKey === 'test-photos')
+              ? photoWithAnnotations
+              : photoForPdf
+          )(await this.storage.get(media.filePath), media.mimeType, media.annotations),
         );
       } catch (cause) {
         if (
@@ -241,10 +283,13 @@ export class PdfService implements PdfProvider {
       page.on('request', (request) => {
         void (/^(data:|about:)/.test(request.url()) ? request.continue() : request.abort());
       });
-      await page.setContent(evsDocumentHtml(template(report, images), final), {
-        waitUntil: 'load',
-        timeout: 30000,
-      });
+      await page.setContent(
+        evsDocumentHtml(renderWithCustomPages(report, images, template), final),
+        {
+          waitUntil: 'load',
+          timeout: 30000,
+        },
+      );
       await page.evaluate(paginateEvs);
       return Buffer.from(
         await page.pdf({
@@ -272,7 +317,10 @@ export class PdfService implements PdfProvider {
     const snapshot = await this.snapshot(id);
     const prepared = await preparePdfAsIs(snapshot, input, files, user);
     const bytes = await this.render(prepared.report, true, prepared.images);
-    return { bytes, warnings: prepared.warnings };
+    return { bytes, warnings: prepared.warnings, fileName: reportPdfName(prepared.report) };
+  }
+  async downloadName(id: string) {
+    return reportPdfName(await this.snapshot(id));
   }
   async preview(id: string) {
     return this.render(await this.snapshot(id), false);

@@ -23,3 +23,8 @@ export * from './users';
 
 export * from './hydrostatic-photos';
 export * from './measurement-photos';
+export * from './thickness-calculation';
+export * from './custom-report-pages';
+export * from './report-layout';
+
+export { reportPdfName } from './pdf-name';
