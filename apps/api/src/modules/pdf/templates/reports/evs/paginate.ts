@@ -146,6 +146,22 @@ export function paginateEvs() {
     let sheet = original;
     let flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
     const blocks = Array.from(flow.children);
+    if (original.classList.contains('lp-test-photos') && blocks.length) {
+      const captionHeight = blocks.reduce(
+        (total, block) =>
+          total + (block.querySelector('figcaption')?.getBoundingClientRect().height ?? 0),
+        0,
+      );
+      const area = flow.getBoundingClientRect();
+      // Use the available height equally. A wide photo stops growing at the
+      // page width so its actual image ends where the next photo can begin.
+      const rowHeight = Math.max(76, (area.height - captionHeight - 0.25) / blocks.length);
+      for (const frame of flow.querySelectorAll<HTMLElement>('.lp-test-photo-image')) {
+        const image = frame.querySelector('img')!;
+        const ratio = image.naturalWidth / image.naturalHeight || 4 / 3;
+        frame.style.height = `${Math.min(rowHeight, area.width / ratio)}px`;
+      }
+    }
     const measurement = original.classList.contains('measurement-sheet');
     const maxPhotoRows = 3;
     const photoBlocks = blocks.filter((block) => block.querySelector('.report-photo-frame'));

@@ -23,13 +23,13 @@ beforeAll(async () => {
 });
 afterAll(async () => browser?.close());
 
-it.each([1, 3, 4])(
-  'LP keeps equal frames and source resolution for %i test photos',
+it.each([1, 2, 3, 4])(
+  'LP enlarges and stacks %i test photos at source resolution',
   async (count) => {
     const media = Array.from({ length: count }, (_, i) => ({
       id: String(i),
       sectionKey: 'test-photos',
-      caption: i === 1 ? 'Detalhe do ensaio' : '',
+      caption: i === 1 && count !== 3 ? 'Detalhe do ensaio' : '',
     }));
     const report = {
       number: 'LP-001',
@@ -65,36 +65,66 @@ it.each([1, 3, 4])(
         await Promise.all([...document.images].map((img) => img.decode()));
       });
       await page.evaluate(paginateEvs);
-      const frames = await page.$$eval('.lp-test-photo-image', (nodes) =>
-        nodes.map((node) => {
-          const rect = node.getBoundingClientRect(),
-            img = node.querySelector('img')!;
-          return {
-            width: rect.width,
-            height: rect.height,
-            fit: getComputedStyle(img).objectFit,
-            pixels: img.naturalWidth,
-            overflow: rect.bottom - node.closest('.evs-flow')!.getBoundingClientRect().bottom,
-          };
+      const sheets = await page.$$eval('.lp-test-photos .evs-flow', (flows) =>
+        flows.map((flow) => {
+          const bounds = flow.getBoundingClientRect();
+          return [...flow.querySelectorAll('.lp-test-photo')].map((figure) => {
+            const img = figure.querySelector('img')!;
+            const rect = img.getBoundingClientRect();
+            const style = getComputedStyle(figure);
+            const ratio = img.naturalWidth / img.naturalHeight;
+            return {
+              top: rect.top,
+              bottom: rect.bottom,
+              height: rect.height,
+              areaWidth: bounds.width,
+              visibleWidth: Math.min(rect.width, rect.height * ratio),
+              visibleHeight: Math.min(rect.height, rect.width / ratio),
+              fit: getComputedStyle(img).objectFit,
+              pixels: [img.naturalWidth, img.naturalHeight],
+              overflow: rect.bottom - bounds.bottom,
+              borders: [style.borderTopWidth, style.borderBottomWidth],
+              captionHeight:
+                figure.querySelector('figcaption')?.getBoundingClientRect().height ?? 0,
+            };
+          });
         }),
       );
+      const frames = sheets.flat();
       expect(frames).toHaveLength(count);
-      expect(await page.$$eval('.lp-test-photos', (nodes) => nodes.length)).toBe(
-        Math.ceil(count / 3),
-      );
-      for (const frame of frames) {
-        expect(frame.width).toBeCloseTo(frames[0]!.width);
-        expect(frame.height).toBeCloseTo(frames[0]!.height);
+      expect(sheets.map((photos) => photos.length)).toEqual(count === 4 ? [3, 1] : [count]);
+      const expectedPixels = [
+        [1800, 1200],
+        [1200, 1800],
+        [1500, 1500],
+      ];
+      for (const [index, frame] of frames.entries()) {
+        expect(frame.borders).toEqual(['0px', '0px']);
         expect(frame.fit).toBe('contain');
-        expect(frame.pixels).toBeGreaterThanOrEqual(1200);
+        expect(frame.pixels).toEqual(expectedPixels[index % 3]);
+        expect(frame.visibleHeight).toBeCloseTo(frame.height, 1);
         expect(frame.overflow).toBeLessThanOrEqual(0);
       }
+      for (const photos of sheets) {
+        for (let i = 1; i < photos.length; i++) {
+          expect(photos[i]!.top).toBeCloseTo(
+            photos[i - 1]!.bottom + photos[i - 1]!.captionHeight,
+            1,
+          );
+        }
+      }
+      expect(frames[0]!.visibleWidth).toBeGreaterThan((102 * 96) / 25.4);
+      if (count === 1) expect(frames[0]!.visibleWidth).toBeCloseTo(frames[0]!.areaWidth, 1);
       if (count === 3) {
         const folder = fileURLToPath(
           new URL('../../../../artifacts/lp-photo-quality/', import.meta.url),
         );
         await mkdir(folder, { recursive: true });
-        await (await page.$('.lp-test-photos'))!.screenshot({ path: folder + 'three-photos.png' });
+        await page.pdf({
+          path: folder + 'three-photos.pdf',
+          preferCSSPageSize: true,
+          printBackground: true,
+        });
       }
     } finally {
       await page.close();
