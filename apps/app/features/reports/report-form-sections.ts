@@ -1,4 +1,9 @@
-import { reportSections, reportTypeCodes, type ReportSection } from '@weldcosta/shared';
+import {
+  reportSectionId,
+  reportSections,
+  reportTypeCodes,
+  type ReportSection,
+} from '@weldcosta/shared';
 
 export type ReportFormSection = ReportSection & {
   content?:
@@ -6,7 +11,11 @@ export type ReportFormSection = ReportSection & {
 };
 
 // The model defines the complete form. Company/project defaults only supply values.
-export function reportFormSections(code: string, base: ReportSection[]): ReportFormSection[] {
+export function reportFormSections(
+  code: string,
+  base: ReportSection[],
+  order?: unknown,
+): ReportFormSection[] {
   const sections: ReportFormSection[] = [...base];
   const conclusion = sections.findIndex((section) =>
     ['Laudo', 'Observação'].includes(section.title),
@@ -48,7 +57,24 @@ export function reportFormSections(code: string, base: ReportSection[]): ReportF
       : []),
   );
   sections.push({ title: 'Responsáveis', fields: [], content: 'signatures' });
+  if (Array.isArray(order) && order.length) {
+    const positions = new Map(order.map((id, index) => [id, index]));
+    sections.sort((a, b) => {
+      const stage = reportFormStage(a);
+      const group = stage - reportFormStage(b);
+      if (group || stage === 1) return group;
+      return (
+        (positions.get(reportSectionId(a)) ?? order.length) -
+        (positions.get(reportSectionId(b)) ?? order.length)
+      );
+    });
+  }
   return sections;
+}
+
+export function reportFormStage(section: ReportFormSection) {
+  const id = reportSectionId(section);
+  return id === 'conclusion' || id === 'signatures' ? 1 : 0;
 }
 
 export function hasReportForm(code: string, customFields?: Record<string, unknown>) {

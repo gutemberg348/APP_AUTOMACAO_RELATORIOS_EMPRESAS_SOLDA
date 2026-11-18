@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import {
   drawingId,
   newCustomReportPage,
@@ -51,6 +51,7 @@ export function CustomReportPagesEditor({
   onPickingChange,
   correctionRequest,
   buttonVisible = true,
+  buttonStyle,
   sections,
 }: {
   value: CustomReportPage[];
@@ -66,6 +67,7 @@ export function CustomReportPagesEditor({
   onPickingChange(busy: boolean): void;
   correctionRequest?: number;
   buttonVisible?: boolean;
+  buttonStyle?: StyleProp<ViewStyle>;
   sections: (ReportSection & { content?: string })[];
 }) {
   const { styles } = useTheme();
@@ -116,10 +118,11 @@ export function CustomReportPagesEditor({
     <>
       {buttonVisible && (
         <Button
-          title={`Adicionar página personalizada${value.length ? ' · ' + value.length : ''}`}
+          title="Páginas extras"
           icon="plus"
           secondary
           small
+          style={buttonStyle}
           disabled={!editable && !value.length}
           onPress={() => {
             setOpen(true);

@@ -10,7 +10,10 @@ import {
   withoutReportLayout,
   buildReportDefaults,
 } from '@weldcosta/shared';
-import { reportFormSections } from '../../../app/features/reports/report-form-sections';
+import {
+  reportFormSections,
+  reportFormStage,
+} from '../../../app/features/reports/report-form-sections';
 import { recentReportDefaults } from '../../../app/features/reports/report-autofill';
 import { renderWithCustomPages } from '../../src/modules/pdf/templates/reports/custom-pages';
 import { reportForPdf } from '../../src/modules/pdf/pdf-snapshot';
@@ -21,6 +24,30 @@ import { render as me } from '../../src/modules/pdf/templates/reports/thickness'
 import { render as rdo } from '../../src/modules/pdf/templates/reports/rdo';
 import type { PdfReport } from '../../src/modules/pdf/templates/reports/layout';
 const renderers = { EVS: evs, EVD: evs, LP: lp, TH: th, ME: me, RDO: rdo };
+
+it('applies a saved order to inspection only and appends steps missing from an older order', () => {
+  const sectionOrder = ['points', 'drawings', 'signatures', 'conclusion'];
+  const saved = validateSpecificData(
+    'EVS',
+    { sectionOrder, omittedSections: ['technical'] },
+    'draft',
+  );
+  expect(validateSpecificData('EVS', saved, 'submission')).toEqual(saved);
+  const sections = reportFormSections('EVS', reportSections.EVS!, saved.sectionOrder);
+  expect(sections.filter((section) => reportFormStage(section) === 0).map(reportSectionId)).toEqual(
+    ['points', 'drawings', 'identification', 'technical'],
+  );
+  expect(sections.filter((section) => reportFormStage(section) === 1).map(reportSectionId)).toEqual(
+    ['conclusion', 'signatures'],
+  );
+  expect(withoutReportLayout(saved)).not.toHaveProperty('sectionOrder');
+  expect(reportFormSections('EVS', reportSections.EVS!).map(reportSectionId)[0]).toBe(
+    'identification',
+  );
+  expect(() =>
+    validateSpecificData('EVS', { sectionOrder: ['drawings', 'drawings'] }, 'draft'),
+  ).toThrow();
+});
 
 it.each(reportTypeCodes)(
   'keeps layout local to %s and restores the complete template for new reports',

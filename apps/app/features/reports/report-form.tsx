@@ -85,7 +85,12 @@ import { PickerSheet } from '../../components/picker-sheet';
 import { ReportSaveIssues } from './report-save-issues';
 import { VisualInspectionRecords } from './visual-inspection-records';
 import { LpTechniqueField } from './lp-technique-field';
-import { hasReportForm, reportFormSections, type ReportFormSection } from './report-form-sections';
+import {
+  hasReportForm,
+  reportFormSections,
+  reportFormStage as sectionStage,
+  type ReportFormSection,
+} from './report-form-sections';
 import {
   activeOfflineReports,
   mountedOfflineReports,
@@ -101,6 +106,7 @@ import { newOfflineMutationId, syncLocalReport, syncWaitingReports } from './off
 import { useConnectivity, offlineStorageFailure } from '../../stores/connectivity';
 import { offlineDisk } from '../../services/offline-disk';
 import { ReportSummary } from './report-summary';
+const sectionActionStyle = { flexBasis: 116, flexGrow: 1, minHeight: 48 };
 const resultOptions: SelectOption[] = [
   { value: '', label: 'Não informado', description: 'Definir o resultado depois.', icon: 'clock' },
   {
@@ -270,7 +276,6 @@ function ReportFormContent({
   const [saveIssues, setSaveIssues] = useState<ReportCorrection[]>([]);
   const [failureOpen, setFailureOpen] = useState(false);
   const [issuesOpen, setIssuesOpen] = useState(false);
-  const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
   const [correction, setCorrection] = useState<CorrectionRequest>();
   const fieldViews = useRef<Record<string, ViewInstance | null>>({});
   const reveal = usePageScroll();
@@ -327,20 +332,26 @@ function ReportFormContent({
     },
   });
   const removedSections = useWatch({ control, name: 'specificData.omittedSections' });
+  const sectionOrder = useWatch({ control, name: 'specificData.sectionOrder' });
   type Section = ReportFormSection;
-  const allSections = reportFormSections(type.code, baseSections);
+  const allSections = reportFormSections(type.code, baseSections, sectionOrder);
+  const hasCustomOrder =
+    Array.isArray(sectionOrder) &&
+    allSections.some(
+      (section) => sectionStage(section) === 0 && sectionOrder.includes(reportSectionId(section)),
+    );
   const sections = allSections.filter(
     (s) => !Array.isArray(removedSections) || !removedSections.includes(reportSectionId(s)),
   );
   const stages = [{ title: 'Inspeção' }, { title: 'Concluir' }];
-  const sectionStage = (section: Section) =>
-    section.content === 'signatures' || ['Laudo', 'Observação'].includes(section.title) ? 1 : 0;
   const defaultSection =
-    sections.find(
-      (section) =>
-        sectionStage(section) === step &&
-        (section.content === 'points' || ['Laudo', 'Observação'].includes(section.title)),
-    ) ?? sections.find((section) => sectionStage(section) === step);
+    (step === 0 && hasCustomOrder
+      ? undefined
+      : sections.find(
+          (section) =>
+            sectionStage(section) === step &&
+            (section.content === 'points' || ['Laudo', 'Observação'].includes(section.title)),
+        )) ?? sections.find((section) => sectionStage(section) === step);
   const isSectionOpen = (section: Section) =>
     !identityOpen &&
     section.title === (openSectionTitle === undefined ? defaultSection?.title : openSectionTitle);
@@ -350,13 +361,14 @@ function ReportFormContent({
     setOpenSectionTitle(undefined);
     setStep(next);
   };
-  const openSection = (index: number) => {
-    const section = sections[index];
+  const openSection = (section: Section | undefined) => {
     if (!section) return;
+    Keyboard.dismiss();
     errorSection.current = section.title;
     setStep(sectionStage(section));
     setIdentityOpen(false);
     setOpenSectionTitle(section.title);
+    setSectionNavigation((value) => value + 1);
   };
   const orderedSections = [
     ...sections.filter((s) => sectionStage(s) === 0),
@@ -806,7 +818,7 @@ function ReportFormContent({
           message: cause.message,
           guidance:
             (cause.location.customPage
-              ? 'Abra Páginas personalizadas no topo, edite a página indicada e confira sua foto. O arquivo continua no telefone; tente novamente após corrigir.'
+              ? 'Abra Páginas extras no topo, edite a página indicada e confira sua foto. O arquivo continua no telefone; tente novamente após corrigir.'
               : ['TH', 'ME'].includes(type.code) || cause.location.testPhotos
                 ? 'Abra Fotos do ensaio e confira a foto indicada. Ela continua no telefone. Corrija o arquivo ou retire somente esta foto e salve novamente.'
                 : cause.code && reportBusinessCorrection(cause.code, cause.message)?.guidance) ||
@@ -1270,91 +1282,70 @@ function ReportFormContent({
           ))}
         </View>
       </Card>
-      <View style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
-        <Controller
-          control={control}
-          name="specificData.omittedSections"
-          render={({ field }) => (
-            <ReportSectionsManager
-              sections={allSections}
-              value={(Array.isArray(field.value) ? field.value : []) as ReportSectionId[]}
-              editable={canEdit('specificData.omittedSections')}
-              onChange={(removed) => {
-                field.onChange(removed);
-                setOpenSectionTitle(undefined);
-                setIdentityOpen(false);
-                setStep(0);
-              }}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="specificData.customPages"
-          render={({ field }) => (
-            <CustomReportPagesEditor
-              sections={sections}
-              buttonVisible={step === 0}
-              value={(Array.isArray(field.value) ? field.value : []) as CustomReportPage[]}
-              onChange={(pages) => field.onChange(pages)}
-              editable={canEdit('specificData.customPages')}
-              canUpload={user.permissions.includes('media.upload')}
-              canDraw={user.permissions.includes('drawing.edit')}
-              canRemove={user.permissions.includes('media.delete')}
-              reportId={report?.id}
-              projectId={projectId}
-              media={report?.media ?? []}
-              draftKey={photoDraftKey}
-              onPickingChange={setPickingPhoto}
-              correctionRequest={
-                correction?.path[1] === 'customPages' ? correction.request : undefined
-              }
-            />
-          )}
-        />
-        {sections.some((section) => section.content === 'points') && (
-          <Button
-            title="Pontos e fotos"
-            icon="pin"
-            small
-            secondary
+      <Card style={{ padding: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <ReportSectionsManager
+            sections={allSections}
+            removed={(Array.isArray(removedSections) ? removedSections : []) as ReportSectionId[]}
+            hasCustomOrder={hasCustomOrder}
+            canRemove={canEditPath('specificData.omittedSections')}
+            canReorder={canEditPath('specificData.sectionOrder')}
             disabled={editingBusy}
-            onPress={() => {
-              Keyboard.dismiss();
-              openSection(sections.findIndex((section) => section.content === 'points'));
-              setSectionNavigation((value) => value + 1);
+            buttonStyle={sectionActionStyle}
+            onNavigate={openSection}
+            onOrderChange={(order) =>
+              setValue('specificData.sectionOrder', order, { shouldDirty: true })
+            }
+            onRemovedChange={(removed) => {
+              setValue('specificData.omittedSections', removed, { shouldDirty: true });
+              if (
+                allSections.some(
+                  (section) =>
+                    section.title === openSectionTitle &&
+                    removed.includes(reportSectionId(section)),
+                )
+              )
+                setOpenSectionTitle(undefined);
             }}
           />
-        )}
-        <Button
-          title="Todas as seções"
-          icon="layers"
-          small
-          secondary
-          disabled={editingBusy}
-          onPress={() => setSectionPickerOpen(true)}
-        />
-      </View>
-      <PickerSheet
-        visible={sectionPickerOpen}
-        title="Seções do relatório"
-        subtitle={type.name + ' · ' + type.code}
-        icon="report"
-        onClose={() => setSectionPickerOpen(false)}
-      >
-        {orderedSections.map((section, index) => (
-          <Button
-            key={section.title}
-            title={`${index + 1}. ${section.content === 'points' ? section.title + ' e fotos' : section.title}`}
-            secondary
-            onPress={() => {
-              setSectionPickerOpen(false);
-              openSection(sections.indexOf(section));
-              setSectionNavigation((value) => value + 1);
-            }}
+          <Controller
+            control={control}
+            name="specificData.customPages"
+            render={({ field }) => (
+              <CustomReportPagesEditor
+                sections={sections}
+                buttonVisible={step === 0}
+                buttonStyle={sectionActionStyle}
+                value={(Array.isArray(field.value) ? field.value : []) as CustomReportPage[]}
+                onChange={(pages) => field.onChange(pages)}
+                editable={canEdit('specificData.customPages')}
+                canUpload={user.permissions.includes('media.upload')}
+                canDraw={user.permissions.includes('drawing.edit')}
+                canRemove={user.permissions.includes('media.delete')}
+                reportId={report?.id}
+                projectId={projectId}
+                media={report?.media ?? []}
+                draftKey={photoDraftKey}
+                onPickingChange={setPickingPhoto}
+                correctionRequest={
+                  correction?.path[1] === 'customPages' ? correction.request : undefined
+                }
+              />
+            )}
           />
-        ))}
-      </PickerSheet>
+          {sections.some((section) => section.content === 'points') && (
+            <Button
+              title="Pontos e fotos"
+              icon="pin"
+              small
+              secondary
+              style={sectionActionStyle}
+              disabled={editingBusy}
+              onPress={() => openSection(sections.find((section) => section.content === 'points'))}
+            />
+          )}
+        </View>
+      </Card>
       <Notice error={error} guidance={formErrorGuidance(error)} />
       <ReportSaveIssues
         issues={saveIssues}

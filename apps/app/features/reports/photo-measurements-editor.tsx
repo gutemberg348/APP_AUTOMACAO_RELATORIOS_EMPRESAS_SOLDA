@@ -13,7 +13,6 @@ import {
   photoAnnotationsSchema,
   photoAnnotationsSvg,
   nextPhotoMeasurementNumber,
-  measurementPhotoHeading,
   type PhotoAnnotations,
   type PhotoMeasurement,
 } from '@weldcosta/shared';
@@ -68,7 +67,12 @@ export function PhotoMeasurementsEditor({
   const { styles, tokens: t } = useTheme();
   const window = useWindowDimensions();
   const [items, setItems] = useState<PhotoMeasurement[]>(value.measurements ?? []);
-  const [details, setDetails] = useState(value.measurementDetails ?? {});
+  const [details, setDetails] = useState(() => ({
+    ...value.measurementDetails,
+    headerMode:
+      value.measurementDetails?.headerMode ??
+      (value.measurementDetails?.side?.trim() ? 'side' : 'points'),
+  }));
   const [nextNumber, setNextNumber] = useState(
     String(Math.max(startNumber, nextPhotoMeasurementNumber([value]))),
   );
@@ -130,13 +134,15 @@ export function PhotoMeasurementsEditor({
       title="Foto e pontos de medição"
       icon="pin"
       maxWidth={680}
-      subtitle="Toque na foto para numerar. Preencha a espessura de cada ponto abaixo. Sem valor, não há linha no PDF."
+      subtitle={
+        editable ? 'Toque na foto para marcar pontos e preencha as medições abaixo.' : undefined
+      }
       onClose={onClose}
       footer={
         <View style={{ gap: 8 }}>
           <Notice error={error ? new Error(error) : undefined} />
           <Button
-            title={editable ? 'Salvar pontos da foto' : 'Fechar prévia'}
+            title={editable ? 'Salvar dados da foto' : 'Fechar prévia'}
             icon="check"
             onPress={() => (editable ? validate(onSave) : onClose())}
           />
@@ -147,7 +153,8 @@ export function PhotoMeasurementsEditor({
         <SelectField
           label="Identificação acima da foto no PDF"
           disabled={!editable}
-          value={details.headerMode ?? (details.side ? 'side' : 'points')}
+          clearable={false}
+          value={details.headerMode}
           options={[
             { value: 'side', label: 'Lado' },
             { value: 'points', label: 'Pontos' },
@@ -156,71 +163,51 @@ export function PhotoMeasurementsEditor({
             setDetails((old) => ({ ...old, headerMode: v === 'side' ? 'side' : 'points' }))
           }
         />
-        <Field
-          label="Lado / parte do equipamento"
-          value={details.side ?? ''}
-          editable={editable}
-          maxLength={500}
-          placeholder="Ex.: lateral direita"
-          onChangeText={(side) => setDetails((old) => ({ ...old, side }))}
-        />
-        <Field
-          label="Pontos identificados nesta foto"
-          value={details.pointNumbers ?? ''}
-          editable={editable}
-          maxLength={500}
-          placeholder="Ex.: 01, 02, 03 ou deixe vazio para usar as marcações"
-          onChangeText={(pointNumbers) => setDetails((old) => ({ ...old, pointNumbers }))}
-        />
-        <Text style={styles.muted}>
-          Acima da foto:{' '}
-          {measurementPhotoHeading({ measurementDetails: details, measurements: items }).label}
-          {' — '}
-          {measurementPhotoHeading({ measurementDetails: details, measurements: items }).value ||
-            'não informado'}
-          {'. Se a opção escolhida estiver vazia, usamos a outra informação preenchida.'}
-        </Text>
-        <Field
-          label="Descontinuidade"
-          value={details.discontinuity ?? ''}
-          editable={editable}
-          maxLength={500}
-          placeholder="Ex.: -"
-          onChangeText={(discontinuity) => setDetails((old) => ({ ...old, discontinuity }))}
-        />
-        <SelectField
-          label="Aceitável"
-          disabled={!editable}
-          value={details.acceptable == null ? '' : details.acceptable ? 'yes' : 'no'}
-          options={[
-            { value: 'yes', label: 'Sim' },
-            { value: 'no', label: 'Não' },
-          ]}
-          onChange={(v) =>
-            setDetails((old) => ({ ...old, acceptable: v === '' ? null : v === 'yes' }))
-          }
-        />
-        <Field
-          label="Espessura de projeto"
-          value={details.projectThickness ?? ''}
-          editable={editable}
-          maxLength={500}
-          placeholder="Ex.: 6 mm"
-          onChangeText={(projectThickness) => setDetails((old) => ({ ...old, projectThickness }))}
-        />
-        <Text style={styles.label}>Toque na foto para colocar os círculos numerados</Text>
-        <Field
-          label="Número do próximo ponto"
-          value={nextNumber}
-          editable={editable}
-          keyboardType="number-pad"
-          maxLength={4}
-          onChangeText={setNextNumber}
-        />
-        <Text style={styles.muted}>
-          A numeração continua entre as fotos. Você pode alterar o próximo número ou editar cada
-          ponto abaixo.
-        </Text>
+        {details.headerMode === 'side' ? (
+          <Field
+            label="Lado / parte do equipamento"
+            value={details.side ?? ''}
+            editable={editable}
+            maxLength={500}
+            placeholder="Ex.: lateral direita"
+            onChangeText={(side) => setDetails((old) => ({ ...old, side }))}
+          />
+        ) : (
+          <>
+            <Field
+              label="Pontos identificados nesta foto"
+              value={details.pointNumbers ?? ''}
+              editable={editable}
+              maxLength={500}
+              placeholder={
+                items.length ? items.map((item) => item.number).join(', ') : 'Ex.: 01, 02, 03'
+              }
+              onChangeText={(pointNumbers) => setDetails((old) => ({ ...old, pointNumbers }))}
+            />
+            <SelectField
+              label="Aceitável"
+              disabled={!editable}
+              value={details.acceptable == null ? '' : details.acceptable ? 'yes' : 'no'}
+              options={[
+                { value: 'yes', label: 'Sim' },
+                { value: 'no', label: 'Não' },
+              ]}
+              onChange={(v) =>
+                setDetails((old) => ({ ...old, acceptable: v === '' ? null : v === 'yes' }))
+              }
+            />
+            <Field
+              label="Espessura de projeto"
+              value={details.projectThickness ?? ''}
+              editable={editable}
+              maxLength={500}
+              placeholder="Ex.: 6 mm"
+              onChangeText={(projectThickness) =>
+                setDetails((old) => ({ ...old, projectThickness }))
+              }
+            />
+          </>
+        )}
         <View ref={photoRef} collapsable={false}>
           <Pressable
             ref={touchRef}
@@ -298,6 +285,15 @@ export function PhotoMeasurementsEditor({
             secondary
             small
             onPress={() => setMoving(undefined)}
+          />
+        )}
+        {editable && (
+          <Field
+            label="Número do próximo ponto"
+            value={nextNumber}
+            keyboardType="number-pad"
+            maxLength={4}
+            onChangeText={setNextNumber}
           />
         )}
         <Button

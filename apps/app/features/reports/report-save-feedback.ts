@@ -113,7 +113,7 @@ export function reportCorrections(
     const message = date ? 'Informe uma data válida em DD/MM/AAAA.' : issue.message;
     const guidance =
       path[0] === 'specificData' && path[1] === 'customPages'
-        ? 'Toque em Adicionar página personalizada no topo do relatório, abra a página indicada e revise este campo. Depois conclua a página e salve o relatório.'
+        ? 'Abra Páginas extras no topo do relatório e revise o campo na página indicada. Depois conclua a página e salve o relatório.'
         : date
           ? 'Digite dia, mês e ano, por exemplo 29/10/2026. Confira se a data existe.'
           : key === 'number'

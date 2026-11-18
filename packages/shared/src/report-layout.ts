@@ -23,6 +23,10 @@ export const omittedReportSectionsSchema = z
   .array(z.enum(reportSectionIds))
   .max(reportSectionIds.length)
   .refine((v) => new Set(v).size === v.length, 'Não repita as etapas removidas.');
+export const reportSectionOrderSchema = z
+  .array(z.enum(reportSectionIds))
+  .max(reportSectionIds.length)
+  .refine((v) => new Set(v).size === v.length, 'Cada etapa deve aparecer uma vez na ordem.');
 export function reportSectionId(section: ReportSection & { content?: string }): ReportSectionId {
   if (section.content && reportSectionIds.includes(section.content as ReportSectionId))
     return section.content as ReportSectionId;
@@ -71,6 +75,7 @@ export function withoutReportLayout(data: Record<string, unknown>) {
   const result = { ...data };
   delete result.customPages;
   delete result.omittedSections;
+  delete result.sectionOrder;
   return result;
 }
 

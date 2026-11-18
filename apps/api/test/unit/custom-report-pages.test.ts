@@ -67,5 +67,5 @@ it('explains how to correct errors in a custom page', () => {
     [],
   )[0]!;
   expect(issue.label).toContain('Quantidade de fotos');
-  expect(issue.guidance).toContain('Adicionar página personalizada');
+  expect(issue.guidance).toContain('Páginas extras');
 });
