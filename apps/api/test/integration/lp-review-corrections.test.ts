@@ -85,56 +85,97 @@ const fixture = () =>
     ],
   }) as unknown as PdfReport;
 
-it('spreads TH identification across the sheet and paginates long values without overflow', async () => {
-  const report = fixture();
-  report.reportType.code = 'TH';
-  report.title = 'COLETOR DE VAPOR';
-  report.specificData = {
-    owner: 'OCS',
-    work: 'OCS',
-    project: '071016',
-    referenceDrawing: 'XXXXXXXX',
-    materialStandard: 'ASTM',
-    procedureRevision: 'REV-00',
-    artNumber: '123456789',
-    referenceStandard: 'ASME',
-  };
-  const page = await browser.newPage();
-  try {
-    await page.setViewport({ width: 850, height: 1200 });
-    for (const long of [false, true]) {
-      if (long)
-        report.specificData = {
-          ...(report.specificData as object),
-          referenceStandard: 'NORMA EXTENSA '.repeat(350) + 'FIM DA NORMA',
-        };
-      await page.setContent(evsDocumentHtml(hydrostatic(report, new Map()), false));
-      await page.evaluate(paginateEvs);
-      const sheets = await page.$$eval('.th-identification .evs-flow', (nodes) =>
-        nodes.map((flow) => ({
-          gap: parseFloat(getComputedStyle(flow).gap),
-          bottom: flow.getBoundingClientRect().bottom,
-          last: flow.lastElementChild!.getBoundingClientRect().bottom,
-        })),
-      );
-      expect(sheets.every((s) => s.last <= s.bottom + 1)).toBe(true);
-      if (long) {
-        expect(sheets.length).toBeGreaterThan(1);
-        expect(await page.$eval('body', (e) => e.textContent)).toContain('FIM DA NORMA');
-      } else {
-        expect(sheets).toHaveLength(1);
-        expect(sheets[0]!.gap).toBeGreaterThan(15);
-        const folder = fileURLToPath(new URL('../../../../artifacts/lp-review/', import.meta.url));
-        await mkdir(folder, { recursive: true });
-        await (await page.$('.th-identification'))!.screenshot({
-          path: folder + 'updated-th-identification.png',
-        });
+it.each([
+  [
+    'TH',
+    hydrostatic,
+    'COLETOR DE VAPOR',
+    {
+      owner: 'OCS',
+      work: 'OCS',
+      project: '071016',
+      referenceDrawing: 'XXXXXXXX',
+      materialStandard: 'ASTM',
+      procedureRevision: 'REV-00',
+      artNumber: '123456789',
+      referenceStandard: 'ASME',
+    },
+  ],
+  [
+    'ME',
+    thickness,
+    'MEDIÇÃO DE ESPESSURA',
+    {
+      owner: 'HEINEKEN BRASIL',
+      work: 'ARARAQUARA - SP',
+      project: '2134-26',
+      drawing: 'XXXXXXXXXX',
+      inspectionType: 'MEDIÇÃO DE ESPESSURA',
+      projectThickness: '7 MM',
+      baseMetal: 'AÇO INOX 304L',
+      referenceStandard: 'ASME X',
+    },
+  ],
+] as const)(
+  'spreads %s identification across the sheet and paginates long values without overflow',
+  async (code, renderer, title, data) => {
+    const report = fixture();
+    report.reportType.code = code;
+    report.title = title;
+    report.specificData = { ...data };
+    const page = await browser.newPage();
+    try {
+      await page.setViewport({ width: 850, height: 1200 });
+      for (const long of [false, true]) {
+        if (long)
+          report.specificData = {
+            ...(report.specificData as object),
+            referenceStandard: 'NORMA EXTENSA '.repeat(350) + 'FIM DA NORMA',
+          };
+        await page.setContent(evsDocumentHtml(renderer(report, new Map()), false));
+        await page.evaluate(paginateEvs);
+        const sheets = await page.$$eval('.evs-identification .evs-flow', (nodes) =>
+          nodes.map((flow) => {
+            const frame = flow.getBoundingClientRect();
+            const last = flow.lastElementChild!.getBoundingClientRect().bottom;
+            return {
+              gap: parseFloat(getComputedStyle(flow).rowGap),
+              bottom: frame.bottom,
+              last,
+              occupied: (last - frame.top) / frame.height,
+              fieldSize: parseFloat(
+                getComputedStyle(flow.querySelector('.evs-data-line')!).fontSize,
+              ),
+            };
+          }),
+        );
+        expect(sheets.every((s) => s.last <= s.bottom + 1)).toBe(true);
+        expect(sheets.every((s) => s.fieldSize > 22)).toBe(true);
+        if (long) {
+          expect(sheets.length).toBeGreaterThan(1);
+          expect(await page.$eval('body', (e) => e.textContent)).toContain('FIM DA NORMA');
+          expect(sheets.at(-1)!.gap).toBeLessThan(sheets[0]!.gap + 0.1);
+        } else {
+          expect(sheets).toHaveLength(1);
+          expect(sheets[0]!.occupied).toBeGreaterThan(0.8);
+          expect(sheets[0]!.occupied).toBeLessThan(0.95);
+          const folder = fileURLToPath(
+            new URL('../../../../artifacts/lp-review/', import.meta.url),
+          );
+          await mkdir(folder, { recursive: true });
+          await page.pdf({
+            path: folder + code.toLowerCase() + '-identification.pdf',
+            preferCSSPageSize: true,
+            printBackground: true,
+            pageRanges: '2',
+          });
+        }
       }
+    } finally {
+      await page.close();
     }
-  } finally {
-    await page.close();
-  }
-});
+  },
+);
 
 it('uses the LP inspected line as title, falls back for old blank fields, and leaves other types alone', () => {
   const report = fixture();

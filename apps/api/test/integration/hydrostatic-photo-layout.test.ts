@@ -31,7 +31,7 @@ it.each([0, 1, 3, 6, 7, 13])(
       id: 'photo-' + i,
       sectionKey: i % 2 ? 'test-photos' : 'photos',
       reportPointId: i % 2 ? null : 'old-point',
-      caption: '',
+      caption: i === 1 ? 'Vista do ensaio' : '',
     }));
     const report = {
       number: 'TH-005',
@@ -98,12 +98,15 @@ it.each([0, 1, 3, 6, 7, 13])(
       expect(await page.$$eval('.evs-sheet', (sheets) => sheets.length)).toBe(
         4 + Math.ceil(count / 6),
       );
+      const firstPhoto = result[0]?.images[0];
       for (const sheet of result) {
         expect(Math.abs(sheet.top)).toBeLessThan(1);
         sheet.rows.forEach((row) => expect(row.bottom).toBeLessThanOrEqual(1));
         sheet.images.forEach((img) => {
           expect(img.width).toBeGreaterThan(250);
           expect(img.height).toBeGreaterThan(200);
+          expect(Math.abs(img.width - firstPhoto!.width)).toBeLessThanOrEqual(1);
+          expect(img.height).toBeCloseTo(firstPhoto!.height, 1);
           expect(img.fit).toBe('fill');
         });
         if (sheet.count <= 4) expect(sheet.bottomSpace).toBeGreaterThan(200);

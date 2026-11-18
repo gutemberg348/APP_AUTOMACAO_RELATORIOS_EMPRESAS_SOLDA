@@ -133,6 +133,8 @@ it.each([
       photos.forEach((photo, i) => {
         expect(photo.width).toBeGreaterThan(300);
         expect(photo.height).toBeGreaterThan(180);
+        expect(Math.abs(photo.width - photos[0]!.width)).toBeLessThanOrEqual(1);
+        expect(photo.height).toBe(photos[0]!.height);
         expect(photo.fit).toBe('fill');
         expect(photo.overflow).toBeLessThanOrEqual(1);
         if (!overview || i >= 2)

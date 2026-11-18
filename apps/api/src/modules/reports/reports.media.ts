@@ -14,12 +14,21 @@ import { LocalStorageProvider } from '../../services/storage/local-storage-provi
 import { assertEditable } from './reports.policy';
 import { reportScope, projectScope } from '../../middlewares/access-scope';
 import { assertPhotoPoint, lockPhotoHash } from './reports.media-duplicates';
-import { photoAnnotationsSchema } from '@weldcosta/shared';
+import { customReportPages, photoAnnotationsSchema } from '@weldcosta/shared';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 7, fieldSize: 4 * 1024 * 1024 },
 });
 const storage = new LocalStorageProvider(env.STORAGE_PATH);
+function isCustomGalleryPhoto(specificData: unknown, uploadId?: string | null) {
+  const [prefix, pageId] = uploadId?.split(':', 2) ?? [];
+  return (
+    prefix === 'custom-page' &&
+    customReportPages(specificData).some(
+      (page) => page.id === pageId && (page.kind === 'photos' || page.kind === 'points'),
+    )
+  );
+}
 const metadata = z
   .object({
     version: z.coerce.number().int().positive(),
@@ -27,6 +36,7 @@ const metadata = z
     sectionKey: z.enum(['photos', 'drawing', 'test-photos']).default('photos'),
     reportPointId: z.uuid().optional(),
     clientUploadId: z.string().min(1).max(100).optional(),
+    allowDuplicate: z.enum(['true', 'false']).optional(),
     annotations: z
       .string()
       .transform((value, ctx) => {
@@ -94,6 +104,7 @@ reportMediaCheckRoutes.post(
         reportId: z.uuid().optional(),
         reportPointId: z.uuid().optional(),
         projectId: z.uuid().optional(),
+        warnOnSamePoint: z.literal('true').optional(),
       })
       .strict()
       .parse(req.body);
@@ -125,7 +136,11 @@ reportMediaCheckRoutes.post(
       projectId = project.id;
     }
     const { sha256 } = await prepareImage(req.file);
-    await assertPhotoPoint(prisma, sha256, { ...target, projectId });
+    await assertPhotoPoint(prisma, sha256, {
+      projectId,
+      reportId: target.reportId,
+      reportPointId: target.warnOnSamePoint ? undefined : target.reportPointId,
+    });
     send(res, { sha256, projectId });
   },
 );
@@ -151,7 +166,8 @@ reportMediaRoutes.post(
         assertEditable(report.status, req.user!);
         if (
           input.sectionKey === 'test-photos' &&
-          !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '')
+          !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '') &&
+          !isCustomGalleryPhoto(report.specificData, input.clientUploadId)
         )
           throw new AppError(
             400,
@@ -215,11 +231,12 @@ reportMediaRoutes.post(
             return { id: previous.id, reused: true };
           }
         }
-        await assertPhotoPoint(tx, sha256, {
-          projectId: report.projectId,
-          reportId,
-          reportPointId: input.reportPointId,
-        });
+        if (input.allowDuplicate !== 'true')
+          await assertPhotoPoint(tx, sha256, {
+            projectId: report.projectId,
+            reportId,
+            reportPointId: input.allowDuplicate === 'false' ? undefined : input.reportPointId,
+          });
         const changed = await tx.report.updateMany({
           where: { id: reportId, version: input.version, status: report.status },
           data: { version: { increment: 1 } },
@@ -251,7 +268,10 @@ reportMediaRoutes.post(
             action: 'UPLOAD_MEDIA',
             entity: 'Report',
             entityId: reportId,
-            metadata: { mediaId: media.id },
+            metadata: {
+              mediaId: media.id,
+              ...(input.allowDuplicate === 'true' ? { duplicateConfirmed: true } : {}),
+            },
           },
         });
         return { id: media.id, reused: false };
@@ -327,17 +347,18 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
     });
     if (!report) throw new AppError(404, 'NOT_FOUND', 'Relatório não encontrado.');
     assertEditable(report.status, req.user!);
+    const item = await tx.reportMedia.findFirst({ where: { id: mediaId, reportId } });
+    if (!item) throw new AppError(404, 'NOT_FOUND', 'Imagem não encontrada.');
     if (
       input.sectionKey === 'test-photos' &&
-      !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '')
+      !['LP', 'TH', 'ME'].includes(report.reportType?.code ?? '') &&
+      !isCustomGalleryPhoto(report.specificData, item.clientUploadId)
     )
       throw new AppError(
         400,
         'INVALID_MEDIA_SECTION',
         'Fotos do ensaio está disponível nos relatórios de Líquido Penetrante, Teste Hidrostático e Medição de Espessura.',
       );
-    const item = await tx.reportMedia.findFirst({ where: { id: mediaId, reportId } });
-    if (!item) throw new AppError(404, 'NOT_FOUND', 'Imagem não encontrada.');
     if (
       input.reportPointId &&
       !(await tx.reportPoint.findFirst({ where: { id: input.reportPointId, reportId } }))
@@ -346,13 +367,18 @@ reportMediaRoutes.patch('/:mediaId', requirePermission('media.upload'), async (r
     const targetPointId = ['drawing', 'test-photos'].includes(input.sectionKey)
       ? null
       : input.reportPointId;
-    await lockPhotoHash(tx, item.sha256);
-    await assertPhotoPoint(
-      tx,
-      item.sha256,
-      { projectId: report.projectId, reportId, reportPointId: targetPointId },
-      item.id,
-    );
+    if (
+      targetPointId !== item.reportPointId ||
+      input.sectionKey !== (item.sectionKey ?? 'photos')
+    ) {
+      await lockPhotoHash(tx, item.sha256);
+      await assertPhotoPoint(
+        tx,
+        item.sha256,
+        { projectId: report.projectId, reportId, reportPointId: targetPointId },
+        item.id,
+      );
+    }
     const changed = await tx.report.updateMany({
       where: { id: reportId, version: input.version, status: report.status },
       data: { version: { increment: 1 } },

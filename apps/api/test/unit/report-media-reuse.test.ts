@@ -316,3 +316,77 @@ it('checks reassignment too, while permitting a caption change on the same point
   expect((await patch(null)).status).toBe(409);
   expect(prisma.reportMedia.update).toHaveBeenCalledOnce();
 });
+
+it('warns for a repeated selection even on the same point and saves only when explicitly allowed', async () => {
+  existing = { id: mediaId, reportId, reportPointId: pointId };
+  const warning = await request(app)
+    .post('/reports/media/check')
+    .set(auth)
+    .field('reportId', reportId)
+    .field('reportPointId', pointId)
+    .field('warnOnSamePoint', 'true')
+    .attach('file', image, 'photo.png');
+  expect(warning.status).toBe(409);
+  expect(warning.body.error).toMatchObject({
+    code: 'DUPLICATE_MEDIA',
+    details: { sha256: createHash('sha256').update(image).digest('hex') },
+  });
+  const sendPhoto = (allowDuplicate: 'false' | 'true', point: string) =>
+    request(app)
+      .post(`/reports/${reportId}/media`)
+      .set(auth)
+      .field('version', '1')
+      .field('reportPointId', point)
+      .field('allowDuplicate', allowDuplicate)
+      .field('caption', '')
+      .field('sectionKey', 'photos')
+      .field('annotations', '{"elements":[]}')
+      .field('clientUploadId', 'new-photo-slot')
+      .attach('file', image, 'photo.png');
+  const find = vi.mocked(prisma.reportMedia.findFirst).getMockImplementation()!;
+  vi.mocked(prisma.reportMedia.findFirst).mockImplementation((args) =>
+    args?.where?.clientUploadId ? (Promise.resolve(null) as never) : find(args),
+  );
+  expect((await sendPhoto('false', pointId)).status).toBe(409);
+  expect(prisma.reportMedia.create).not.toHaveBeenCalled();
+  expect((await sendPhoto('true', otherPoint)).status).toBe(201);
+  expect(prisma.reportMedia.create).toHaveBeenCalledOnce();
+  expect((await upload(otherPoint)).status).toBe(409);
+  existing = { ...existing, reportPointId: otherPoint };
+  vi.mocked(prisma.reportMedia.findFirst).mockClear();
+  const edited = await request(app)
+    .patch(`/reports/${reportId}/media/${mediaId}`)
+    .set(auth)
+    .send({ version: 1, reportPointId: otherPoint, sectionKey: 'photos', caption: 'Nova legenda' });
+  expect(edited.status).toBe(200);
+  expect(prisma.reportMedia.findFirst).toHaveBeenCalledOnce();
+});
+
+it('allows a confirmed photo in a saved custom gallery of an EVS report', async () => {
+  vi.mocked(prisma.report.findFirst).mockResolvedValue({
+    id: reportId,
+    status: 'DRAFT',
+    version: 1,
+    projectId,
+    reportType: { code: 'EVS' },
+    specificData: { customPages: [{ id: 'gallery', kind: 'photos' }] },
+  } as never);
+  const sendPhoto = (clientUploadId: string, allowDuplicate: 'true' | 'false') =>
+    request(app)
+      .post(`/reports/${reportId}/media`)
+      .set(auth)
+      .field('version', '1')
+      .field('sectionKey', 'test-photos')
+      .field('clientUploadId', clientUploadId)
+      .field('allowDuplicate', allowDuplicate)
+      .attach('file', image, 'photo.png');
+  const find = vi.mocked(prisma.reportMedia.findFirst).getMockImplementation()!;
+  vi.mocked(prisma.reportMedia.findFirst).mockImplementation(async (args) =>
+    args?.where?.clientUploadId ? null : find(args),
+  );
+  existing = { id: mediaId, reportId, reportPointId: pointId };
+  expect((await sendPhoto('custom-page:missing:photos:1', 'true')).status).toBe(400);
+  expect((await sendPhoto('custom-page:gallery:photos:1', 'false')).status).toBe(409);
+  expect((await sendPhoto('custom-page:gallery:photos:1', 'true')).status).toBe(201);
+  expect(prisma.reportMedia.create).toHaveBeenCalledOnce();
+});

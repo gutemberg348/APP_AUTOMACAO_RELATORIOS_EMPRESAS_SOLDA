@@ -298,24 +298,32 @@ export function PointPhotos({
             </Pressable>
           ))}
       </View>
-      {editable && !additional && !groupedWelds && count === 1 && pending.length === 1 && (
-        <Button
-          title="Usar esta foto também ao lado"
-          small
-          secondary
-          icon="image"
-          onPress={() =>
-            update((current) => {
-              const photos = current.photos.filter((photo) => photo.pointKey === pointId);
-              if (photos.length !== 1 || existing.length) return current;
-              return {
-                ...current,
-                photos: [...current.photos, { ...photos[0]!, id: drawingId() }],
-              };
-            })
-          }
-        />
-      )}
+      {editable &&
+        !additional &&
+        !groupedWelds &&
+        count === 1 &&
+        pending.length === 1 &&
+        !pending[0]?.duplicateNeedsConfirmation && (
+          <Button
+            title="Usar esta foto também ao lado"
+            small
+            secondary
+            icon="image"
+            onPress={() =>
+              update((current) => {
+                const photos = current.photos.filter((photo) => photo.pointKey === pointId);
+                if (photos.length !== 1 || existing.length) return current;
+                return {
+                  ...current,
+                  photos: [
+                    ...current.photos,
+                    { ...photos[0]!, id: drawingId(), allowDuplicate: true },
+                  ],
+                };
+              })
+            }
+          />
+        )}
       {!existing.length && !pending.length && (
         <Text style={styles.muted}>
           {customPageId
@@ -378,16 +386,17 @@ export function PointPhotos({
                 : undefined
         }
         onClose={closeSource}
-        onSelect={async (asset, onProgress) => {
+        onSelect={async (asset, onProgress, confirmDuplicate) => {
           if (asset.size && asset.size > 10 * 1024 * 1024) {
             throw new Error('Use uma imagem de até 10 MB.');
           }
-          const sha256 = await checkReportPhoto(
+          const { sha256, duplicate } = await checkReportPhoto(
             asset,
             draftKey,
-            { pointId, reportId, persistedPointId, projectId },
+            { reportId, persistedPointId, projectId },
             onProgress,
           );
+          if (duplicate && !(await confirmDuplicate())) return false;
           const id = customPageId
             ? customPhotoPrefix(customPageId, customPointKey) + drawingId().slice(-10)
             : drawingId();
@@ -407,6 +416,7 @@ export function PointPhotos({
                 asset: localAsset,
                 caption: '',
                 sha256,
+                allowDuplicate: duplicate,
               },
             ],
           }));

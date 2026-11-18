@@ -255,6 +255,7 @@ export function CustomReportPagesEditor({
                     return true;
                   }}
                   reportId={reportId}
+                  projectId={projectId}
                   media={media}
                   photoDraftKey={draftKey}
                   canUploadImages={canUpload}

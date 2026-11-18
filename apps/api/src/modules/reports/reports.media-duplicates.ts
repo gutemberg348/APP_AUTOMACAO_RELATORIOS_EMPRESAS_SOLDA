@@ -34,7 +34,8 @@ export async function assertPhotoPoint(
     throw new AppError(
       409,
       'DUPLICATE_MEDIA',
-      'Esta foto já está vinculada a outro ponto ou relatório desta obra. Você pode repetir ao lado no mesmo ponto ou usar em outra obra. Para outro ponto desta obra, escolha uma foto diferente.',
+      'Esta foto já foi usada nesta obra. Confirme se deseja usá-la mesmo assim.',
+      { sha256 },
     );
 }
 

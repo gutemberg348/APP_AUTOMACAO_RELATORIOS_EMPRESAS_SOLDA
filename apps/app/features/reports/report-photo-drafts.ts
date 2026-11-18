@@ -16,6 +16,8 @@ export interface ReportPhotoDraft {
   asset: LocalAsset;
   caption: string;
   sha256?: string;
+  allowDuplicate?: boolean;
+  duplicateNeedsConfirmation?: boolean;
 }
 export interface PhotoDrafts {
   projectId?: string;
@@ -210,6 +212,8 @@ export async function saveReportPhotos(
           'PHOTO_POINT_PENDING',
           'Esta foto ficou sem vínculo com um ponto. Abra Pontos e fotos, escolha o ponto em “Fotos aguardando vínculo” e salve novamente.',
         );
+      if (photo.duplicateNeedsConfirmation)
+        throw new ApiError(409, 'DUPLICATE_MEDIA', 'Confirme se deseja usar a foto repetida.');
       const form = new FormData();
       const number = current.points?.find((point) => point.id === photo.pointKey)?.number;
       const detail = (number ? 'Ponto ' + number + ' · ' : '') + photo.asset.name;
@@ -221,6 +225,8 @@ export async function saveReportPhotos(
       if (photo.pointKey) form.append('reportPointId', photo.pointKey);
       form.append('caption', photo.caption);
       if (photo.annotations) form.append('annotations', JSON.stringify(photo.annotations));
+      if (photo.allowDuplicate !== undefined)
+        form.append('allowDuplicate', String(photo.allowDuplicate));
       progress('Enviando foto ' + (completed + 1) + ' de ' + total + '…', detail);
       await api('/reports/' + saved.id + '/media', { method: 'POST', body: form });
       completed++;
@@ -238,6 +244,10 @@ export async function saveReportPhotos(
     const refreshed = await api<Report>('/reports/' + saved.id).catch(() => undefined);
     if (refreshed) current = refreshed;
     store.update(nextKey, (draft) => {
+      const duplicateId =
+        cause instanceof ApiError && cause.code === 'DUPLICATE_MEDIA'
+          ? location.photoId
+          : undefined;
       const pending =
         draft.photos.length ||
         draft.removedIds.length ||
@@ -245,13 +255,22 @@ export async function saveReportPhotos(
       const hasAnnotationEdits = Object.keys(draft.annotationEdits ?? {}).length;
       return {
         ...draft,
+        ...(duplicateId
+          ? {
+              photos: draft.photos.map((photo) =>
+                photo.id === duplicateId ? { ...photo, duplicateNeedsConfirmation: true } : photo,
+              ),
+            }
+          : {}),
         error:
           pending || hasAnnotationEdits
             ? new ReportPhotoSaveError(
-                location.label +
-                  ': Os dados do relatório foram salvos. Há fotos, legendas ou marcações pendentes: ' +
-                  reason +
-                  ' Confira a foto e toque em Salvar para tentar novamente.',
+                duplicateId
+                  ? `Foto repetida: ${location.label}. Abra o relatório para decidir se quer usar a foto mesmo assim.`
+                  : location.label +
+                      ': Os dados do relatório foram salvos. Há fotos, legendas ou marcações pendentes: ' +
+                      reason +
+                      ' Confira a foto e toque em Salvar para tentar novamente.',
                 location,
                 cause instanceof ApiError ? cause.code : undefined,
               )

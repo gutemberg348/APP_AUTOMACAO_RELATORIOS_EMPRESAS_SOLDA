@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image, Platform, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -24,7 +24,8 @@ export function MediaSourcePicker({
   onSelect(
     asset: DocumentPicker.DocumentPickerAsset,
     onProgress: (message: string) => void,
-  ): void | Promise<void>;
+    confirmDuplicate: () => Promise<boolean>,
+  ): void | false | Promise<void | false>;
   includeDocuments?: boolean;
   maxSelections?: number;
   contextLabel?: string;
@@ -36,12 +37,27 @@ export function MediaSourcePicker({
   const [message, setMessage] = useState('Preparando imagem…');
   const [fileName, setFileName] = useState('');
   const [added, setAdded] = useState<{ uri: string; name: string }[]>([]);
+  const [duplicate, setDuplicate] = useState<DocumentPicker.DocumentPickerAsset>();
+  const decision = useRef<(allowed: boolean) => void>(undefined);
+  const visibleRef = useRef(visible);
   useEffect(() => {
+    visibleRef.current = visible;
     if (visible) {
       setAdded([]);
       setError(undefined);
-    }
+    } else setDuplicate(undefined);
+    return () => {
+      visibleRef.current = false;
+      decision.current?.(false);
+      decision.current = undefined;
+    };
   }, [visible]);
+  const resolveDuplicate = (allowed: boolean) => {
+    const resolve = decision.current;
+    decision.current = undefined;
+    setDuplicate(undefined);
+    resolve?.(allowed);
+  };
   const choose = async (source: 'gallery' | 'camera' | 'files') => {
     setError(undefined);
     setBusy(true);
@@ -154,7 +170,19 @@ export function MediaSourcePicker({
           }
           progress('Conferindo arquivo…');
           setFileName(asset.name);
-          await onSelect(asset, progress);
+          if (!visibleRef.current) return;
+          const accepted = await onSelect(
+            asset,
+            progress,
+            () =>
+              new Promise<boolean>((resolve) => {
+                if (!visibleRef.current) return resolve(false);
+                decision.current = resolve;
+                setDuplicate(asset);
+              }),
+          );
+          if (!visibleRef.current) return;
+          if (accepted === false) continue;
           completed++;
           if (!includeDocuments)
             setAdded((previous) => [...previous, { uri: asset.uri, name: asset.name }]);
@@ -177,7 +205,7 @@ export function MediaSourcePicker({
             : '') + failures.join(' '),
         );
       // Keep the camera flow open for the second photo, without another trip through the point.
-      if (source !== 'camera' || limit <= 1 || includeDocuments) onClose();
+      if (completed && (source !== 'camera' || limit <= 1 || includeDocuments)) onClose();
     } catch (cause) {
       setError(cause);
     } finally {
@@ -187,17 +215,23 @@ export function MediaSourcePicker({
   return (
     <PickerSheet
       visible={visible}
-      title={contextLabel ?? 'De onde vem o material?'}
+      title={duplicate ? 'Foto repetida' : (contextLabel ?? 'De onde vem o material?')}
       subtitle={
-        selectionDescription ??
-        (maxSelections > 1
-          ? 'Selecione até ' +
-            maxSelections +
-            ' fotos de uma vez. Elas entram neste ponto na ordem escolhida.'
-          : 'Escolha a origem. Você poderá conferir o arquivo antes de enviar.')
+        duplicate
+          ? 'Esta foto já foi usada nesta obra. Quer usá-la mesmo assim?'
+          : (selectionDescription ??
+            (maxSelections > 1
+              ? 'Selecione até ' +
+                maxSelections +
+                ' fotos de uma vez. Elas entram neste ponto na ordem escolhida.'
+              : 'Escolha a origem. Você poderá conferir o arquivo antes de enviar.'))
       }
       icon="image"
       onClose={() => {
+        if (duplicate) {
+          resolveDuplicate(false);
+          return;
+        }
         if (!busy) {
           setError(undefined);
           onClose();
@@ -232,7 +266,22 @@ export function MediaSourcePicker({
             )}
           </View>
         )}
-        {busy && <TransferProgress message={message} detail={fileName || 'Aguarde um instante.'} />}
+        {busy && !duplicate && (
+          <TransferProgress message={message} detail={fileName || 'Aguarde um instante.'} />
+        )}
+        {duplicate && (
+          <>
+            <Image
+              source={{ uri: duplicate.uri }}
+              accessibilityLabel={'Foto repetida: ' + duplicate.name}
+              resizeMode="contain"
+              style={{ width: '100%', height: 160 }}
+            />
+            <Text style={styles.label}>{duplicate.name}</Text>
+            <Button title="Usar mesmo assim" onPress={() => resolveDuplicate(true)} />
+            <Button title="Não usar esta foto" secondary onPress={() => resolveDuplicate(false)} />
+          </>
+        )}
         {!busy && (
           <>
             <Button

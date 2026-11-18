@@ -40,6 +40,12 @@ export async function prepareCurrentReportPdf(
   for (const [index, photo] of photos.entries()) {
     if (options.signal?.aborted)
       throw new Error('Download cancelado. Seu preenchimento continua no telefone.');
+    if (photo.duplicateNeedsConfirmation) {
+      warnings.push(
+        `Foto “${photo.asset.name}”: aguarda confirmação para uso repetido no relatório.`,
+      );
+      continue;
+    }
     options.onProgress?.(`Preparando foto ${index + 1} de ${photos.length}: ${photo.asset.name}`);
     const input = {
       id: photo.id,

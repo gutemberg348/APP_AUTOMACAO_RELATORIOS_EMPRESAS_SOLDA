@@ -18,10 +18,11 @@ body{margin:0;font:12px Arial,sans-serif;color:#111;text-transform:uppercase}p{m
 .evs-contact{flex-shrink:0;padding:5mm 2mm 4mm;border-top:1.5px solid #111;text-align:center;font:italic 11px Georgia,serif;line-height:1.35;color:#263b70}
 .evs-cover-block{padding:42mm 18mm 26mm;font-size:24px;line-height:1.5;font-weight:bold;overflow-wrap:anywhere}
 .evs-cover-block p{text-align:center;margin-top:10mm}.evs-cover-block+.evs-cover-block{padding-top:30mm}
-.evs-data-title{text-align:center;font-size:28px;margin:0;padding:12mm 8mm 8mm;overflow-wrap:anywhere}
-.evs-data-line{font-size:22px;line-height:1.45;margin:0;padding:0 8mm 6mm;white-space:pre-wrap;overflow-wrap:anywhere}
+.evs-data-title{text-align:center;font-size:30px;line-height:1.2;margin:0;overflow-wrap:anywhere}
+.evs-data-line{font-size:24px;line-height:1.4;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .evs-identification .evs-flow{display:flex;flex-direction:column;justify-content:flex-start;gap:2mm;padding:8mm 0 5mm}
-.evs-identification .evs-flow>*{flex-shrink:0}.evs-identification .evs-data-title{padding:0 8mm 6mm}.evs-identification .evs-data-line{padding-bottom:4mm}
+.evs-identification .evs-flow>*{flex-shrink:0;padding:0 8mm 4mm}
+.evs-identification .evs-data-title{padding-bottom:6mm}
 .evs-drawing{height:239mm;width:100%;display:flex;align-items:center;justify-content:center}
 .evs-drawing-page{height:auto;aspect-ratio:196/239;flex-shrink:0}
 .evs-drawing svg,.evs-drawing img{width:100%;height:100%;object-fit:contain}.evs-drawing-caption{padding:3mm;font-size:12px}

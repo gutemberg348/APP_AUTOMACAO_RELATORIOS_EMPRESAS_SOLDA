@@ -89,13 +89,7 @@ export function identification(report: PdfReport, fields: [string, string][]) {
           .join(''),
       )
       .join('');
-  return sheet(
-    report,
-    titles[report.reportType.code]!,
-    body,
-    true,
-    'evs-identification' + (report.reportType.code === 'TH' ? ' th-identification' : ''),
-  );
+  return sheet(report, titles[report.reportType.code]!, body, true, 'evs-identification');
 }
 export function drawings(report: PdfReport, images: Map<string, string>) {
   if (!reportSectionVisible(report, 'drawings')) return '';

@@ -90,7 +90,7 @@ describe('Report save corrections', () => {
     expect(reportBusinessCorrection('DUPLICATE_MEDIA', 'Repetida')).toMatchObject({
       path: ['points'],
       label: 'Foto repetida nesta obra',
-      guidance: expect.stringContaining('outra obra'),
+      guidance: expect.stringContaining('Usar mesmo assim'),
     });
     const result = reportCorrections(
       [

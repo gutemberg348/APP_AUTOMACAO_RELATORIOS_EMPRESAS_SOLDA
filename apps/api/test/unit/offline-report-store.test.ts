@@ -163,6 +163,7 @@ it.each(reportTypeCodes)(
           pointKey: null,
           sectionKey: 'test-photos',
           caption: 'FOTO EXTRA',
+          allowDuplicate: true,
           asset: { uri: 'cache://extra', name: 'extra.jpg', offlineFileId: 'extra.jpg' },
         },
       ],
@@ -197,6 +198,7 @@ it.each(reportTypeCodes)(
       id: customPhotoPrefix('extra-page') + 'local-photo',
       pointKey: null,
       sectionKey: 'test-photos',
+      allowDuplicate: true,
       asset: { uri: 'restored://extra.jpg' },
     });
   },

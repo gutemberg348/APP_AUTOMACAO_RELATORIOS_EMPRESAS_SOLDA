@@ -121,7 +121,7 @@ describe('Photos selected in the point form', () => {
     });
     expect(reason).toBe('Marcações da foto: Há marcações demais nesta foto.');
   });
-  it('retains the exact point/photo and duplicate reason so Correct can explain the project rule', async () => {
+  it('keeps an offline duplicate for confirmation and uploads it only after consent', async () => {
     useReportPhotoDrafts
       .getState()
       .update('user:new', () => ({ photos: [draft('pending')], removedIds: [] }));
@@ -131,11 +131,29 @@ describe('Photos selected in the point form', () => {
     await saveReportPhotos('user:new', saved, points);
     const remaining = useReportPhotoDrafts.getState().reports['user:report-1']!;
     expect(remaining.photos).toHaveLength(1);
+    expect(remaining.photos[0]).toMatchObject({ id: 'pending', duplicateNeedsConfirmation: true });
     expect(remaining.error).toBeInstanceOf(ReportPhotoSaveError);
     expect(remaining.error).toMatchObject({
       code: 'DUPLICATE_MEDIA',
       location: { pointNumber: 'S-42', label: expect.stringContaining('foto.jpg') },
     });
+    apiMock.mockClear();
+    apiMock.mockResolvedValueOnce(saved);
+    await saveReportPhotos('user:report-1', saved, points);
+    expect(apiMock.mock.calls.map(([path]) => path)).toEqual(['/reports/report-1']);
+    useReportPhotoDrafts.getState().update('user:report-1', (queue) => ({
+      ...queue,
+      photos: queue.photos.map((photo) => ({
+        ...photo,
+        allowDuplicate: true,
+        duplicateNeedsConfirmation: undefined,
+      })),
+    }));
+    apiMock.mockClear();
+    apiMock.mockResolvedValueOnce({ id: 'saved-photo' }).mockResolvedValueOnce(saved);
+    await saveReportPhotos('user:report-1', saved, points);
+    expect((apiMock.mock.calls[0]?.[1]?.body as FormData).get('allowDuplicate')).toBe('true');
+    expect(useReportPhotoDrafts.getState().reports['user:report-1']!.photos).toHaveLength(0);
   });
   it('includes pending paint in the same original photo upload', async () => {
     const annotations = {

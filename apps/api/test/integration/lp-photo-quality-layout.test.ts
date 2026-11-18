@@ -24,7 +24,7 @@ beforeAll(async () => {
 afterAll(async () => browser?.close());
 
 it.each([1, 2, 3, 4])(
-  'LP enlarges and stacks %i test photos at source resolution',
+  'LP stacks %i test photos in equal slots at source resolution',
   async (count) => {
     const media = Array.from({ length: count }, (_, i) => ({
       id: String(i),
@@ -77,7 +77,8 @@ it.each([1, 2, 3, 4])(
               top: rect.top,
               bottom: rect.bottom,
               height: rect.height,
-              areaWidth: bounds.width,
+              width: rect.width,
+              areaHeight: bounds.height,
               visibleWidth: Math.min(rect.width, rect.height * ratio),
               visibleHeight: Math.min(rect.height, rect.width / ratio),
               fit: getComputedStyle(img).objectFit,
@@ -102,6 +103,9 @@ it.each([1, 2, 3, 4])(
         expect(frame.borders).toEqual(['0px', '0px']);
         expect(frame.fit).toBe('contain');
         expect(frame.pixels).toEqual(expectedPixels[index % 3]);
+        expect(frame.width).toBeCloseTo(frames[0]!.width, 1);
+        expect(frame.height).toBeCloseTo(frames[0]!.height, 1);
+        expect(frame.height).toBeLessThanOrEqual(frame.areaHeight / 3);
         expect(frame.visibleHeight).toBeCloseTo(frame.height, 1);
         expect(frame.overflow).toBeLessThanOrEqual(0);
       }
@@ -114,14 +118,15 @@ it.each([1, 2, 3, 4])(
         }
       }
       expect(frames[0]!.visibleWidth).toBeGreaterThan((102 * 96) / 25.4);
-      if (count === 1) expect(frames[0]!.visibleWidth).toBeCloseTo(frames[0]!.areaWidth, 1);
-      if (count === 3) {
+      if (count === 4) {
+        expect(sheets[1]![0]!.visibleWidth).toBeCloseTo(sheets[0]![0]!.visibleWidth, 1);
+        expect(sheets[1]![0]!.visibleHeight).toBeCloseTo(sheets[0]![0]!.visibleHeight, 1);
         const folder = fileURLToPath(
           new URL('../../../../artifacts/lp-photo-quality/', import.meta.url),
         );
         await mkdir(folder, { recursive: true });
         await page.pdf({
-          path: folder + 'three-photos.pdf',
+          path: folder + 'uniform-photos.pdf',
           preferCSSPageSize: true,
           printBackground: true,
         });

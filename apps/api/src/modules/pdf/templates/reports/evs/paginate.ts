@@ -142,26 +142,45 @@ export function paginateEvs() {
     sheet.after(continuation);
   }
   const sheets = Array.from(document.querySelectorAll<HTMLElement>('.evs-sheet'));
+  // Use three rows as the sizing reference, including on an incomplete last sheet.
+  // Reserve space for captions and row headings before paginating the photos.
+  const preferredMinimumHeight = (68 * 96) / 25.4;
+  for (const [sheetClass, frameSelector] of [
+    ['lp-test-photos', '.lp-test-photo-image'],
+    ['th-test-photos', '.th-test-photo-image'],
+  ] as const) {
+    const photoSheets = sheets.filter((sheet) => sheet.classList.contains(sheetClass));
+    if (!photoSheets.length) continue;
+    let photoHeight = Infinity;
+    for (const sheet of photoSheets) {
+      const flow = sheet.querySelector('.evs-flow')!;
+      const overhead = Math.max(
+        0,
+        ...Array.from(
+          flow.children,
+          (row) =>
+            row.getBoundingClientRect().height -
+            (row.querySelector(frameSelector)?.getBoundingClientRect().height ?? 0),
+        ),
+      );
+      const available = flow.getBoundingClientRect().height - 1;
+      // Let a long caption take another row's space before shrinking all photos.
+      photoHeight = Math.min(
+        photoHeight,
+        Math.max(preferredMinimumHeight, available / 3 - overhead),
+        available - overhead,
+      );
+    }
+    for (const sheet of photoSheets)
+      sheet.style.setProperty('--test-photo-height', `${Math.max(76, photoHeight)}px`);
+  }
   for (const original of sheets) {
     let sheet = original;
     let flow = sheet.querySelector<HTMLElement>('.evs-flow')!;
     const blocks = Array.from(flow.children);
-    if (original.classList.contains('lp-test-photos') && blocks.length) {
-      const captionHeight = blocks.reduce(
-        (total, block) =>
-          total + (block.querySelector('figcaption')?.getBoundingClientRect().height ?? 0),
-        0,
-      );
-      const area = flow.getBoundingClientRect();
-      // Use the available height equally. A wide photo stops growing at the
-      // page width so its actual image ends where the next photo can begin.
-      const rowHeight = Math.max(76, (area.height - captionHeight - 0.25) / blocks.length);
-      for (const frame of flow.querySelectorAll<HTMLElement>('.lp-test-photo-image')) {
-        const image = frame.querySelector('img')!;
-        const ratio = image.naturalWidth / image.naturalHeight || 4 / 3;
-        frame.style.height = `${Math.min(rowHeight, area.width / ratio)}px`;
-      }
-    }
+    const bottomPadding = original.classList.contains('evs-identification')
+      ? parseFloat(getComputedStyle(flow).paddingBottom)
+      : 0;
     const measurement = original.classList.contains('measurement-sheet');
     const maxPhotoRows = 3;
     const photoBlocks = blocks.filter((block) => block.querySelector('.report-photo-frame'));
@@ -217,7 +236,8 @@ export function paginateEvs() {
       const photoRow = !!block.querySelector('.report-photo-frame');
       flow.append(block);
       if (
-        (block.getBoundingClientRect().bottom > flow.getBoundingClientRect().bottom + 1 ||
+        (block.getBoundingClientRect().bottom >
+          flow.getBoundingClientRect().bottom - bottomPadding + 1 ||
           (photoRow && photoRows >= maxPhotoRows)) &&
         flow.children.length > 1
       ) {
@@ -234,22 +254,28 @@ export function paginateEvs() {
       }
       if (photoRow) photoRows++;
       // A pathological single block must never silently run into the next page.
-      if (block.getBoundingClientRect().bottom > flow.getBoundingClientRect().bottom + 1)
+      if (
+        block.getBoundingClientRect().bottom >
+        flow.getBoundingClientRect().bottom - bottomPadding + 1
+      )
         throw new Error(
           'Um campo excedeu o espaço de uma página do relatório. Divida o texto em campos menores.',
         );
     }
   }
-  // Distribute TH identification after pagination, using only the spare space.
-  // Long fields keep their natural height and continuation pages remain readable.
-  for (const flow of document.querySelectorAll<HTMLElement>('.th-identification .evs-flow')) {
+  // Distribute short identification pages after pagination, using only spare space.
+  // Titleless continuation sheets keep the compact spacing.
+  for (const flow of document.querySelectorAll<HTMLElement>('.evs-identification .evs-flow')) {
     const blocks = Array.from(flow.children);
-    if (blocks.length < 2) continue;
+    if (blocks.length < 2 || !flow.querySelector('.evs-data-title')) continue;
     const style = getComputedStyle(flow);
     const available =
       flow.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
     const used = blocks.reduce((sum, block) => sum + block.getBoundingClientRect().height, 0);
-    const gap = Math.max(0, Math.min(30, (available * 0.9 - used) / (blocks.length - 1)));
+    const gap = Math.max(
+      parseFloat(style.rowGap),
+      Math.min(42, (available * 0.88 - used) / (blocks.length - 1)),
+    );
     flow.style.gap = `${gap}px`;
   }
   // Position extras after pagination so a chosen model page includes continuation sheets.

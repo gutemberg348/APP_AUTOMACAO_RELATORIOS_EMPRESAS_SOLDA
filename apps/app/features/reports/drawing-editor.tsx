@@ -2,6 +2,7 @@ import type { CorrectionRequest } from './report-save-feedback';
 import { DrawingColorSource } from './drawing-eyedropper';
 import { useTheme } from '../../utils/theme';
 import { keepReportAsset } from '../../services/offline-files';
+import { checkReportPhoto } from './check-report-photo';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
@@ -356,6 +357,7 @@ export function DrawingEditor({
   onRemovePoints,
   pointPhotoCount,
   reportId,
+  projectId,
   media,
   photoDraftKey,
   canUploadImages = false,
@@ -374,6 +376,7 @@ export function DrawingEditor({
   annotationMode?: boolean;
   onCloseAnnotation?(): void;
   reportId?: string;
+  projectId?: string;
   media?: ReportMedia[];
   photoDraftKey?: string;
   canUploadImages?: boolean;
@@ -4671,12 +4674,19 @@ export function DrawingEditor({
         visible={imageSourceOpen}
         contextLabel="Inserir imagem no desenho"
         onClose={() => setImageSourceOpen(false)}
-        onSelect={async (asset, progress) => {
+        onSelect={async (asset, progress, confirmDuplicate) => {
           if (!data || !photoDraftKey || !canUploadImages) return;
           if (data.elements.length >= 600)
             throw new Error('Limite de 600 elementos. Crie outra folha.');
           progress('Preparando imagem para o desenho…');
           const size = await drawingImageSize(asset);
+          const { sha256, duplicate } = await checkReportPhoto(
+            asset,
+            photoDraftKey,
+            { reportId, projectId },
+            progress,
+          );
+          if (duplicate && !(await confirmDuplicate())) return false;
           const mediaKey = 'drawing-image-' + drawingId();
           progress('Guardando imagem no telefone…');
           const localAsset = await keepReportAsset(asset, mediaKey);
@@ -4696,6 +4706,7 @@ export function DrawingEditor({
           if (!add(fitted)) throw new Error('Não foi possível inserir a imagem. Tente novamente.');
           useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
             ...draft,
+            projectId: projectId ?? draft.projectId,
             photos: [
               ...draft.photos,
               {
@@ -4704,6 +4715,8 @@ export function DrawingEditor({
                 sectionKey: 'drawing',
                 asset: localAsset,
                 caption: '',
+                sha256,
+                allowDuplicate: duplicate,
               },
             ],
           }));

@@ -2,6 +2,7 @@ import {
   isHydrostaticTestPhoto,
   measurementPhotoDefaults,
   isCustomPagePhoto,
+  type ReportDrawing,
 } from '@weldcosta/shared';
 import { ReportPhotoSaveError } from './report-photo-error';
 import { cleanReportDraft } from './report-draft-clean';
@@ -213,6 +214,7 @@ function ReportFormContent({
   const photoDrafts = useReportPhotoDrafts(
     (state) => state.reports[photoDraftKey] ?? emptyPhotoDrafts,
   );
+  const repeatedPhoto = photoDrafts.photos.find((photo) => photo.duplicateNeedsConfirmation);
   const hasPhotoDrafts = !!(
     photoDrafts.photos.length ||
     photoDrafts.removedIds.length ||
@@ -280,6 +282,9 @@ function ReportFormContent({
   const errorSection = useRef<string | undefined>(undefined);
   const [openSectionTitle, setOpenSectionTitle] = useState<string | null>();
   const editingBusy = pickingPhoto || saving || acting || syncingLocally;
+  useEffect(() => {
+    if (repeatedPhoto?.id && !editingBusy) reveal(formTop.current);
+  }, [repeatedPhoto?.id, editingBusy, reveal]);
   const config = reportConfigSchema.parse(type.config);
   const baseSections: ReportSection[] = reportSections[type.code] ?? [
     {
@@ -780,6 +785,7 @@ function ReportFormContent({
   };
   const showSaveError = (cause: unknown) => {
     if (cause instanceof ReportPhotoSaveError) {
+      if (cause.code === 'DUPLICATE_MEDIA' && cause.location.photoId) return;
       const pointIndex = getValues('points').findIndex(
         (point) => point.number === cause.location.pointNumber,
       );
@@ -1013,6 +1019,41 @@ function ReportFormContent({
     setTimeout(() => reveal(conclusionActions.current), 200);
   };
   const canDownloadAsIs = !!report && online && user.permissions.includes('pdf.download');
+  const resolveRepeatedPhoto = (allow: boolean) => {
+    if (!repeatedPhoto || editingBusy) return;
+    const id = repeatedPhoto.id;
+    if (!allow && repeatedPhoto.sectionKey === 'drawing') {
+      const removeImage = <T extends Pick<ReportDrawing, 'data'>>(drawing: T): T => ({
+        ...drawing,
+        data: {
+          ...drawing.data,
+          elements: drawing.data.elements.filter((e) => e.type !== 'image' || e.mediaKey !== id),
+        },
+      });
+      setValue('drawings', getValues('drawings').map(removeImage), { shouldDirty: true });
+      const pages = getValues('specificData.customPages') as CustomReportPage[] | undefined;
+      if (Array.isArray(pages))
+        setValue(
+          'specificData.customPages',
+          pages.map((page) => ({
+            ...page,
+            drawings: page.drawings.map(removeImage),
+          })),
+          { shouldDirty: true },
+        );
+    }
+    useReportPhotoDrafts.getState().update(photoDraftKey, (draft) => ({
+      ...draft,
+      error: undefined,
+      photos: draft.photos.flatMap((photo) => {
+        if (photo.id !== id) return [photo];
+        return allow
+          ? [{ ...photo, allowDuplicate: true, duplicateNeedsConfirmation: undefined }]
+          : [];
+      }),
+    }));
+    void save();
+  };
   return (
     <View ref={formTop} style={{ gap: 20 }}>
       <TransferOverlay progress={transferProgress} />
@@ -1025,7 +1066,32 @@ function ReportFormContent({
         </View>
         <Badge label={type.code} tone="blue" dot={false} />
       </View>
-      <Notice error={photoDrafts.error} />
+      {repeatedPhoto ? (
+        <Card style={{ padding: 14, gap: 8 }}>
+          <Text style={styles.label}>Foto repetida</Text>
+          <Text style={styles.muted}>
+            {repeatedPhoto.pointNumber ? `Ponto ${repeatedPhoto.pointNumber} · ` : ''}
+            {repeatedPhoto.asset.name} já foi usada nesta obra. Quer incluí-la mesmo assim?
+          </Text>
+          <View style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
+            <Button
+              title="Usar mesmo assim"
+              small
+              disabled={editingBusy}
+              onPress={() => resolveRepeatedPhoto(true)}
+            />
+            <Button
+              title="Não usar esta foto"
+              small
+              secondary
+              disabled={editingBusy}
+              onPress={() => resolveRepeatedPhoto(false)}
+            />
+          </View>
+        </Card>
+      ) : (
+        <Notice error={photoDrafts.error} />
+      )}
       {(!online || localEntry || storageError || localMessage) && (
         <Card style={{ padding: 14, gap: 8 }}>
           <Text style={styles.label}>
@@ -1037,7 +1103,7 @@ function ReportFormContent({
                 ? 'Há um rascunho salvo neste telefone aguardando sincronização.'
                 : 'As alterações e fotos serão guardadas neste telefone enquanto você preenche.')}
           </Text>
-          {!!localEntry?.error && localEntry.error.code !== 'NETWORK_ERROR' && (
+          {!!localEntry?.error && localEntry.error.code !== 'NETWORK_ERROR' && !repeatedPhoto && (
             <View style={{ gap: 8 }}>
               <Notice
                 error={new Error(localEntry.error.message)}
@@ -1678,6 +1744,7 @@ function ReportFormContent({
                       render={({ field }) => (
                         <DrawingEditor
                           reportId={report?.id}
+                          projectId={projectId}
                           media={report?.media}
                           photoDraftKey={photoDraftKey}
                           canUploadImages={

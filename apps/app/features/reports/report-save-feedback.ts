@@ -206,7 +206,7 @@ export function reportBusinessCorrection(
     DUPLICATE_MEDIA: [
       'points',
       'Foto repetida nesta obra',
-      'No ponto indicado, remova a foto pendente repetida e escolha outra. Você pode repetir ao lado no mesmo ponto ou usar a foto em outra obra. Depois toque em Salvar; os demais dados continuam salvos.',
+      'No aviso Foto repetida, escolha Usar mesmo assim ou Não usar esta foto. Seu preenchimento continua salvo.',
     ],
     DRAWING_IMAGE_PENDING: [
       'drawings',

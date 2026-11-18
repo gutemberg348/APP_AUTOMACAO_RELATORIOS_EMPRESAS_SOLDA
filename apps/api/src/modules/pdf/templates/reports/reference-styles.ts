@@ -12,18 +12,18 @@ export const referenceStyles = `
 .custom-drawing svg{display:block;width:100%;height:100%}
 .lp-report .evs-flow,.lp-report .evs-contact,.lp-report .reference-photo-tab span,
 .lp-report .lp-form-table td,.lp-report .lp-custom-choice{color:#111}
-.th-test-photos .evs-flow{display:grid;grid-template-rows:repeat(3,minmax(0,1fr))}
 .th-test-photo-row{min-height:0;display:flex;flex-direction:column;border-bottom:1px solid #111}
 .th-test-photo-row>.reference-band{flex:none;font-size:17px;padding:2mm}
-.th-test-photo-columns{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.th-test-photo-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
 .th-test-photo{margin:0;min-width:0;min-height:0;display:flex;flex-direction:column}
 .th-test-photo+.th-test-photo{border-left:1px solid #111}
-.th-test-photo-image{flex:1;min-height:0;position:relative;overflow:hidden}
+.th-test-photo-image{flex:none;position:relative;overflow:hidden}
 .th-test-photo-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
 .th-test-photo figcaption{padding:1mm 2mm;font-size:12px;overflow-wrap:anywhere;white-space:pre-wrap}
 
 .lp-test-photo{margin:0;break-inside:avoid}
-.lp-test-photo-image{position:relative;width:100%;height:68mm}
+.lp-test-photo-image{position:relative;width:100%}
+.lp-test-photo-image,.th-test-photo-image{height:var(--test-photo-height,68mm)}
 .lp-test-photo-image img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}
 .lp-test-photo figcaption{flex:none;padding:1mm 2mm;font-size:12px;line-height:1.25;white-space:pre-wrap;overflow-wrap:anywhere}
 .reference-band{margin:0;padding:3mm 2mm;text-align:center;font-size:17px;font-weight:normal;border-top:1px solid #111;border-bottom:1px solid #111}
